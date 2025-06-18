@@ -48,39 +48,43 @@ Malla (_Mesh_, in Spanish) is an ([AI-built](./AI.md)) tool that logs Meshtastic
 
 ## Installation
 
+### Using uv
+
+The recommended way to install this is using [uv](https://docs.astral.sh/uv/):
 1. **Clone or download** the project files to your preferred directory
-
-2. **Install dependencies**:
    ```bash
-   # The recommended way: install uv if you haven't already
+   git clone https://github.com/zenitraM/malla.git
+   cd malla
+   ```
+
+2. **Install uv** if you don't have it installed yet:
+   ```bash
    curl -LsSf https://astral.sh/uv/install.sh | sh
-
-   # Install project dependencies
-   uv sync
    ```
 
-   Or using pip:
+3. **Create a configuration file** by copying the sample file:
    ```bash
-   pip install -r requirements.txt
+   cp config.sample.yaml config.yaml
+   $EDITOR config.yaml  # tweak values as desired
    ```
 
-3. **Optional: Install as a package** (enables command-line scripts):
-   ```bash
-   # Install in development mode with uv
-   uv pip install -e .
-
-   # Or with pip
-   pip install -e .
-   ```
-
-   After installation, you can use the convenient command-line scripts:
+4. **Start it** with `uv run` in the project directory, which should pull the required dependencies.
    ```bash
    # Start the web UI
-   malla-web
+   uv run malla-web
 
    # Start the MQTT capture tool
-   malla-capture
+   uv run malla-capture
    ```
+
+### Using Nix
+The project also comes with a Nix flake and a devshell - if you have Nix installed or run NixOS it will set up
+`uv` for you together with the exact system dependencies that run on CI (Playwright, etc.):
+
+```bash
+nix develop --command uv run malla-web
+nix develop --command uv run malla-capture
+```
 
 ## Quick Start
 
@@ -88,34 +92,17 @@ The system consists of two components that work together:
 
 ### 1. MQTT Data Capture
 
-This tool connects to your Meshtastic MQTT broker and captures all mesh packets to a SQLite database.
+This tool connects to your Meshtastic MQTT broker and captures all mesh packets to a SQLite database. You will need to configure the MQTT broker address in the `config.yaml` file (or set the `MALLA_MQTT_BROKER_ADDRESS` environment variable) before starting it. See [Configuration Options](#configuration-options) for the entire set of settings.
 
-**Configuration:**
-```bash
-# Set your MQTT broker address (required)
-export MALLA_MQTT_BROKER_ADDRESS="your.mqtt.broker.address"
-
-# Optional: Set MQTT credentials if needed
-export MALLA_MQTT_USERNAME="your_username"
-export MALLA_MQTT_PASSWORD="your_password"
-
-# Optional: Customize database location
-export MALLA_DATABASE_FILE="meshtastic_history.db"
+```yaml
+mqtt_broker_address: "your.mqtt.broker.address"
 ```
+
+You can use this tool with your own MQTT broker that you've got your own nodes connected to, or with a public broker if you've got permission to do so.
 
 **Start the capture tool:**
 ```bash
-# Method 1: Using the wrapper script (recommended)
-./malla-capture
-
-# Method 2: Using uv to run the module
-uv run python -m malla.mqtt_capture
-
-# Method 3: Using the standalone script
-uv run python mqtt_to_sqlite.py
-
-# Method 4: If installed as package
-malla-capture
+uv run malla-capture
 ```
 
 ### 2. Web UI
@@ -124,22 +111,11 @@ The web interface for browsing and analyzing the captured data.
 
 **Start the web UI:**
 ```bash
-# Method 1: Using the wrapper script (recommended)
-./malla-web
-
-# Method 2: Using uv to run the module
-uv run python -m malla.web_ui
-
-# Method 3: Using regular Python with the module
-python -m malla.web_ui
-
-# Method 4: If installed as package
-malla-web
+uv run malla-web
 ```
 
 **Access the web interface:**
 - Local: http://localhost:5008
-- Network: http://your-server-ip:5008
 
 ## Running Both Tools Together
 
@@ -156,7 +132,7 @@ export MALLA_MQTT_BROKER_ADDRESS="127.0.0.1"  # Replace with your broker
 ./malla-web
 ```
 
-Both tools can safely access the same SQLite database concurrently using thread-safe connections.
+Both tools use the same SQLite database concurrently using thread-safe connections.
 
 ## Configuration Options
 
@@ -185,85 +161,13 @@ The following keys are recognised:
 | --------------- | ------ | ---------------------------------------- | --------------------------------------------- | ---------------- |
 | `name`          | str    | `"Malla"`                                | Display name shown in the navigation bar.     | `MALLA_NAME` |
 | `home_markdown` | str    | `""`                                     | Markdown rendered on the dashboard homepage.  | `MALLA_HOME_MARKDOWN` |
-| `secret_key`    | str    | `"dev-secret-key-change-in-production"` | Flask session secret key (change in prod!).   | `MALLA_SECRET_KEY` |
+| `secret_key`    | str    | `"dev-secret-key-change-in-production"` | Flask session secret key (change in prod!). (currently unused)   | `MALLA_SECRET_KEY` |
 | `database_file` | str    | `"meshtastic_history.db"`                | SQLite database file location.                | `MALLA_DATABASE_FILE` |
 | `host`          | str    | `"0.0.0.0"`                              | Interface to bind the web server to.          | `MALLA_HOST` |
 | `port`          | int    | `5008`                                   | TCP port for the web server.                  | `MALLA_PORT` |
 | `debug`         | bool   | `false`                                  | Run Flask in debug mode (unsafe for prod!).   | `MALLA_DEBUG` |
 
 Environment variables **always override** values coming from the YAML file.
-
-### Environment Variable Overrides (optional)
-
-**MQTT Capture Tool:**
-- `MALLA_MQTT_BROKER_ADDRESS`: MQTT broker hostname/IP (required)
-- `MALLA_MQTT_PORT`: MQTT broker port (default: 1883)
-- `MALLA_MQTT_USERNAME`: MQTT username (optional)
-- `MALLA_MQTT_PASSWORD`: MQTT password (optional)
-- `MALLA_MQTT_TOPIC_PREFIX`: Topic prefix (default: "msh")
-- `MALLA_MQTT_TOPIC_SUFFIX`: Topic suffix (default: "/+/+/+/#")
-- `MALLA_DATABASE_FILE`: SQLite database path (default: "meshtastic_history.db")
-- `MALLA_LOG_LEVEL`: Logging level (default: "INFO")
-
-**Web UI:** You can still override individual settings without a YAML file via
-environment variables with the same names from the table above (e.g.
-`MALLA_PORT=8080`).
-
-> **Note** Older variable names such as `FLASK_PORT` or `DATABASE_FILE` are no
-> longer recognised – use the `MALLA_*` prefix instead.
-
-### Custom Configuration Example
-
-```bash
-# Custom setup with different database and ports
-export MALLA_MQTT_BROKER_ADDRESS="mqtt.example.com"
-export MALLA_MQTT_USERNAME="meshtastic_user"
-export MALLA_MQTT_PASSWORD="secure_password"
-export MALLA_DATABASE_FILE="/data/mesh_network.db"
-export MALLA_PORT="8080"
-
-# Start capture tool
-./malla-capture &
-
-# Start web UI
-./malla-web
-```
-
-### Debug Mode
-
-**MQTT Capture Tool:**
-```bash
-export LOG_LEVEL="DEBUG"
-uv run python mqtt_to_sqlite.py
-```
-
-**Web UI:**
-```bash
-export FLASK_DEBUG="true"
-uv run python main.py
-```
-
-## Development
-
-### Using uv for Development
-
-```bash
-# Install development dependencies
-uv sync --dev
-
-# Run tests
-uv run pytest
-
-# Run with specific Python version
-uv run --python 3.13 python -m malla.mqtt_capture
-```
-
-## Security Considerations
-
-- **Local use recommended**: Bind to `127.0.0.1` for local access only
-- **Network access**: If exposing on network, consider reverse proxy with authentication
-- **Database access**: Ensure database file permissions are appropriately restricted
-- **No authentication**: This tool has no built-in authentication - secure at network level if needed
 
 ## Contributing
 
