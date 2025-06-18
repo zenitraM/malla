@@ -12,9 +12,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/determinate-nix-action@v3
+      - uses: nixbuild/nix-quick-install-action@v30
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          nix_conf: |
+            keep-env-derivations = true
+            keep-outputs = true
+
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@v6
 
       - name: Install project dependencies (including dev)
         run: nix develop --command make install-dev
