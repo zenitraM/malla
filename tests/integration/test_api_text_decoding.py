@@ -1,9 +1,8 @@
 """Test text message decoding functionality in API endpoints."""
 
 import pytest
-from flask import Flask
 
-from malla.routes.api_routes import api_bp
+from tests.conftest import TestFlaskApp
 
 
 class TestAPITextDecoding:
@@ -11,10 +10,11 @@ class TestAPITextDecoding:
 
     @pytest.fixture
     def app(self):
-        """Create Flask app with API routes."""
-        app = Flask(__name__)
-        app.register_blueprint(api_bp)
-        return app
+        """Create Flask app with proper test configuration."""
+        test_app = TestFlaskApp()
+        test_app.start()
+        yield test_app.app
+        test_app.stop()
 
     @pytest.fixture
     def client(self, app):
@@ -23,7 +23,7 @@ class TestAPITextDecoding:
 
     def test_text_message_decoding_with_real_data(self, client):
         """Test that text messages are properly decoded from raw_payload."""
-        # This test uses the actual database, so it should work with real data
+        # This test uses the test database with fixture data
         response = client.get("/api/packets/data?portnum=TEXT_MESSAGE_APP&limit=5")
         assert response.status_code == 200
 
