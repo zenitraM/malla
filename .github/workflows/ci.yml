@@ -22,5 +22,8 @@ jobs:
       - name: Install project dependencies (including dev)
         run: nix develop --command make install-dev
 
-      - name: Run lint and tests
-        run: nix develop --command make check
+      - name: Run linting
+        run: nix develop --command make lint
+
+      - name: Run tests
+        run: nix develop --command uv run pytest -n 8
