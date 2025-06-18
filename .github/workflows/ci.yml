@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  actions: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
