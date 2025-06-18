@@ -167,9 +167,7 @@ class PacketRepositoryOptimized:
 
                     # Calculate aggregated values
                     gateway_ids = list(
-                        {
-                            p["gateway_id"] for p in packets_in_group if p["gateway_id"]
-                        }
+                        {p["gateway_id"] for p in packets_in_group if p["gateway_id"]}
                     )
                     rssi_values = [
                         p["rssi"] for p in packets_in_group if p["rssi"] is not None
@@ -246,10 +244,10 @@ class PacketRepositoryOptimized:
                         and packet["max_rssi"] is not None
                     ):
                         if packet["min_rssi"] == packet["max_rssi"]:
-                            packet["rssi_range"] = f"{packet['min_rssi']} dBm"
+                            packet["rssi_range"] = f"{packet['min_rssi']:.1f} dBm"
                         else:
                             packet["rssi_range"] = (
-                                f"{packet['min_rssi']} to {packet['max_rssi']} dBm"
+                                f"{packet['min_rssi']:.1f} to {packet['max_rssi']:.1f} dBm"
                             )
                     else:
                         packet["rssi_range"] = None
@@ -257,10 +255,10 @@ class PacketRepositoryOptimized:
                     # Format SNR range
                     if packet["min_snr"] is not None and packet["max_snr"] is not None:
                         if packet["min_snr"] == packet["max_snr"]:
-                            packet["snr_range"] = f"{packet['min_snr']} dB"
+                            packet["snr_range"] = f"{packet['min_snr']:.2f} dB"
                         else:
                             packet["snr_range"] = (
-                                f"{packet['min_snr']} to {packet['max_snr']} dB"
+                                f"{packet['min_snr']:.2f} to {packet['max_snr']:.2f} dB"
                             )
                     else:
                         packet["snr_range"] = None

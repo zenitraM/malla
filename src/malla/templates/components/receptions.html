@@ -73,14 +73,14 @@
                         </td>
                         <td>
                             {% if packet.rssi %}
-                                <span class="signal-value">{{ packet.rssi }} dBm</span>
+                                <span class="signal-value">{{ packet.rssi|format_rssi }} dBm</span>
                             {% else %}
                                 <span class="text-muted">Unknown</span>
                             {% endif %}
                         </td>
                         <td>
                             {% if packet.snr %}
-                                <span class="signal-value">{{ packet.snr }} dB</span>
+                                <span class="signal-value">{{ packet.snr|format_snr }} dB</span>
                             {% else %}
                                 <span class="text-muted">Unknown</span>
                             {% endif %}
@@ -127,14 +127,14 @@
                         </td>
                         <td>
                             {% if reception.rssi %}
-                                <span class="signal-value">{{ reception.rssi }} dBm</span>
+                                <span class="signal-value">{{ reception.rssi|format_rssi }} dBm</span>
                             {% else %}
                                 <span class="text-muted">Unknown</span>
                             {% endif %}
                         </td>
                         <td>
                             {% if reception.snr %}
-                                <span class="signal-value">{{ reception.snr }} dB</span>
+                                <span class="signal-value">{{ reception.snr|format_snr }} dB</span>
                             {% else %}
                                 <span class="text-muted">Unknown</span>
                             {% endif %}

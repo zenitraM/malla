@@ -93,8 +93,8 @@ class TestTracerouteFilters:
         from_node_input = page.locator("#from_node")  # The visible text input
         expect(from_node_input).to_be_visible()
 
-        # Type in the node short name to search (this works better than decimal ID)
-        from_node_input.fill("JmnH")
+        # Type in the node short name to search (using actual test fixture data)
+        from_node_input.fill("TGA")
 
         # Wait for dropdown to appear and select the first result
         page.wait_for_selector(".node-picker-results .node-picker-item", timeout=5000)
@@ -112,7 +112,7 @@ class TestTracerouteFilters:
         for msg in console_messages:
             print(f"  {msg}")
 
-        assert "from_node=858993459" in current_url, (
+        assert "from_node=1128074276" in current_url, (
             f"Auto-filtering should update URL: {current_url}"
         )
 
@@ -131,8 +131,8 @@ class TestTracerouteFilters:
         from_node_input = page.locator("#from_node")  # The visible text input
         expect(from_node_input).to_be_visible()
 
-        # Type in the node short name (this works better than decimal ID)
-        from_node_input.fill("JmnH")
+        # Type in the node short name (using actual test fixture data)
+        from_node_input.fill("TGA")
 
         # Wait for dropdown and select first result
         page.wait_for_selector(".node-picker-results .node-picker-item", timeout=5000)
@@ -150,7 +150,7 @@ class TestTracerouteFilters:
         current_url = page.url
         print(f"URL after apply filters: {current_url}")
 
-        assert "from_node=858993459" in current_url, (
+        assert "from_node=1128074276" in current_url, (
             f"Manual filtering should update URL: {current_url}"
         )
 
@@ -173,7 +173,7 @@ class TestTracerouteFilters:
         expect(from_node_input).to_be_visible()
 
         # Type in a node short name that exists in the test fixtures
-        from_node_input.fill("JmnH")
+        from_node_input.fill("TGA")
 
         # Wait for dropdown and select first result
         page.wait_for_selector(".node-picker-results .node-picker-item", timeout=5000)
@@ -191,9 +191,9 @@ class TestTracerouteFilters:
         api_requests = [req for req in requests if "/api/traceroute/data" in req.url]
         print(f"API requests: {[req.url for req in api_requests]}")
 
-        # Find the request with filters - TSNF has node ID 858993459 in test fixtures
+        # Find the request with filters - TGA has node ID 1128074276 in test fixtures
         filtered_requests = [
-            req for req in api_requests if "from_node=858993459" in req.url
+            req for req in api_requests if "from_node=1128074276" in req.url
         ]
 
         assert len(filtered_requests) > 0, (

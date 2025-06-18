@@ -154,6 +154,36 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
                 {"error": f"Serialization failed: {str(e)}"}, indent=indent
             )
 
+    @app.template_filter("format_rssi")
+    def format_rssi_filter(rssi):
+        """Template filter for consistent RSSI formatting with 1 decimal place."""
+        if rssi is None:
+            return "N/A"
+        try:
+            return f"{float(rssi):.1f}"
+        except (ValueError, TypeError):
+            return str(rssi)
+
+    @app.template_filter("format_snr")
+    def format_snr_filter(snr):
+        """Template filter for consistent SNR formatting with 2 decimal places."""
+        if snr is None:
+            return "N/A"
+        try:
+            return f"{float(snr):.2f}"
+        except (ValueError, TypeError):
+            return str(snr)
+
+    @app.template_filter("format_signal")
+    def format_signal_filter(value, decimals=1):
+        """Template filter for consistent signal value formatting with configurable decimal places."""
+        if value is None:
+            return "N/A"
+        try:
+            return f"{float(value):.{decimals}f}"
+        except (ValueError, TypeError):
+            return str(value)
+
     # ------------------------------------------------------------------
     # Markdown rendering filter & context processor for config variables
     # ------------------------------------------------------------------

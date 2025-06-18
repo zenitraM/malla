@@ -295,7 +295,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (value !== null && value !== '' && value !== 'N/A') {
                         const rssiValue = parseFloat(value);
                         const colorClass = getRssiColorClass(rssiValue);
-                        return `<span class="${colorClass}">${value} dBm</span>`;
+                        const formattedValue = rssiValue.toFixed(1);
+                        return `<span class="${colorClass}">${formattedValue} dBm</span>`;
                     }
                     return '<span class="text-muted">N/A</span>';
                 }
@@ -308,7 +309,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (value !== null && value !== '' && value !== 'N/A') {
                         const snrValue = parseFloat(value);
                         const colorClass = getSnrColorClass(snrValue);
-                        return `<span class="${colorClass}">${value} dB</span>`;
+                        const formattedValue = snrValue.toFixed(2);
+                        return `<span class="${colorClass}">${formattedValue} dB</span>`;
                     }
                     return '<span class="text-muted">N/A</span>';
                 }

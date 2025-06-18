@@ -212,14 +212,14 @@ class DatabaseFixtures:
                 "last_seen": now - 180,
             },
             {
-                "node_id": 4294967295,  # 0xffffffff
-                "hex_id": "!ffffffff",
+                "node_id": 0xDDDDDDDD,  # Changed from 0xffffffff to avoid broadcast filtering
+                "hex_id": "!dddddddd",
                 "long_name": "Test Edge Node Delta",
                 "short_name": "TEND",
                 "hw_model": "TBEAM",
                 "role": "CLIENT_MUTE",
                 "is_licensed": False,
-                "mac_address": "24:6f:28:ff:ff:ff",
+                "mac_address": "24:6f:28:dd:dd:dd",
                 "first_seen": now - 7200,  # 2 hours ago
                 "last_updated": now - 3600,  # 1 hour ago
                 "last_seen": now - 3600,
@@ -751,7 +751,7 @@ class DatabaseFixtures:
                 "altitude": 80,
             },
             {
-                "node_id": 4294967295,  # Test Edge Node Delta
+                "node_id": 0xDDDDDDDD,  # Test Edge Node Delta
                 "latitude": 37.7549,
                 "longitude": -122.4394,
                 "altitude": 60,
@@ -831,7 +831,7 @@ class DatabaseFixtures:
                 "altitude": 5,
             },
             {
-                "node_id": 4294967295,  # Edge Node Beta
+                "node_id": 0xDDDDDDDD,  # Edge Node Beta (TEND)
                 "latitude": 40.7505,
                 "longitude": -73.9934,
                 "altitude": 15,
@@ -887,6 +887,153 @@ class DatabaseFixtures:
                 },
             )
             packets.append(packet)
+
+        # Enhanced gateway comparison data - create multiple packets received by both gateways
+        import random
+
+        random.seed(42)  # For consistent test data
+
+        gateway1_id = "!11110000"  # First gateway
+        gateway2_id = "!11110001"  # Second gateway
+
+        # Create 20 packets with varied RSSI/SNR values for gateway comparison
+        for i in range(20):
+            base_packet_id = 5000 + i
+            timestamp = base_time + (i * 120)  # 2 minutes apart
+            from_node = 1128074276 + (i % 5)  # Cycle through different source nodes
+
+            # Create the original packet
+            packet = self.create_test_packet(
+                packet_id=base_packet_id,
+                from_node_id=from_node,
+                portnum=1,
+                portnum_name="TEXT_MESSAGE_APP",
+                timestamp=timestamp,
+                gateway_id=gateway1_id,
+                rssi=random.randint(-120, -60),  # Varied RSSI values
+                snr=random.uniform(-15.0, 10.0),  # Varied SNR values
+                hop_limit=3,
+                payload_data=f"Gateway comparison test message {i + 1}",
+            )
+            packets.append(packet)
+
+            # Create duplicate reception by second gateway with different signal values
+            packet2 = self.create_test_packet(
+                packet_id=base_packet_id
+                + 1000,  # Different packet ID but same mesh_packet_id
+                from_node_id=from_node,
+                portnum=1,
+                portnum_name="TEXT_MESSAGE_APP",
+                timestamp=timestamp + random.uniform(0.1, 2.0),  # Slight time offset
+                gateway_id=gateway2_id,
+                rssi=random.randint(-125, -55),  # Different RSSI range
+                snr=random.uniform(-20.0, 15.0),  # Different SNR range
+                hop_limit=3,
+                payload_data=f"Gateway comparison test message {i + 1}",
+                mesh_packet_id=packet[
+                    "mesh_packet_id"
+                ],  # Same mesh packet ID for comparison
+            )
+            packets.append(packet2)
+
+        # Add more multi-gateway packets for better showcase
+        # Create some packets received by 3+ gateways to show more complex scenarios
+        gateway3_id = "!11110002"  # Third gateway
+        gateway4_id = "!11110003"  # Fourth gateway
+        gateway5_id = "!11110004"  # Fifth gateway
+
+        # Create 10 packets received by multiple gateways (3-5 gateways each)
+        for i in range(10):
+            base_packet_id = 50000 + i
+            timestamp = base_time + 1800 + (i * 180)  # 3 minutes apart
+            from_node = 1128074276 + (i % 3)  # Cycle through different source nodes
+            mesh_id = f"multi_gw_{i:03d}"
+
+            # Base message
+            base_message = f"Multi-gateway broadcast message {i + 1}"
+
+            # Create reception by first gateway
+            packet1 = self.create_test_packet(
+                packet_id=base_packet_id,
+                from_node_id=from_node,
+                portnum=1,
+                portnum_name="TEXT_MESSAGE_APP",
+                timestamp=timestamp,
+                gateway_id=gateway1_id,
+                rssi=random.randint(-85, -65),  # Good signal
+                snr=random.uniform(2.0, 12.0),  # Good SNR
+                hop_limit=3,
+                payload_data=base_message,
+                mesh_packet_id=mesh_id,
+            )
+            packets.append(packet1)
+
+            # Create reception by second gateway with different signal
+            packet2 = self.create_test_packet(
+                packet_id=base_packet_id + 1000,
+                from_node_id=from_node,
+                portnum=1,
+                portnum_name="TEXT_MESSAGE_APP",
+                timestamp=timestamp + random.uniform(0.1, 1.5),
+                gateway_id=gateway2_id,
+                rssi=random.randint(-95, -70),  # Slightly worse signal
+                snr=random.uniform(-2.0, 8.0),  # More varied SNR
+                hop_limit=3,
+                payload_data=base_message,
+                mesh_packet_id=mesh_id,
+            )
+            packets.append(packet2)
+
+            # Create reception by third gateway (for first 8 packets)
+            if i < 8:
+                packet3 = self.create_test_packet(
+                    packet_id=base_packet_id + 2000,
+                    from_node_id=from_node,
+                    portnum=1,
+                    portnum_name="TEXT_MESSAGE_APP",
+                    timestamp=timestamp + random.uniform(0.2, 2.0),
+                    gateway_id=gateway3_id,
+                    rssi=random.randint(-100, -75),  # Weaker signal
+                    snr=random.uniform(-5.0, 5.0),  # Lower SNR
+                    hop_limit=3,
+                    payload_data=base_message,
+                    mesh_packet_id=mesh_id,
+                )
+                packets.append(packet3)
+
+            # Create reception by fourth gateway (for first 5 packets)
+            if i < 5:
+                packet4 = self.create_test_packet(
+                    packet_id=base_packet_id + 3000,
+                    from_node_id=from_node,
+                    portnum=1,
+                    portnum_name="TEXT_MESSAGE_APP",
+                    timestamp=timestamp + random.uniform(0.3, 2.5),
+                    gateway_id=gateway4_id,
+                    rssi=random.randint(-110, -80),  # Even weaker signal
+                    snr=random.uniform(-8.0, 3.0),  # Lower SNR range
+                    hop_limit=3,
+                    payload_data=base_message,
+                    mesh_packet_id=mesh_id,
+                )
+                packets.append(packet4)
+
+            # Create reception by fifth gateway (for first 2 packets only)
+            if i < 2:
+                packet5 = self.create_test_packet(
+                    packet_id=base_packet_id + 4000,
+                    from_node_id=from_node,
+                    portnum=1,
+                    portnum_name="TEXT_MESSAGE_APP",
+                    timestamp=timestamp + random.uniform(0.4, 3.0),
+                    gateway_id=gateway5_id,
+                    rssi=random.randint(-115, -85),  # Weakest signal
+                    snr=random.uniform(-10.0, 1.0),  # Lowest SNR range
+                    hop_limit=3,
+                    payload_data=base_message,
+                    mesh_packet_id=mesh_id,
+                )
+                packets.append(packet5)
 
         return packets
 
@@ -995,7 +1142,7 @@ class DatabaseFixtures:
             },
             {
                 "from_node": 2147483647,  # Central Hub Node
-                "to_node": 4294967295,  # Edge Node Beta
+                "to_node": 0xDDDDDDDD,  # Edge Node Beta (TEND)
                 "route_nodes": [],  # Direct connection
                 "snr_towards": [-18.5],
                 "route_back": [],

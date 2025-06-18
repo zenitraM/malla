@@ -1,6 +1,6 @@
 # Malla
 
-Malla is an ([AI-built](./AI.md)) tool to log Meshtastic packets into a SQLite database and get some nice data insights from them.
+Malla (_Mesh_, in Spanish) is an ([AI-built](./AI.md)) tool that logs Meshtastic packets from an MQTT broker into a SQLite database and exposes a web UI to get some interesting data insights from them.
 
 ## Features
 
@@ -29,11 +29,15 @@ Malla is an ([AI-built](./AI.md)) tool to log Meshtastic packets into a SQLite d
 • **One-command launch** – `malla-capture` and `malla-web` wrapper scripts get you up and running in seconds.
 
 <!-- screenshots:start -->
-![dashboard](.screenshots/dashboard.png)
-![nodes](.screenshots/nodes.png)
-![packets](.screenshots/packets.png)
-![map](.screenshots/map.png)
-![traceroute_graph](.screenshots/traceroute_graph.png)
+![dashboard](.screenshots/dashboard.jpg)
+![nodes](.screenshots/nodes.jpg)
+![packets](.screenshots/packets.jpg)
+![traceroutes](.screenshots/traceroutes.jpg)
+![map](.screenshots/map.jpg)
+![traceroute_graph](.screenshots/traceroute_graph.jpg)
+![hop_analysis](.screenshots/hop_analysis.jpg)
+![gateway_compare](.screenshots/gateway_compare.jpg)
+![longest_links](.screenshots/longest_links.jpg)
 <!-- screenshots:end -->
 
 ## Prerequisites

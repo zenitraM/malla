@@ -90,7 +90,7 @@
             <div class="card card-metric">
                 <div class="card-body">
                     <div class="metric-value">
-                        {% if node.avg_rssi %}{{ node.avg_rssi }}{% else %}?{% endif %}
+                        {% if node.avg_rssi %}{{ node.avg_rssi|format_rssi }}{% else %}?{% endif %}
                     </div>
                     <div class="metric-label">Avg RSSI (dBm)</div>
                 </div>
@@ -167,13 +167,13 @@
                                     <td>
                                         {% if node.avg_rssi %}
                                             {% if node.avg_rssi >= -60 %}
-                                                <span class="signal-indicator signal-excellent">{{ node.avg_rssi }} dBm</span>
+                                                <span class="signal-indicator signal-excellent">{{ node.avg_rssi|format_rssi }} dBm</span>
                                             {% elif node.avg_rssi >= -70 %}
-                                                <span class="signal-indicator signal-good">{{ node.avg_rssi }} dBm</span>
-                                            {% elif node.avg_rssi >= -80 %}
-                                                <span class="signal-indicator signal-fair">{{ node.avg_rssi }} dBm</span>
-                                            {% else %}
-                                                <span class="signal-indicator signal-poor">{{ node.avg_rssi }} dBm</span>
+                                                                                <span class="signal-indicator signal-good">{{ node.avg_rssi|format_rssi }} dBm</span>
+                            {% elif node.avg_rssi >= -80 %}
+                                <span class="signal-indicator signal-fair">{{ node.avg_rssi|format_rssi }} dBm</span>
+                            {% else %}
+                                <span class="signal-indicator signal-poor">{{ node.avg_rssi|format_rssi }} dBm</span>
                                             {% endif %}
                                         {% else %}
                                             <span class="text-muted">Unknown</span>
@@ -185,11 +185,11 @@
                                     <td>
                                         {% if node.avg_snr %}
                                             {% if node.avg_snr > 5 %}
-                                                <span class="signal-indicator signal-excellent">{{ node.avg_snr }} dB</span>
-                                            {% elif node.avg_snr > 0 %}
-                                                <span class="signal-indicator signal-good">{{ node.avg_snr }} dB</span>
-                                            {% else %}
-                                                <span class="signal-indicator signal-poor">{{ node.avg_snr }} dB</span>
+                                                                                <span class="signal-indicator signal-excellent">{{ node.avg_snr|format_snr }} dB</span>
+                            {% elif node.avg_snr > 0 %}
+                                <span class="signal-indicator signal-good">{{ node.avg_snr|format_snr }} dB</span>
+                            {% else %}
+                                <span class="signal-indicator signal-poor">{{ node.avg_snr|format_snr }} dB</span>
                                             {% endif %}
                                         {% else %}
                                             <span class="text-muted">Unknown</span>
@@ -344,14 +344,14 @@
                                     </td>
                                     <td>
                                         {% if protocol.avg_rssi %}
-                                            {{ protocol.avg_rssi }} dBm
+                                            {{ protocol.avg_rssi|format_rssi }} dBm
                                         {% else %}
                                             -
                                         {% endif %}
                                     </td>
                                     <td>
                                         {% if protocol.avg_snr %}
-                                            {{ protocol.avg_snr }} dB
+                                            {{ protocol.avg_snr|format_snr }} dB
                                         {% else %}
                                             -
                                         {% endif %}

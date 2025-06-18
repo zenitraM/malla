@@ -365,11 +365,11 @@
                     <div class="row">
                         <div class="col-6">
                             <strong>Avg RSSI:</strong><br>
-                            <span class="text-primary">{{ stats.avg_rssi }}dBm</span>
+                            <span class="text-primary">{{ stats.avg_rssi|format_rssi }}dBm</span>
                         </div>
                         <div class="col-6">
                             <strong>Avg SNR:</strong><br>
-                            <span class="text-success">{{ stats.avg_snr }}dB</span>
+                            <span class="text-success">{{ stats.avg_snr|format_snr }}dB</span>
                         </div>
                     </div>
                     <hr>

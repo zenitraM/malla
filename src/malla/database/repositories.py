@@ -377,10 +377,10 @@ class PacketRepository:
                         and packet["max_rssi"] is not None
                     ):
                         if packet["min_rssi"] == packet["max_rssi"]:
-                            packet["rssi_range"] = f"{packet['min_rssi']} dBm"
+                            packet["rssi_range"] = f"{packet['min_rssi']:.1f} dBm"
                         else:
                             packet["rssi_range"] = (
-                                f"{packet['min_rssi']} to {packet['max_rssi']} dBm"
+                                f"{packet['min_rssi']:.1f} to {packet['max_rssi']:.1f} dBm"
                             )
                     else:
                         packet["rssi_range"] = None
@@ -388,10 +388,10 @@ class PacketRepository:
                     # Format SNR range
                     if packet["min_snr"] is not None and packet["max_snr"] is not None:
                         if packet["min_snr"] == packet["max_snr"]:
-                            packet["snr_range"] = f"{packet['min_snr']} dB"
+                            packet["snr_range"] = f"{packet['min_snr']:.2f} dB"
                         else:
                             packet["snr_range"] = (
-                                f"{packet['min_snr']} to {packet['max_snr']} dB"
+                                f"{packet['min_snr']:.2f} to {packet['max_snr']:.2f} dB"
                             )
                     else:
                         packet["snr_range"] = None
@@ -1244,21 +1244,19 @@ class NodeRepository:
                         and packet["max_rssi"] is not None
                     ):
                         if packet["min_rssi"] == packet["max_rssi"]:
-                            rssi_display = f"{packet['min_rssi']} dBm"
+                            rssi_display = f"{packet['min_rssi']:.1f} dBm"
                         else:
-                            rssi_display = (
-                                f"{packet['min_rssi']} to {packet['max_rssi']} dBm"
-                            )
+                            rssi_display = f"{packet['min_rssi']:.1f} to {packet['max_rssi']:.1f} dBm"
                     else:
                         rssi_display = None
 
                     # Format SNR range
                     if packet["min_snr"] is not None and packet["max_snr"] is not None:
                         if packet["min_snr"] == packet["max_snr"]:
-                            snr_display = f"{packet['min_snr']} dB"
+                            snr_display = f"{packet['min_snr']:.2f} dB"
                         else:
                             snr_display = (
-                                f"{packet['min_snr']} to {packet['max_snr']} dB"
+                                f"{packet['min_snr']:.2f} to {packet['max_snr']:.2f} dB"
                             )
                     else:
                         snr_display = None
@@ -2255,10 +2253,12 @@ class TracerouteRepository:
                         aggregated["min_rssi"] = min(rssi_values)
                         aggregated["max_rssi"] = max(rssi_values)
                         if aggregated["min_rssi"] == aggregated["max_rssi"]:
-                            aggregated["rssi_range"] = f"{aggregated['min_rssi']} dBm"
+                            aggregated["rssi_range"] = (
+                                f"{aggregated['min_rssi']:.1f} dBm"
+                            )
                         else:
                             aggregated["rssi_range"] = (
-                                f"{aggregated['min_rssi']} to {aggregated['max_rssi']} dBm"
+                                f"{aggregated['min_rssi']:.1f} to {aggregated['max_rssi']:.1f} dBm"
                             )
                         aggregated["rssi"] = aggregated["rssi_range"]
                     else:
@@ -2272,10 +2272,10 @@ class TracerouteRepository:
                         aggregated["min_snr"] = min(snr_values)
                         aggregated["max_snr"] = max(snr_values)
                         if aggregated["min_snr"] == aggregated["max_snr"]:
-                            aggregated["snr_range"] = f"{aggregated['min_snr']} dB"
+                            aggregated["snr_range"] = f"{aggregated['min_snr']:.2f} dB"
                         else:
                             aggregated["snr_range"] = (
-                                f"{aggregated['min_snr']} to {aggregated['max_snr']} dB"
+                                f"{aggregated['min_snr']:.2f} to {aggregated['max_snr']:.2f} dB"
                             )
                         aggregated["snr"] = aggregated["snr_range"]
                     else:

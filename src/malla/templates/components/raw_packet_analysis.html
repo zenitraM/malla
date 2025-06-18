@@ -263,7 +263,7 @@
                                 <td><code>rx_rssi</code></td>
                                 <td>
                                     {% if raw_analysis.mesh_packet.rssi %}
-                                        <code>{{ raw_analysis.mesh_packet.rssi }}</code> dBm
+                                        <code>{{ raw_analysis.mesh_packet.rssi|format_rssi }}</code> dBm
                                         <br><small class="text-muted">Signal strength at gateway</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -275,7 +275,7 @@
                                 <td><code>rx_snr</code></td>
                                 <td>
                                     {% if raw_analysis.mesh_packet.snr %}
-                                        <code>{{ raw_analysis.mesh_packet.snr }}</code> dB
+                                        <code>{{ raw_analysis.mesh_packet.snr|format_snr }}</code> dB
                                         <br><small class="text-muted">Signal quality at gateway</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -473,8 +473,8 @@
                                                     <tr>
                                                         <td><strong>Signal Metrics:</strong></td>
                                                         <td>
-                                                            {% if value.rssi %}RSSI: {{ value.rssi }} dBm<br>{% endif %}
-                                                            {% if value.snr %}SNR: {{ value.snr }} dB{% endif %}
+                                                                                    {% if value.rssi %}RSSI: {{ value.rssi|format_rssi }} dBm<br>{% endif %}
+                        {% if value.snr %}SNR: {{ value.snr|format_snr }} dB{% endif %}
                                                         </td>
                                                     </tr>
                                                 {% elif field == 'position_precision_bits' %}

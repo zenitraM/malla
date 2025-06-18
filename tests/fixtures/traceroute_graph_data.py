@@ -38,8 +38,8 @@ SAMPLE_GRAPH_DATA = {
             "location": {"latitude": 40.6782, "longitude": -73.9442, "altitude": 5},
         },
         {
-            "id": 4294967295,
-            "name": "Edge Node Beta",
+            "id": 0xDDDDDDDD,
+            "name": "Edge Node Beta (TEND)",
             "avg_snr": -18.7,
             "connections": 3,
             "packet_count": 650,
@@ -109,7 +109,7 @@ SAMPLE_GRAPH_DATA = {
         },
         {
             "source": 2147483647,
-            "target": 4294967295,
+            "target": 0xDDDDDDDD,
             "avg_snr": -18.5,
             "strength": 7,
             "packet_count": 380,
@@ -162,7 +162,7 @@ SAMPLE_GRAPH_DATA = {
             "last_seen": int(time.time()) - 900,
         },
         {
-            "source": 4294967295,
+            "source": 0xDDDDDDDD,
             "target": 111222333,
             "avg_snr": -16.9,
             "strength": 7,
