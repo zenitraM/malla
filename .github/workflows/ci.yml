@@ -11,13 +11,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: DeterminateSystems/determinate-nix-action@v3
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/determinate-nix-action@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: DeterminateSystems/flakehub-cache-action@main
 
       - name: Install project dependencies (including dev)
         run: nix develop --command make install-dev
