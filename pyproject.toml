@@ -100,7 +100,13 @@ addopts = [
     "--tb=short",
     "--strict-markers",
     "-n=auto",
+    "--color=yes",
+    "--durations=10",
+    "--durations-min=1.0",
+    "--show-capture=no",
+    "--maxfail=5",
 ]
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
