@@ -1604,7 +1604,7 @@ class TestTracerouteFilters:
                 f"document.querySelectorAll('#tracerouteTable tbody tr').length !== {initial_rows}",
                 timeout=8000,
             )
-        except:
+        except Exception:
             # If waiting fails, continue with the test
             pass
 
