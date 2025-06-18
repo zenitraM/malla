@@ -119,6 +119,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize URL filter manager AFTER sidebar content is moved
     const urlManager = new URLFilterManager();
 
+    // Expose urlManager to global scope for debugging and testing
+    window.urlManager = urlManager;
+
     // Initialize sidebar toggle functionality
     const toggleBtn = document.getElementById('toggleSidebar');
     const closeBtn = document.getElementById('closeSidebar');
@@ -481,6 +484,9 @@ document.addEventListener('DOMContentLoaded', function() {
         columns: getDynamicColumns()
     });
 
+    // Expose table to global scope for debugging and testing
+    window.table = table;
+
     // Function to update table columns and reload data
     function updateTableColumns() {
         const newColumns = getDynamicColumns();
@@ -507,11 +513,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Apply current filters and update columns if needed
     function applyCurrentFiltersWithColumns() {
-        // Check if packet type filter has changed and update columns accordingly
-        updateTableColumns();
-
+        // Get current filters first
         const filters = urlManager.getCurrentFilters();
+
+        // Update the table's column configuration BEFORE applying filters
+        const newColumns = getDynamicColumns();
+        table.options.columns = newColumns;
+        table.updateTableHeader();
+
+        // Apply filters (this will load data with filters using the new columns)
         table.setFilters(filters);
+
         updateStats();
 
         // Update URL with current filters

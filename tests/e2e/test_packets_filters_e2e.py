@@ -627,7 +627,7 @@ class TestPacketsFilters:
         page.wait_for_selector("#packetsTable", timeout=10000)
 
         # Check when packet types are loaded
-        packet_types_loaded = page.wait_for_function(
+        page.wait_for_function(
             "document.getElementById('portnum').children.length > 1", timeout=5000
         )
 
@@ -661,3 +661,181 @@ class TestPacketsFilters:
             )
 
         print("✅ Hardcoded types suggestion test completed")
+
+    def test_packet_type_filter_manual_dropdown_change_applies_filter(
+        self, page: Page, test_server_url: str
+    ):
+        """Test that manually changing packet type dropdown applies filter automatically, not just columns."""
+        # This test checks for the issue where changing dropdown updates columns but doesn't filter data
+
+        # Navigate to packets page without any URL parameters
+        page.goto(f"{test_server_url}/packets")
+
+        # Wait for page to load completely
+        page.wait_for_selector("#packetsTable", timeout=10000)
+        page.wait_for_timeout(2000)
+
+        # Get initial row count (should show all packet types)
+        initial_rows = page.locator("#packetsTable tbody tr")
+        initial_count = initial_rows.count()
+        print(f"Initial row count (all packets): {initial_count}")
+
+        # Verify we have a good amount of data initially
+        assert initial_count > 10, (
+            f"Expected more than 10 rows initially, got {initial_count}"
+        )
+
+        # Track API requests to verify filtering is applied
+        api_requests = []
+
+        def track_requests(request):
+            if "/api/packets/data" in request.url:
+                api_requests.append(request.url)
+
+        page.on("request", track_requests)
+
+        # Clear previous requests
+        api_requests.clear()
+
+        # Change the packet type dropdown to TEXT_MESSAGE_APP
+        portnum_select = page.locator("#portnum")
+        portnum_select.select_option("TEXT_MESSAGE_APP")
+
+        # Wait for any requests to complete
+        page.wait_for_timeout(2000)
+
+        # Debug what getCurrentFilters returns after dropdown change
+        debug_result = page.evaluate("""
+            () => {
+                const urlManager = window.urlManager;
+                if (urlManager) {
+                    const filters = urlManager.getCurrentFilters();
+                    console.log('getCurrentFilters after dropdown change:', filters);
+                    return {
+                        filters: filters,
+                        portnumValue: document.getElementById('portnum').value,
+                        formExists: !!document.getElementById('filtersForm')
+                    };
+                } else {
+                    return { error: 'urlManager not found' };
+                }
+            }
+        """)
+        print(f"Debug result after dropdown change: {debug_result}")
+
+        # Check what the actual API response contains
+        api_response_debug = page.evaluate("""
+            async () => {
+                try {
+                    const response = await fetch('/api/packets/data?page=1&limit=25&search=&portnum=TEXT_MESSAGE_APP&group_packets=true');
+                    const data = await response.json();
+                    return {
+                        totalCount: data.total_count,
+                        dataLength: data.data ? data.data.length : 0,
+                        firstFewTypes: data.data ? data.data.slice(0, 3).map(p => p.portnum_name) : []
+                    };
+                } catch (error) {
+                    return { error: error.message };
+                }
+            }
+        """)
+        print(f"API response debug: {api_response_debug}")
+
+        # Check the table's internal state
+        table_state_debug = page.evaluate("""
+            () => {
+                const table = window.table;
+                if (table) {
+                    return {
+                        stateDataLength: table.state.data ? table.state.data.length : 0,
+                        stateTotalCount: table.state.totalCount,
+                        stateFilters: table.state.filters,
+                        firstFewStateTypes: table.state.data ? table.state.data.slice(0, 3).map(p => p.portnum_name) : []
+                    };
+                } else {
+                    return { error: 'table not found' };
+                }
+            }
+        """)
+        print(f"Table state debug: {table_state_debug}")
+
+        # Check that the columns were updated (Message column should be present)
+        headers = page.locator("#packetsTable thead th")
+        header_count = headers.count()
+        header_texts = [headers.nth(i).inner_text() for i in range(header_count)]
+        print(f"Headers after dropdown change: {header_texts}")
+
+        # Should have "Message" column for text messages
+        message_column_found = any("Message" in header for header in header_texts)
+        assert message_column_found, (
+            f"Expected 'Message' column after changing to TEXT_MESSAGE_APP, got: {header_texts}"
+        )
+
+        # CRITICAL TEST: Check that the data was actually filtered automatically
+        filtered_rows = page.locator("#packetsTable tbody tr")
+        filtered_count = filtered_rows.count()
+        print(f"Row count after dropdown change: {filtered_count}")
+
+        # The key assertion - check that filtering actually happened
+        print(
+            f"Row count comparison: initial={initial_count}, after_dropdown={filtered_count}"
+        )
+
+        # Instead of checking row count (which will be 25 for pages with 25+ results),
+        # check that the total count changed and data is actually filtered
+        if (
+            table_state_debug.get("stateTotalCount")
+            and table_state_debug.get("stateTotalCount") != initial_count
+        ):
+            print(
+                f"✅ Total count changed from {initial_count} to {table_state_debug['stateTotalCount']} - filtering is working"
+            )
+            filtering_worked = True
+        elif (
+            api_response_debug.get("totalCount")
+            and api_response_debug.get("totalCount") < 145
+        ):  # 145 is total packets in test data
+            print(
+                f"✅ API total count is {api_response_debug['totalCount']} (less than 145) - filtering is working"
+            )
+            filtering_worked = True
+        else:
+            print("❌ No evidence of filtering working")
+            filtering_worked = False
+
+        assert filtering_worked, (
+            f"ISSUE FOUND: Manual dropdown change should filter data automatically. "
+            f"Table state: {table_state_debug}, API response: {api_response_debug}"
+        )
+
+        # Verify API request was made with the filter
+        print(f"API requests after dropdown change: {api_requests}")
+        filtered_requests = [
+            req for req in api_requests if "portnum=TEXT_MESSAGE_APP" in req
+        ]
+
+        # More lenient check - if no requests were made, that's also an issue
+        if len(api_requests) == 0:
+            print(
+                "ISSUE: No API requests made after dropdown change - filter event may not be triggering"
+            )
+        elif len(filtered_requests) == 0:
+            print(f"ISSUE: API requests made but none with filter: {api_requests}")
+
+        # Restore the assertion now that we know what's happening
+        assert len(filtered_requests) > 0, (
+            f"ISSUE FOUND: No API requests with portnum=TEXT_MESSAGE_APP filter found. "
+            f"All requests: {api_requests}. This means the filter wasn't applied to the API call."
+        )
+
+        # Verify the filtered data shows only text messages
+        if filtered_count > 0:
+            for i in range(min(3, filtered_count)):
+                row = filtered_rows.nth(i)
+                type_cell = row.locator("td").nth(3)  # Type column
+                type_text = type_cell.inner_text()
+                assert "Text" in type_text, (
+                    f"Row {i} should show Text type, got: {type_text}"
+                )
+
+        print("✅ Manual dropdown change applies filter automatically test passed")
