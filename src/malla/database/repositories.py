@@ -300,9 +300,7 @@ class PacketRepository:
 
                     # Calculate aggregated values
                     gateway_ids = list(
-                        {
-                            p["gateway_id"] for p in packets_in_group if p["gateway_id"]
-                        }
+                        {p["gateway_id"] for p in packets_in_group if p["gateway_id"]}
                     )
                     rssi_values = [
                         p["rssi"] for p in packets_in_group if p["rssi"] is not None
@@ -2196,7 +2194,7 @@ class TracerouteRepository:
 
                 # Convert groups to aggregated packets
                 aggregated_packets = []
-                for group_key, packets_in_group in groups.items():
+                for _group_key, packets_in_group in groups.items():
                     # Sort by timestamp (newest first) within group
                     packets_in_group.sort(key=lambda x: x["timestamp"], reverse=True)
 
