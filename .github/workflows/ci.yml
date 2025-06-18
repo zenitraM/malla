@@ -23,4 +23,4 @@ jobs:
         run: nix develop --command make lint
 
       - name: Run tests
-        run: nix develop --command uv run pytest -n 8
+        run: nix develop --command uv run pytest -n 4
