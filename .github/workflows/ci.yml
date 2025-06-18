@@ -15,7 +15,6 @@ jobs:
       - uses: DeterminateSystems/determinate-nix-action@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: DeterminateSystems/flakehub-cache-action@main
 
       - name: Install project dependencies (including dev)
         run: nix develop --command make install-dev
