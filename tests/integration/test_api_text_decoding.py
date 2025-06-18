@@ -1,25 +1,8 @@
 """Test text message decoding functionality in API endpoints."""
 
-import pytest
-
-from tests.conftest import TestFlaskApp
-
 
 class TestAPITextDecoding:
     """Test text message decoding in API responses."""
-
-    @pytest.fixture
-    def app(self):
-        """Create Flask app with proper test configuration."""
-        test_app = TestFlaskApp()
-        test_app.start()
-        yield test_app.app
-        test_app.stop()
-
-    @pytest.fixture
-    def client(self, app):
-        """Create test client."""
-        return app.test_client()
 
     def test_text_message_decoding_with_real_data(self, client):
         """Test that text messages are properly decoded from raw_payload."""
