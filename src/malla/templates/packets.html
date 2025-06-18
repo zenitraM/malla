@@ -168,7 +168,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Initialize URL parameters and table
+        // Initialize URL parameters and table
     async function initializePageWithFilters() {
         // Load packet types first
         await loadPacketTypes();
@@ -176,32 +176,31 @@ document.addEventListener('DOMContentLoaded', function() {
         // Small delay to ensure DOM is updated
         await new Promise(resolve => setTimeout(resolve, 100));
 
-        // Apply URL parameters after packet types are loaded
+        // Apply URL parameters BEFORE adding listeners to prevent duplicate calls
         const hasParams = await urlManager.applyURLParameters();
 
-        // Add form field listeners for automatic filtering
+        // Add form field listeners AFTER applying URL parameters
+        // This prevents the change events from being triggered during URL parameter application
         addFormFieldListeners();
 
+        // Apply filters if we have URL parameters, otherwise load unfiltered data
         if (hasParams) {
-            // If we have URL parameters, apply filters first then load data
-            // This prevents the initial unfiltered request
-            setTimeout(() => {
-                applyCurrentFilters();
-            }, 100);
+            // If we have URL parameters, update columns and apply filters immediately
+            // Use the column-updating version to ensure proper column configuration
+            const newColumns = getDynamicColumns();
+            table.updateColumns(newColumns);
+            applyCurrentFilters();
         } else {
             // Only load data without filters if no URL parameters
-            table.loadData();
+            // Update columns first, then load data
+            updateTableColumns();
         }
     }
 
-    // Initialize the modern table
-    const table = new ModernTable('packetsTable', {
-        endpoint: '/api/packets/data',
-        enableSearch: false,
-        enablePagination: true,
-        pageSize: 25,
-        deferInitialLoad: true,  // Defer loading until after URL parameters are applied
-        columns: [
+    // Generic column configuration system
+    const COLUMN_CONFIGS = {
+        // Base columns that are always visible
+        base: [
             {
                 key: 'timestamp',
                 title: 'Timestamp',
@@ -218,7 +217,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 sortable: true,
                 render: (value, row) => {
                     if (row.from_node_id) {
-                        // Use the short name from API response
                         const shortName = row.from_node_short || row.from_node_id.toString(16).padStart(8, '0').slice(-4);
                         return `<a href="/node/${row.from_node_id}" class="text-decoration-none node-link"
                                    data-node-id="${row.from_node_id}" data-bs-toggle="tooltip"
@@ -236,7 +234,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 sortable: true,
                 render: (value, row) => {
                     if (row.to_node_id) {
-                        // Use the short name from API response
                         const shortName = row.to_node_short || row.to_node_id.toString(16).padStart(8, '0').slice(-4);
                         return `<a href="/node/${row.to_node_id}" class="text-decoration-none node-link"
                                    data-node-id="${row.to_node_id}" data-bs-toggle="tooltip"
@@ -254,7 +251,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 sortable: true,
                 render: (value, row) => {
                     if (value) {
-                        // Map common port names to more readable versions
                         const typeMap = {
                             'TEXT_MESSAGE_APP': 'Text',
                             'POSITION_APP': 'Position',
@@ -270,30 +266,66 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     return `<span class="text-muted">Unknown</span>`;
                 }
-            },
+            }
+        ],
+
+        // Always visible columns
+        always: [
+            {
+                key: 'channel',
+                title: 'Channel',
+                sortable: true,
+                render: (value, row) => {
+                    if (value && value !== 'Unknown') {
+                        if (value === 'LongFast') {
+                            return `<span class="badge bg-primary">${value}</span>`;
+                        } else {
+                            return `<span class="badge bg-info">${value}</span>`;
+                        }
+                    }
+                    return `<span class="text-muted">Unknown</span>`;
+                }
+            }
+        ],
+
+        // Conditional columns based on packet type
+        conditional: {
+            'TEXT_MESSAGE_APP': [
+                {
+                    key: 'text_content',
+                    title: 'Message',
+                    sortable: false,
+                    render: (value, row) => {
+                        if (value) {
+                            return `<span class="text-break">${value}</span>`;
+                        }
+                        return `<span class="text-muted">No content</span>`;
+                    }
+                }
+            ]
+        },
+
+        // Default columns for all packet types (unless overridden)
+        default: [
             {
                 key: 'gateway',
                 title: 'Gateway',
                 sortable: true,
                 render: (value, row) => {
                     if (row.is_grouped) {
-                        // For grouped packets, show gateway count
                         const count = row.gateway_count;
                         if (count > 1) {
                             return `<span class="badge bg-info" title="Multiple gateways: ${row.gateway_list}">
-                                                ${count} gateways
-                                            </span>`;
+                                        ${count} gateways
+                                    </span>`;
                         } else {
                             return `<span class="badge bg-info">${value}</span>`;
                         }
-                        return `<span class="text-muted">N/A</span>`;
                     } else {
-                        // For individual packets, show gateway short name with link
                         const gatewayName = row.gateway_name;
                         const gatewayNodeId = row.gateway_node_id;
 
                         if (value && value.startsWith('!') && gatewayNodeId) {
-                            // Use last 4 hex digits as short name
                             const shortName = value.substring(value.length - 4).toUpperCase();
                             return `<a href="/node/${gatewayNodeId}" class="text-decoration-none node-link"
                                        data-node-id="${gatewayNodeId}" data-bs-toggle="tooltip"
@@ -302,7 +334,6 @@ document.addEventListener('DOMContentLoaded', function() {
                                         ${shortName}
                                     </a>`;
                         } else if (gatewayName && gatewayNodeId) {
-                            // Extract short name from gateway name if available
                             const parenMatch = gatewayName.match(/\(([^)]+)\)$/);
                             const shortName = parenMatch ? parenMatch[1] : gatewayName.substring(0, 4).toUpperCase();
                             return `<a href="/node/${gatewayNodeId}" class="text-decoration-none node-link"
@@ -385,7 +416,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         return value ? `<small>${value}</small>` : `<span class="text-muted">N/A</span>`;
                     }
                 }
-            },
+            }
+        ],
+
+        // Final columns that are always at the end
+        actions: [
             {
                 key: 'id',
                 title: 'Actions',
@@ -397,7 +432,61 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         ]
+    };
+
+    // Function to get dynamic columns based on current filter
+    function getDynamicColumns() {
+        const portnum = document.getElementById('portnum')?.value || '';
+
+        let columns = [
+            ...COLUMN_CONFIGS.base,
+            ...COLUMN_CONFIGS.always
+        ];
+
+        // Add conditional columns based on packet type
+        if (COLUMN_CONFIGS.conditional[portnum]) {
+            columns.push(...COLUMN_CONFIGS.conditional[portnum]);
+        }
+
+        // Add default columns (unless we're in a mode that excludes them)
+        const excludeDefaultColumns = getExcludedDefaultColumns(portnum);
+        const defaultColumns = COLUMN_CONFIGS.default.filter(col =>
+            !excludeDefaultColumns.includes(col.key)
+        );
+        columns.push(...defaultColumns);
+
+        // Add action columns
+        columns.push(...COLUMN_CONFIGS.actions);
+
+        return columns;
+    }
+
+    // Function to determine which default columns to exclude for specific packet types
+    function getExcludedDefaultColumns(portnum) {
+        const exclusions = {
+            'TEXT_MESSAGE_APP': ['size']  // Hide size column for text messages
+        };
+        return exclusions[portnum] || [];
+    }
+
+
+
+    // Initialize the modern table
+    let table = new ModernTable('packetsTable', {
+        endpoint: '/api/packets/data',
+        enableSearch: false,
+        enablePagination: true,
+        pageSize: 25,
+        deferInitialLoad: true,  // Defer loading until after URL parameters are applied
+        columns: getDynamicColumns()
     });
+
+    // Function to update table columns and reload data
+    function updateTableColumns() {
+        const newColumns = getDynamicColumns();
+        table.updateColumns(newColumns);
+        table.loadData();
+    }
 
     // Filter handling
     const filtersForm = document.getElementById('filtersForm');
@@ -408,6 +497,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Apply current filters (used both for manual application and URL parameter application)
     function applyCurrentFilters() {
+        const filters = urlManager.getCurrentFilters();
+        table.setFilters(filters);
+        updateStats();
+
+        // Update URL with current filters
+        urlManager.updateURL(filters);
+    }
+
+    // Apply current filters and update columns if needed
+    function applyCurrentFiltersWithColumns() {
+        // Check if packet type filter has changed and update columns accordingly
+        updateTableColumns();
+
         const filters = urlManager.getCurrentFilters();
         table.setFilters(filters);
         updateStats();
@@ -428,10 +530,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         setTimeout(applyCurrentFilters, 10);
                     });
                 } else {
-                    // For text inputs, select fields, etc.
-                    input.addEventListener('change', function() {
-                        applyCurrentFilters();
-                    });
+                    // For the packet type dropdown, use the column-updating version
+                    if (input.id === 'portnum') {
+                        input.addEventListener('change', function() {
+                            applyCurrentFiltersWithColumns();
+                        });
+                    } else {
+                        // For other inputs, use regular filtering
+                        input.addEventListener('change', function() {
+                            applyCurrentFilters();
+                        });
+                    }
 
                     // Also trigger on input for text fields (real-time filtering)
                     if (input.type === 'text' || input.type === 'search') {

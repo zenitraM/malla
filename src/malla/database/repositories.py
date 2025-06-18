@@ -112,6 +112,39 @@ class PacketRepository:
     """Repository for packet operations."""
 
     @staticmethod
+    def _decode_text_content(packet: dict[str, Any]) -> str | None:
+        """
+        Decode text message content from raw payload.
+
+        Args:
+            packet: Packet dictionary containing raw_payload and portnum_name
+
+        Returns:
+            Decoded text content or None if not a text message or decoding fails
+        """
+        if packet.get("portnum_name") != "TEXT_MESSAGE_APP" or not packet.get(
+            "raw_payload"
+        ):
+            return None
+
+        try:
+            raw_payload = packet["raw_payload"]
+            if isinstance(raw_payload, bytes):
+                text_content = raw_payload.decode("utf-8", errors="replace")
+            elif isinstance(raw_payload, str):
+                text_content = raw_payload
+            else:
+                text_content = str(raw_payload)
+
+            # Truncate long messages for table display
+            if len(text_content) > 100:
+                text_content = text_content[:97] + "..."
+
+            return text_content
+        except (AttributeError, TypeError, UnicodeDecodeError):
+            return None
+
+    @staticmethod
     def get_packets(
         limit: int = 100,
         offset: int = 0,
@@ -254,8 +287,8 @@ class PacketRepository:
                 query = f"""
                     SELECT
                         id, timestamp, from_node_id, to_node_id, portnum, portnum_name,
-                        gateway_id, mesh_packet_id, rssi, snr, hop_limit, hop_start,
-                        payload_length, processed_successfully,
+                        gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_limit, hop_start,
+                        payload_length, processed_successfully, raw_payload,
                         datetime(timestamp, 'unixepoch') as timestamp_str,
                         (hop_start - hop_limit) as hop_count
                     FROM packet_history
@@ -332,6 +365,7 @@ class PacketRepository:
                         "portnum": portnum,
                         "portnum_name": portnum_name,
                         "mesh_packet_id": mesh_packet_id,
+                        "channel_id": dict(representative_packet).get("channel_id"),
                         "gateway_count": len(gateway_ids),
                         "gateway_list": ",".join(gateway_ids),
                         "min_rssi": min(rssi_values) if rssi_values else None,
@@ -354,6 +388,10 @@ class PacketRepository:
                         "is_grouped": True,
                         "success": min(
                             p["processed_successfully"] for p in packets_in_group
+                        ),
+                        # Decode text content from representative packet
+                        "text_content": PacketRepository._decode_text_content(
+                            dict(representative_packet)
                         ),
                     }
 
@@ -453,7 +491,7 @@ class PacketRepository:
                     SELECT
                         id, timestamp, from_node_id, to_node_id, portnum, portnum_name,
                         gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_limit, hop_start,
-                        payload_length, processed_successfully,
+                        payload_length, processed_successfully, raw_payload,
                         via_mqtt, want_ack, priority, delayed, channel_index, rx_time,
                         pki_encrypted, next_hop, relay_node, tx_after,
                         datetime(timestamp, 'unixepoch') as timestamp_str,
@@ -488,6 +526,11 @@ class PacketRepository:
                     # Add success indicator
                     packet["success"] = packet["processed_successfully"]
                     packet["is_grouped"] = False
+
+                    # Decode text content if this is a text message
+                    packet["text_content"] = PacketRepository._decode_text_content(
+                        packet
+                    )
 
                     packets.append(packet)
 

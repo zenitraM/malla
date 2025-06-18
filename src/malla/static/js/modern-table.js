@@ -469,6 +469,13 @@ class ModernTable {
         this.loadData();
     }
 
+    updateColumns(newColumns) {
+        this.options.columns = newColumns;
+        this.updateTableHeader();
+        // Re-render the table body with the new columns
+        this.renderTableBody();
+    }
+
     setPage(page) {
         if (page >= 1 && page <= this.state.totalPages) {
             this.state.page = page;

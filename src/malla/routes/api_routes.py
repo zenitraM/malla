@@ -143,6 +143,11 @@ def api_packets():
 
         data = PacketRepository.get_packets(limit=limit, offset=offset, filters=filters)
 
+        # Remove raw_payload from packets to avoid JSON serialization issues
+        for packet in data.get("packets", []):
+            if "raw_payload" in packet:
+                del packet["raw_payload"]
+
         # Add pagination info that the test expects
         data["page"] = page
         data["per_page"] = limit
@@ -1166,6 +1171,9 @@ def api_packets_data():
                     packet["to_node_id"], f"{packet['to_node_id']:08x}"[-4:]
                 )
 
+            # Get text content if available (decoded in repository)
+            text_content = packet.get("text_content")
+
             # Handle gateway display for both grouped and individual packets
             gateway_display = packet.get("gateway_id") or "Unknown"
             gateway_sort_value = 0
@@ -1243,6 +1251,8 @@ def api_packets_data():
                 "size_sort_value": size_sort_value,
                 "mesh_packet_id": packet.get("mesh_packet_id"),
                 "is_grouped": group_packets,
+                "channel": packet.get("channel_id") or "Unknown",
+                "text_content": text_content,
             }
 
             # Add gateway-specific fields for grouped packets
