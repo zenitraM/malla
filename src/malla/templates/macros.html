@@ -1,0 +1,358 @@
+{% macro node_link(node_id, node_name=None, display_text=None, additional_classes="", show_hex=false) %}
+    {# 
+    Macro for displaying a node link with hover tooltip containing node information
+    
+    Args:
+        node_id: The node ID (can be integer or hex string)
+        node_name: Optional node name to display (if known)
+        display_text: Optional custom text to display instead of node name
+        additional_classes: Additional CSS classes to apply
+        show_hex: Whether to show hex ID in parentheses
+    #}
+    {% set node_id_str = node_id|string %}
+    
+    {# Handle both integer and hex string node IDs #}
+    {% if node_id_str.startswith('!') %}
+        {% set hex_id = node_id_str %}
+        {% set short_hex = hex_id[-4:] %}
+    {% elif node_id_str.isdigit() %}
+        {% set hex_id = "!" + "%08x"|format(node_id|int) %}
+        {% set short_hex = hex_id[-4:] %}
+    {% else %}
+        {# Assume it's already a hex string without ! prefix #}
+        {% set hex_id = node_id_str %}
+        {% set short_hex = hex_id[-4:] %}
+    {% endif %}
+    
+    {# Create display name with consistent format: "Name (last4)" or just hex if no name #}
+    {% if display_text %}
+        {% set display_name = display_text %}
+    {% elif node_name %}
+        {# Check if node_name already contains hex ID in parentheses to avoid duplication #}
+        {% if "(" in node_name and node_name.endswith(")") %}
+            {% set display_name = node_name %}
+        {% else %}
+            {% set display_name = node_name + " (" + short_hex + ")" %}
+        {% endif %}
+    {% else %}
+        {% set display_name = hex_id %}
+    {% endif %}
+    
+    <a href="{{ url_for('node.node_detail', node_id=node_id) }}" 
+       class="node-link text-decoration-none {{ additional_classes }}"
+       data-node-id="{{ node_id }}"
+       data-bs-toggle="tooltip"
+       data-bs-placement="top"
+       data-bs-html="true"
+       data-bs-title="Loading...">
+        {{ display_name }}
+    </a>
+{% endmacro %}
+
+{% macro node_badge(node_id, node_name=None, badge_class="bg-primary", show_hex=false) %}
+    {# 
+    Macro for displaying a node as a badge with hover tooltip
+    
+    Args:
+        node_id: The node ID (can be integer or hex string)
+        node_name: Optional node name to display (if known)
+        badge_class: CSS classes for the badge styling
+        show_hex: Whether to show hex ID in parentheses
+    #}
+    {% set node_id_str = node_id|string %}
+    
+    {# Handle both integer and hex string node IDs #}
+    {% if node_id_str.startswith('!') %}
+        {% set hex_id = node_id_str %}
+        {% set short_hex = hex_id[-4:] %}
+    {% elif node_id_str.isdigit() %}
+        {% set hex_id = "!" + "%08x"|format(node_id|int) %}
+        {% set short_hex = hex_id[-4:] %}
+    {% else %}
+        {# Assume it's already a hex string without ! prefix #}
+        {% set hex_id = node_id_str %}
+        {% set short_hex = hex_id[-4:] %}
+    {% endif %}
+    
+    {# Create display name with consistent format: "Name (last4)" or just hex if no name #}
+    {% if node_name %}
+        {# Check if node_name already contains hex ID in parentheses to avoid duplication #}
+        {% if "(" in node_name and node_name.endswith(")") %}
+            {% set display_name = node_name %}
+        {% else %}
+            {% set display_name = node_name + " (" + short_hex + ")" %}
+        {% endif %}
+    {% else %}
+        {% set display_name = hex_id %}
+    {% endif %}
+    
+    <a href="{{ url_for('node.node_detail', node_id=node_id) }}" 
+       class="badge {{ badge_class }} text-decoration-none node-link"
+       data-node-id="{{ node_id }}"
+       data-bs-toggle="tooltip"
+       data-bs-placement="top"
+       data-bs-html="true"
+       data-bs-title="Loading...">
+        {{ display_name }}
+    </a>
+{% endmacro %}
+
+{% macro gateway_link(gateway_id, gateway_name=None, additional_classes="") %}
+    {# 
+    Macro for displaying a gateway link with hover tooltip
+    Gateway IDs can be node IDs (if they start with !) or other identifiers
+    
+    Args:
+        gateway_id: The gateway ID (can be node ID or other identifier)
+        gateway_name: Optional gateway name to display (if known)
+        additional_classes: Additional CSS classes to apply
+    #}
+    {% if gateway_id and gateway_id != "Unknown" and gateway_id != "Unknown Gateway" %}
+        {% if gateway_id.startswith('!') %}
+            {# This is a node ID, use node_link macro with gateway_name #}
+            {{ node_link(gateway_id, node_name=gateway_name, additional_classes=additional_classes) }}
+        {% else %}
+            {# This is some other gateway identifier #}
+            {% if gateway_name %}
+                <span class="gateway-other {{ additional_classes }}" 
+                      data-bs-toggle="tooltip" 
+                      data-bs-placement="top" 
+                      title="Gateway: {{ gateway_id }}">
+                    {{ gateway_name }}
+                </span>
+            {% else %}
+                <span class="gateway-other {{ additional_classes }}">{{ gateway_id }}</span>
+            {% endif %}
+        {% endif %}
+    {% else %}
+        <span class="text-muted {{ additional_classes }}">Unknown</span>
+    {% endif %}
+{% endmacro %}
+
+{% macro protocol_badge(protocol_name, additional_classes="") %}
+    {# 
+    Macro for displaying protocol badges with consistent styling
+    #}
+    {% set protocol_colors = {
+        'TEXT_MESSAGE_APP': 'bg-primary',
+        'POSITION_APP': 'bg-success', 
+        'NODEINFO_APP': 'bg-info',
+        'TELEMETRY_APP': 'bg-warning',
+        'TRACEROUTE_APP': 'bg-danger',
+        'ROUTING_APP': 'bg-secondary',
+        'ADMIN_APP': 'bg-dark'
+    } %}
+    
+    {% set badge_color = protocol_colors.get(protocol_name, 'bg-secondary') %}
+    
+    <span class="badge {{ badge_color }} {{ additional_classes }}">
+        {{ protocol_name or "Unknown" }}
+    </span>
+{% endmacro %}
+
+{% macro signal_indicator(rssi=None, snr=None, show_values=true) %}
+    {# 
+    Macro for displaying signal quality indicators
+    #}
+    {% if rssi is not none %}
+        {% if rssi >= -60 %}
+            {% set rssi_class = "signal-excellent" %}
+        {% elif rssi >= -70 %}
+            {% set rssi_class = "signal-good" %}
+        {% elif rssi >= -80 %}
+            {% set rssi_class = "signal-fair" %}
+        {% else %}
+            {% set rssi_class = "signal-poor" %}
+        {% endif %}
+        
+        <span class="signal-indicator {{ rssi_class }}">
+            {% if show_values %}{{ rssi }} dBm{% else %}{{ rssi }}{% endif %}
+        </span>
+    {% elif snr is not none %}
+        {% if snr > 5 %}
+            {% set snr_class = "signal-excellent" %}
+        {% elif snr > 0 %}
+            {% set snr_class = "signal-good" %}
+        {% else %}
+            {% set snr_class = "signal-poor" %}
+        {% endif %}
+        
+        <span class="signal-indicator {{ snr_class }}">
+            {% if show_values %}{{ snr }} dB{% else %}{{ snr }}{% endif %}
+        </span>
+    {% else %}
+        <span class="text-muted">Unknown</span>
+    {% endif %}
+{% endmacro %}
+
+{% macro gateway_reception_link(gateway_id, gateway_name=None, packet_id=None, additional_classes="") %}
+    {# 
+    Macro for displaying a gateway link that can optionally link to a specific packet reception
+    If packet_id is provided, links to that specific packet reception
+    Otherwise, behaves like the regular gateway_link macro
+    
+    Args:
+        gateway_id: The gateway ID (can be node ID or other identifier)
+        gateway_name: Optional gateway name to display (if known)
+        packet_id: Optional packet ID to link to specific reception
+        additional_classes: Additional CSS classes to apply
+    #}
+    {% if gateway_id and gateway_id != "Unknown" and gateway_id != "Unknown Gateway" %}
+        {% if gateway_id.startswith('!') %}
+            {# This is a node ID #}
+            {% if packet_id %}
+                {# Link to specific packet reception #}
+                {% set display_name = gateway_name or gateway_id %}
+                <a href="{{ url_for('packet.packet_detail', packet_id=packet_id) }}" 
+                   class="node-link text-decoration-none {{ additional_classes }}"
+                   data-node-id="{{ gateway_id }}"
+                   data-bs-toggle="tooltip"
+                   data-bs-placement="top"
+                   data-bs-html="true"
+                   data-bs-title="View this specific reception<br>Gateway: {{ display_name }}">
+                    {{ display_name }}
+                </a>
+            {% else %}
+                {# Link to node page (original behavior) #}
+                {{ node_link(gateway_id, node_name=gateway_name, additional_classes=additional_classes) }}
+            {% endif %}
+        {% else %}
+            {# This is some other gateway identifier #}
+            {% set display_name = gateway_name or gateway_id %}
+            {% if packet_id %}
+                <a href="{{ url_for('packet.packet_detail', packet_id=packet_id) }}" 
+                   class="gateway-other text-decoration-none {{ additional_classes }}"
+                   data-bs-toggle="tooltip"
+                   data-bs-placement="top"
+                   data-bs-title="View this specific reception">
+                    {{ display_name }}
+                </a>
+            {% else %}
+                {% if gateway_name %}
+                    <span class="gateway-other {{ additional_classes }}" 
+                          data-bs-toggle="tooltip" 
+                          data-bs-placement="top" 
+                          title="Gateway: {{ gateway_id }}">
+                        {{ gateway_name }}
+                    </span>
+                {% else %}
+                    <span class="gateway-other {{ additional_classes }}">{{ gateway_id }}</span>
+                {% endif %}
+            {% endif %}
+        {% endif %}
+    {% else %}
+        <span class="text-muted {{ additional_classes }}">Unknown</span>
+    {% endif %}
+{% endmacro %}
+
+{% macro node_picker(field_name, field_id=None, label="Node", selected_value="", selected_display="", placeholder="All nodes", required=false, additional_classes="") %}
+    {# 
+    Macro for creating a searchable node picker component
+    
+    Args:
+        field_name: The name attribute for the form field
+        field_id: Optional ID for the field (defaults to field_name)
+        label: Label text for the field
+        selected_value: Currently selected node ID
+        selected_display: Display text for currently selected node
+        placeholder: Placeholder text for the search input
+        required: Whether the field is required
+        additional_classes: Additional CSS classes to apply
+    #}
+    {% set input_id = field_id or field_name %}
+    
+    <div class="node-picker-container {{ additional_classes }}">
+        <label for="{{ input_id }}" class="form-label">{{ label }}</label>
+        <div class="position-relative">
+            <!-- Hidden input to store the actual node ID -->
+            <input type="hidden" name="{{ field_name }}" id="{{ input_id }}_value" value="{{ selected_value }}">
+            
+            <!-- Visible search input -->
+            <input type="text" 
+                   class="form-control node-picker-input" 
+                   id="{{ input_id }}"
+                   placeholder="{{ placeholder }}"
+                   value="{{ selected_display }}"
+                   autocomplete="off"
+                   {{ 'required' if required else '' }}>
+            
+            <!-- Clear button -->
+            <button type="button" 
+                    class="btn btn-sm btn-outline-secondary node-picker-clear" 
+                    title="Clear selection"
+                    {% if not selected_value %}style="display: none;"{% endif %}>
+                <i class="bi bi-x"></i>
+            </button>
+            
+            <!-- Dropdown for search results -->
+            <div class="node-picker-dropdown dropdown-menu">
+                <div class="node-picker-loading text-center p-3" style="display: none;">
+                    <div class="spinner-border spinner-border-sm" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <span class="ms-2">Searching nodes...</span>
+                </div>
+                <div class="node-picker-no-results text-center p-3 text-muted" style="display: none;">
+                    No nodes found
+                </div>
+                <div class="node-picker-results"></div>
+            </div>
+        </div>
+    </div>
+{% endmacro %}
+
+{% macro gateway_picker(field_name, field_id=None, label="Gateway", selected_value="", selected_display="", placeholder="All gateways", required=false, additional_classes="") %}
+    {# 
+    Macro for creating a searchable gateway picker component
+    
+    Args:
+        field_name: The name attribute for the form field
+        field_id: Optional ID for the field (defaults to field_name)
+        label: Label text for the field
+        selected_value: Currently selected gateway ID
+        selected_display: Display text for currently selected gateway
+        placeholder: Placeholder text for the search input
+        required: Whether the field is required
+        additional_classes: Additional CSS classes to apply
+    #}
+    {% set input_id = field_id or field_name %}
+    
+    <div class="gateway-picker-container {{ additional_classes }}">
+        <label for="{{ input_id }}" class="form-label">{{ label }}</label>
+        <div class="position-relative">
+            <!-- Hidden input to store the actual gateway ID -->
+            <input type="hidden" name="{{ field_name }}" id="{{ input_id }}_value" value="{{ selected_value }}">
+            
+            <!-- Visible search input -->
+            <input type="text" 
+                   class="form-control gateway-picker-input" 
+                   id="{{ input_id }}"
+                   placeholder="{{ placeholder }}"
+                   value="{{ selected_display }}"
+                   autocomplete="off"
+                   {{ 'required' if required else '' }}>
+            
+            <!-- Clear button -->
+            <button type="button" 
+                    class="btn btn-sm btn-outline-secondary gateway-picker-clear" 
+                    title="Clear selection"
+                    {% if not selected_value %}style="display: none;"{% endif %}>
+                <i class="bi bi-x"></i>
+            </button>
+            
+            <!-- Dropdown for search results -->
+            <div class="gateway-picker-dropdown dropdown-menu">
+                <div class="gateway-picker-loading text-center p-3" style="display: none;">
+                    <div class="spinner-border spinner-border-sm" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <span class="ms-2">Searching gateways...</span>
+                </div>
+                <div class="gateway-picker-no-results text-center p-3 text-muted" style="display: none;">
+                    No gateways found
+                </div>
+                <div class="gateway-picker-results"></div>
+            </div>
+        </div>
+    </div>
+{% endmacro %} 

@@ -1,0 +1,82 @@
+<!-- Direct Receptions Chart Component -->
+<div class="card mb-4" id="direct-receptions-card" style="display: none;">
+    <div class="card-header">
+        <h5><i class="bi bi-wifi"></i> Direct Receptions</h5>
+        <small class="text-muted" id="direct-receptions-description">
+            Loading direct receptions data...
+        </small>
+    </div>
+    <div class="card-body">
+        <!-- Loading indicator -->
+        <div id="direct-receptions-loading" class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2 text-muted">Loading direct receptions data...</p>
+        </div>
+
+        <!-- Chart content (initially hidden) -->
+        <div id="direct-receptions-content" style="display: none;">
+        <div class="d-flex justify-content-between mb-2">
+            <!-- Direction toggle -->
+            <div class="btn-group btn-group-sm" role="group" aria-label="Direction selector" id="direction-toggle-group">
+                <button type="button" class="btn btn-outline-secondary active" data-direction="received">
+                    <i class="bi bi-arrow-down"></i> Received
+                </button>
+                <button type="button" class="btn btn-outline-secondary" data-direction="transmitted">
+                    <i class="bi bi-arrow-up"></i> Transmitted
+                </button>
+            </div>
+
+            <!-- Metric toggle -->
+            <div class="btn-group btn-group-sm" role="group" aria-label="Metric selector" id="metric-toggle-group">
+                <button type="button" class="btn btn-outline-primary active" data-metric="rssi">RSSI</button>
+                <button type="button" class="btn btn-outline-primary" data-metric="snr">SNR</button>
+            </div>
+        </div>
+        <div style="height: 400px; position: relative;">
+            <div id="direct-receptions-chart" style="width: 100%; height: 100%;"></div>
+        </div>
+        <small class="text-muted">
+            <i class="bi bi-info-circle"></i>
+            Drag to pan, scroll to zoom, double-click to reset zoom. Click points to view packet details.
+        </small>
+
+        <!-- Custom Legend Table -->
+        <div class="mt-3" id="direct-receptions-legend-container">
+            <h6>Node Statistics</h6>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <small class="text-muted">Click rows to toggle visibility.</small>
+                <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn btn-outline-secondary" id="select-all-nodes">Select All</button>
+                    <button type="button" class="btn btn-outline-secondary" id="deselect-all-nodes">Deselect All</button>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover" id="direct-receptions-legend">
+                    <thead>
+                        <tr>
+                            <th rowspan="2">Node</th>
+                            <th rowspan="2">Packets</th>
+                            <th colspan="3">RSSI (dBm)</th>
+                            <th colspan="3">SNR (dB)</th>
+                            <th rowspan="2">Visible</th>
+                        </tr>
+                        <tr>
+                            <th>Avg</th>
+                            <th>Min</th>
+                            <th>Max</th>
+                            <th>Avg</th>
+                            <th>Min</th>
+                            <th>Max</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,195 @@
+{# All Receptions Component #}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5><i class="bi bi-broadcast"></i> All Receptions</h5>
+        <small class="text-muted">All gateways that received this packet</small>
+        {% if correlation_method %}
+            <br><small class="badge bg-info">
+                Correlation:
+                {% if correlation_method == 'mesh_packet_id' %}
+                    <i class="bi bi-check-circle"></i> Using Mesh Packet ID
+                {% else %}
+                    <i class="bi bi-clock"></i> Time-based fallback
+                {% endif %}
+            </small>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        <!-- Reception Map -->
+        {% if reception_count > 1 %}
+        <div class="row mb-4">
+            <div class="col-12">
+                <h6><i class="bi bi-map"></i> Reception Locations</h6>
+                <div id="receptions-map" style="height: 400px; border: 1px solid #dee2e6; border-radius: 0.375rem;">
+                    <div class="d-flex align-items-center justify-content-center h-100">
+                        <div class="text-center">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2 text-muted">Loading reception map...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <small class="text-muted">
+                        <i class="bi bi-info-circle"></i>
+                        Map shows gateway locations that received this packet. Hop counts are displayed if available.
+                    </small>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Reception Table -->
+        <div class="table-responsive">
+            <table class="table table-sm table-striped">
+                <thead>
+                    <tr>
+                        <th>Gateway</th>
+                        <th>Time Offset</th>
+                        <th>RSSI</th>
+                        <th>SNR</th>
+                        <th>Hops</th>
+                        <th>Channel</th>
+                        <th>Timestamp</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Primary reception (main packet) -->
+                    <tr class="reception-primary">
+                        <td>
+                            {% if packet.gateway_id and packet.gateway_id != "Unknown Gateway" %}
+                                {{ node_link(packet.gateway_id, packet.gateway_name or packet.gateway_id) }}
+                                <span class="badge bg-success ms-2">Primary</span>
+                            {% else %}
+                                Unknown Gateway
+                                <span class="badge bg-success ms-2">Primary</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-primary">0.000s</span>
+                            <br><small class="text-muted">Reference</small>
+                        </td>
+                        <td>
+                            {% if packet.rssi %}
+                                <span class="signal-value">{{ packet.rssi }} dBm</span>
+                            {% else %}
+                                <span class="text-muted">Unknown</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if packet.snr %}
+                                <span class="signal-value">{{ packet.snr }} dB</span>
+                            {% else %}
+                                <span class="text-muted">Unknown</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if packet.hop_count is not none %}
+                                <span class="hop-badge">{{ packet.hop_count }}</span>
+                            {% else %}
+                                <span class="text-muted">Unknown</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="channel-badge">{{ packet.channel_id or "Unknown" }}</span>
+                        </td>
+                        <td>
+                            <small>{{ packet.timestamp_str }}</small>
+                        </td>
+                        <td>
+                            <span class="text-muted">Current</span>
+                        </td>
+                    </tr>
+
+                    <!-- Other receptions -->
+                    {% for reception in other_receptions %}
+                    <tr>
+                        <td>
+                            {% if reception.gateway_id and reception.gateway_id != "Unknown Gateway" %}
+                                {{ node_link(reception.gateway_id, reception.gateway_name or reception.gateway_id) }}
+                            {% else %}
+                                Unknown Gateway
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if reception.time_diff > 0 %}
+                                <span class="badge bg-info">+{{ "%.3f"|format(reception.time_diff) }}s</span>
+                            {% elif reception.time_diff < 0 %}
+                                <span class="badge bg-warning text-dark">{{ "%.3f"|format(reception.time_diff) }}s</span>
+                            {% else %}
+                                <span class="badge bg-secondary">0.000s</span>
+                            {% endif %}
+                            <br><small class="text-muted">
+                                {% if reception.time_diff > 0 %}After{% elif reception.time_diff < 0 %}Before{% else %}Same time{% endif %}
+                            </small>
+                        </td>
+                        <td>
+                            {% if reception.rssi %}
+                                <span class="signal-value">{{ reception.rssi }} dBm</span>
+                            {% else %}
+                                <span class="text-muted">Unknown</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if reception.snr %}
+                                <span class="signal-value">{{ reception.snr }} dB</span>
+                            {% else %}
+                                <span class="text-muted">Unknown</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if reception.hop_count is not none %}
+                                <span class="hop-badge">{{ reception.hop_count }}</span>
+                            {% else %}
+                                <span class="text-muted">Unknown</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="channel-badge">{{ reception.channel_id or "Unknown" }}</span>
+                        </td>
+                        <td>
+                            <small>{{ reception.timestamp_str }}</small>
+                        </td>
+                        <td>
+                            <a href="/packet/{{ reception.id }}" class="btn btn-sm btn-outline-primary" title="View this specific reception">
+                                <i class="bi bi-eye"></i> View
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+
+                    {% if not other_receptions %}
+                    <tr>
+                        <td colspan="8" class="text-center text-muted">
+                            <i class="bi bi-info-circle"></i>
+                            No other receptions found within ±2 seconds
+                        </td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Reception Summary -->
+        <div class="row mt-3">
+            <div class="col-md-6">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h5 class="card-title mb-1">{{ reception_count }}</h5>
+                        <p class="card-text text-muted mb-0">Total Receptions</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h5 class="card-title mb-1">{{ gateway_count }}</h5>
+                        <p class="card-text text-muted mb-0">Unique Gateways</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,53 @@
+{
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+
+    // Ruff configuration
+    "python.defaultInterpreterPath": "./.venv/bin/python",
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+        }
+    },
+
+    // Ruff extension settings
+    "ruff.enable": true,
+    "ruff.lint.enable": true,
+    "ruff.format.enable": true,
+    "ruff.organizeImports": true,
+    "ruff.fixAll": true,
+
+    // BasedPyright configuration
+    "python.analysis.typeCheckingMode": "standard",
+    "basedpyright.enable": true,
+    "pylsp.plugins.pycodestyle.enabled": false,
+    "pylsp.plugins.pyflakes.enabled": false,
+    "pylsp.plugins.mccabe.enabled": false,
+    "pylsp.plugins.pyls_isort.enabled": false,
+    "pylsp.plugins.yapf.enabled": false,
+    "pylsp.plugins.autopep8.enabled": false,
+
+    // Disable other formatters/linters to avoid conflicts
+    "python.linting.enabled": false,
+    "python.linting.pylintEnabled": false,
+    "python.linting.flake8Enabled": false,
+    "python.linting.mypyEnabled": false,
+    "black-formatter.enable": false,
+    "isort.enable": false,
+
+    // Editor settings
+    "editor.rulers": [88],
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "files.trimFinalNewlines": true,
+
+    // Cursor-specific settings
+    "cursor.cpp.disabledLanguages": [],
+    "cursor.general.enableCodeActions": true
+}

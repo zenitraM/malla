@@ -1,0 +1,600 @@
+{# Raw Packet Analysis Component #}
+{% if raw_analysis %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5><i class="bi bi-code-square"></i> Raw Packet Analysis</h5>
+        <small class="text-muted">Complete field breakdown and MQTT privacy/exposure analysis</small>
+    </div>
+    <div class="card-body">
+        <!-- Error handling -->
+        {% if raw_analysis.error %}
+            <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle"></i> Analysis Error: {{ raw_analysis.error }}
+            </div>
+            {% if raw_analysis.raw_hex %}
+                <h6>Raw Payload ({{ raw_analysis.size_bytes }} bytes):</h6>
+                <div class="payload-hex">{{ raw_analysis.raw_hex }}</div>
+            {% endif %}
+        {% else %}
+            <!-- Tabbed interface for different analysis sections -->
+            <ul class="nav nav-tabs" id="analysisTab" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview" type="button" role="tab">
+                        <i class="bi bi-info-circle"></i> Overview
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="service-envelope-tab" data-bs-toggle="tab" data-bs-target="#service-envelope" type="button" role="tab">
+                        <i class="bi bi-envelope"></i> ServiceEnvelope
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="mesh-packet-tab" data-bs-toggle="tab" data-bs-target="#mesh-packet" type="button" role="tab">
+                        <i class="bi bi-diagram-3"></i> MeshPacket
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="mqtt-privacy-tab" data-bs-toggle="tab" data-bs-target="#mqtt-privacy" type="button" role="tab">
+                        <i class="bi bi-shield-lock"></i> MQTT Privacy
+                    </button>
+                </li>
+                {% if payload_info and payload_info.data %}
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="payload-details-tab" data-bs-toggle="tab" data-bs-target="#payload-details" type="button" role="tab">
+                        <i class="bi bi-file-binary"></i> Payload Details
+                    </button>
+                </li>
+                {% endif %}
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="protobuf-json-tab" data-bs-toggle="tab" data-bs-target="#protobuf-json" type="button" role="tab">
+                        <i class="bi bi-code-square"></i> Protobuf JSON
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="raw-hex-tab" data-bs-toggle="tab" data-bs-target="#raw-hex" type="button" role="tab">
+                        <i class="bi bi-file-binary"></i> Raw Data
+                    </button>
+                </li>
+            </ul>
+
+            <div class="tab-content mt-3" id="analysisTabContent">
+                <!-- Overview Tab -->
+                <div class="tab-pane fade show active" id="overview" role="tabpanel">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <h6><i class="bi bi-diagram-3"></i> Packet Structure</h6>
+                            <div class="alert alert-info">
+                                <strong>MQTT Packet Flow:</strong><br>
+                                <code>ServiceEnvelope</code> (MQTT layer) → <code>MeshPacket</code> (Mesh layer) → <code>Decoded Payload</code> (Application data)
+                            </div>
+
+                            <table class="table table-sm">
+                                <tr><th>Total Size:</th><td>{{ raw_analysis.size_bytes }} bytes</td></tr>
+                                <tr><th>Gateway:</th><td>{{ raw_analysis.service_envelope.gateway_id or 'Unknown' }}</td></tr>
+                                <tr><th>Channel:</th><td>{{ raw_analysis.service_envelope.channel_id or 'Unknown' }}</td></tr>
+                                <tr><th>Payload Type:</th><td>{{ raw_analysis.mesh_packet.portnum_name or 'Unknown' }}</td></tr>
+                                <tr><th>Hop Count:</th><td>{{ raw_analysis.mesh_packet.hops_taken or 'Unknown' }} / {{ raw_analysis.mesh_packet.hop_start or 'Unknown' }}</td></tr>
+                            </table>
+                        </div>
+                        <div class="col-md-4">
+                            <h6><i class="bi bi-shield-check"></i> Privacy Summary</h6>
+                            <div class="card border-{% if raw_analysis.mqtt_privacy.exposure_level == 'Direct Message' %}success{% else %}warning{% endif %}">
+                                <div class="card-body p-2">
+                                    <strong>Exposure Level:</strong><br>
+                                    <span class="badge bg-{% if raw_analysis.mqtt_privacy.exposure_level == 'Direct Message' %}success{% else %}warning{% endif %}">
+                                        {{ raw_analysis.mqtt_privacy.exposure_level }}
+                                    </span>
+
+                                    {% if raw_analysis.mqtt_privacy.privacy_features %}
+                                    <div class="mt-2">
+                                        <small><strong>Privacy Features:</strong></small><br>
+                                        {% for feature in raw_analysis.mqtt_privacy.privacy_features[:2] %}
+                                            <small class="text-success">✓ {{ feature }}</small><br>
+                                        {% endfor %}
+                                        {% if raw_analysis.mqtt_privacy.privacy_features|length > 2 %}
+                                            <small class="text-muted">+ {{ raw_analysis.mqtt_privacy.privacy_features|length - 2 }} more...</small>
+                                        {% endif %}
+                                    </div>
+                                    {% endif %}
+
+                                    {% if raw_analysis.mqtt_privacy.exposure_risks %}
+                                    <div class="mt-2">
+                                        <small><strong>Exposure Risks:</strong></small><br>
+                                        {% for risk in raw_analysis.mqtt_privacy.exposure_risks[:2] %}
+                                            <small class="text-warning">⚠ {{ risk }}</small><br>
+                                        {% endfor %}
+                                        {% if raw_analysis.mqtt_privacy.exposure_risks|length > 2 %}
+                                            <small class="text-muted">+ {{ raw_analysis.mqtt_privacy.exposure_risks|length - 2 }} more...</small>
+                                        {% endif %}
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ServiceEnvelope Tab -->
+                <div class="tab-pane fade" id="service-envelope" role="tabpanel">
+                    <h6><i class="bi bi-envelope"></i> MQTT ServiceEnvelope Fields</h6>
+                    <p class="text-muted">{{ raw_analysis.service_envelope.description }}</p>
+
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr><th style="width: 30%;">Field</th><th style="width: 70%;">Value</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>gateway_id</code></td>
+                                <td>
+                                    {% if raw_analysis.service_envelope.gateway_id %}
+                                        <code>{{ raw_analysis.service_envelope.gateway_id }}</code>
+                                        {% if raw_analysis.service_envelope.gateway_id.startswith('!') %}
+                                            <br><small class="text-muted">Node ID format</small>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><code>channel_id</code></td>
+                                <td>
+                                    {% if raw_analysis.service_envelope.channel_id %}
+                                        <code>{{ raw_analysis.service_envelope.channel_id }}</code>
+                                        {% if raw_analysis.service_envelope.channel_id == 'LongFast' %}
+                                            <br><small class="text-warning">Default public channel</small>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><code>packet</code></td>
+                                <td>
+                                    <code>MeshPacket</code> ({{ raw_analysis.size_bytes }} bytes)
+                                    <br><small class="text-muted">Contains the actual mesh network packet</small>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- MeshPacket Tab -->
+                <div class="tab-pane fade" id="mesh-packet" role="tabpanel">
+                    <h6><i class="bi bi-diagram-3"></i> MeshPacket Fields</h6>
+                    <p class="text-muted">{{ raw_analysis.mesh_packet.description }}</p>
+
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr><th style="width: 30%;">Field</th><th style="width: 50%;">Value</th><th style="width: 20%;">Type</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>from</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.from_node_id %}
+                                        <code>{{ raw_analysis.mesh_packet.from_node_id }}</code>
+                                        <br><small class="text-muted">Source node ID</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>uint32</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>to</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.to_node_id %}
+                                        {% if raw_analysis.mesh_packet.to_node_id in [0, 4294967295] %}
+                                            <code>{{ raw_analysis.mesh_packet.to_node_id }}</code> (Broadcast)
+                                            <br><small class="text-warning">Visible to all nodes</small>
+                                        {% else %}
+                                            <code>{{ raw_analysis.mesh_packet.to_node_id }}</code>
+                                            <br><small class="text-muted">Target node ID</small>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>uint32</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>decoded.portnum</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.portnum %}
+                                        <code>{{ raw_analysis.mesh_packet.portnum }}</code>
+                                        {% if raw_analysis.mesh_packet.portnum_name %}
+                                            <br><small class="text-muted">{{ raw_analysis.mesh_packet.portnum_name }}</small>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>enum</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>decoded.payload_length</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.payload_length %}
+                                        <code>{{ raw_analysis.mesh_packet.payload_length }}</code> bytes
+                                    {% else %}
+                                        <span class="text-muted">0 bytes</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>size</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>hop_limit</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.hop_limit %}
+                                        <code>{{ raw_analysis.mesh_packet.hop_limit }}</code>
+                                        <br><small class="text-muted">Remaining hops allowed</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>uint32</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>hop_start</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.hop_start %}
+                                        <code>{{ raw_analysis.mesh_packet.hop_start }}</code>
+                                        <br><small class="text-muted">Initial hop limit</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>uint32</small></td>
+                            </tr>
+                            {% if raw_analysis.mesh_packet.hops_taken is defined %}
+                            <tr class="table-info">
+                                <td><code>hops_taken</code></td>
+                                <td>
+                                    <code>{{ raw_analysis.mesh_packet.hops_taken }}</code>
+                                    <br><small class="text-muted">Calculated: hop_start - hop_limit</small>
+                                </td>
+                                <td><small>derived</small></td>
+                            </tr>
+                            {% endif %}
+                            <tr>
+                                <td><code>rx_rssi</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.rssi %}
+                                        <code>{{ raw_analysis.mesh_packet.rssi }}</code> dBm
+                                        <br><small class="text-muted">Signal strength at gateway</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>int32</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>rx_snr</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.snr %}
+                                        <code>{{ raw_analysis.mesh_packet.snr }}</code> dB
+                                        <br><small class="text-muted">Signal quality at gateway</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>float</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>rx_time</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.rx_time %}
+                                        <code>{{ raw_analysis.mesh_packet.rx_time }}</code>
+                                        <br><small class="text-muted">Receive timestamp</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>fixed32</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>via_mqtt</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.via_mqtt %}
+                                        <span class="badge bg-warning">True</span>
+                                        <br><small class="text-muted">Packet came via MQTT</small>
+                                    {% else %}
+                                        <span class="badge bg-success">False</span>
+                                        <br><small class="text-muted">Direct LoRa transmission</small>
+                                    {% endif %}
+                                </td>
+                                <td><small>bool</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>want_ack</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.want_ack %}
+                                        <span class="badge bg-info">True</span>
+                                        <br><small class="text-muted">Acknowledgment requested</small>
+                                    {% else %}
+                                        <span class="badge bg-secondary">False</span>
+                                        <br><small class="text-muted">No ACK requested</small>
+                                    {% endif %}
+                                </td>
+                                <td><small>bool</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>priority</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.priority %}
+                                        <code>{{ raw_analysis.mesh_packet.priority }}</code>
+                                        <br><small class="text-muted">Packet priority level</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>enum</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>delayed</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.delayed %}
+                                        <code>{{ raw_analysis.mesh_packet.delayed }}</code>
+                                        <br><small class="text-muted">Delay status</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>enum</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>channel</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.channel_index %}
+                                        <code>{{ raw_analysis.mesh_packet.channel_index }}</code>
+                                        <br><small class="text-muted">Channel index</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>uint32</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>pki_encrypted</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.pki_encrypted %}
+                                        <span class="badge bg-success">True</span>
+                                        <br><small class="text-muted">PKI encryption used</small>
+                                    {% else %}
+                                        <span class="badge bg-secondary">False</span>
+                                        <br><small class="text-muted">Standard encryption</small>
+                                    {% endif %}
+                                </td>
+                                <td><small>bool</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>next_hop</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.next_hop %}
+                                        <code>{{ raw_analysis.mesh_packet.next_hop }}</code>
+                                        <br><small class="text-muted">Next hop node ID</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>uint32</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>relay_node</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.relay_node %}
+                                        <code>{{ raw_analysis.mesh_packet.relay_node }}</code>
+                                        <br><small class="text-muted">Relay node ID</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>uint32</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>tx_after</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.tx_after %}
+                                        <code>{{ raw_analysis.mesh_packet.tx_after }}</code>
+                                        <br><small class="text-muted">Transmission delay</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>uint32</small></td>
+                            </tr>
+                            <tr>
+                                <td><code>timestamp</code></td>
+                                <td>
+                                    {% if raw_analysis.mesh_packet.timestamp %}
+                                        <code>{{ raw_analysis.mesh_packet.timestamp }}</code>
+                                        <br><small class="text-muted">Unix timestamp</small>
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>uint32</small></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- MQTT Privacy Tab -->
+                <div class="tab-pane fade" id="mqtt-privacy" role="tabpanel">
+                    <h6><i class="bi bi-shield-lock"></i> MQTT Privacy & Exposure Analysis</h6>
+                    <p class="text-muted">Analysis of privacy features and exposure risks when packet is shared via MQTT</p>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card border-{% if raw_analysis.mqtt_privacy.exposure_level == 'Direct Message' %}success{% else %}warning{% endif %}">
+                                <div class="card-header">
+                                    <h6 class="mb-0">
+                                        <i class="bi bi-eye"></i> Exposure Level:
+                                        <span class="badge bg-{% if raw_analysis.mqtt_privacy.exposure_level == 'Direct Message' %}success{% else %}warning{% endif %}">
+                                            {{ raw_analysis.mqtt_privacy.exposure_level }}
+                                        </span>
+                                    </h6>
+                                </div>
+                                <div class="card-body">
+                                    {% if raw_analysis.mqtt_privacy.privacy_features %}
+                                        <h6 class="text-success"><i class="bi bi-shield-check"></i> Privacy Features:</h6>
+                                        <ul class="list-unstyled">
+                                            {% for feature in raw_analysis.mqtt_privacy.privacy_features %}
+                                                <li class="text-success">✓ {{ feature }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% endif %}
+
+                                    {% if raw_analysis.mqtt_privacy.exposure_risks %}
+                                        <h6 class="text-warning"><i class="bi bi-exclamation-triangle"></i> Exposure Risks:</h6>
+                                        <ul class="list-unstyled">
+                                            {% for risk in raw_analysis.mqtt_privacy.exposure_risks %}
+                                                <li class="text-warning">⚠ {{ risk }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6 class="mb-0"><i class="bi bi-gear"></i> MQTT-Specific Fields</h6>
+                                </div>
+                                <div class="card-body">
+                                    {% if raw_analysis.mqtt_privacy.mqtt_specific_fields %}
+                                        <table class="table table-sm">
+                                            {% for field, value in raw_analysis.mqtt_privacy.mqtt_specific_fields.items() %}
+                                                {% if field == 'signal_metrics' %}
+                                                    <tr>
+                                                        <td><strong>Signal Metrics:</strong></td>
+                                                        <td>
+                                                            {% if value.rssi %}RSSI: {{ value.rssi }} dBm<br>{% endif %}
+                                                            {% if value.snr %}SNR: {{ value.snr }} dB{% endif %}
+                                                        </td>
+                                                    </tr>
+                                                {% elif field == 'position_precision_bits' %}
+                                                    <tr>
+                                                        <td><strong>Position Precision:</strong></td>
+                                                        <td>
+                                                            {{ value }} bits
+                                                            {% if raw_analysis.mqtt_privacy.mqtt_specific_fields.position_precision_meters %}
+                                                                (~{{ raw_analysis.mqtt_privacy.mqtt_specific_fields.position_precision_meters }}m accuracy)
+                                                            {% endif %}
+                                                        </td>
+                                                    </tr>
+                                                {% elif field == 'zero_hop_policy' %}
+                                                    <tr>
+                                                        <td><strong>Zero Hop Policy:</strong></td>
+                                                        <td>
+                                                            {% if value %}
+                                                                <span class="badge bg-info">Enabled</span>
+                                                                <br><small class="text-muted">Direct gateway connection</small>
+                                                            {% else %}
+                                                                <span class="badge bg-secondary">Disabled</span>
+                                                            {% endif %}
+                                                        </td>
+                                                    </tr>
+                                                {% elif field == 'gateway_id' %}
+                                                    <tr>
+                                                        <td><strong>Gateway ID:</strong></td>
+                                                        <td><code>{{ value }}</code></td>
+                                                    </tr>
+                                                {% else %}
+                                                    <tr>
+                                                        <td><strong>{{ field|title|replace('_', ' ') }}:</strong></td>
+                                                        <td><code>{{ value }}</code></td>
+                                                    </tr>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </table>
+                                    {% else %}
+                                        <p class="text-muted">No MQTT-specific fields detected</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Payload Details Tab -->
+                {% if payload_info and payload_info.data %}
+                <div class="tab-pane fade" id="payload-details" role="tabpanel">
+                    <h6><i class="bi bi-file-binary"></i> Complete Payload Analysis</h6>
+                    <p class="text-muted">Detailed breakdown of all payload fields and decoded data</p>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Payload Metadata:</h6>
+                            <table class="table table-sm">
+                                <tr><th>Protocol:</th><td>{{ payload_info.portnum }}</td></tr>
+                                <tr><th>Size:</th><td>{{ payload_info.size }} bytes</td></tr>
+                                <tr><th>Decoded:</th><td>
+                                    {% if payload_info.decoded %}
+                                        <span class="badge bg-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge bg-warning">No</span>
+                                    {% endif %}
+                                </td></tr>
+                                {% if payload_info.error %}
+                                    <tr><th>Error:</th><td class="text-warning">{{ payload_info.error }}</td></tr>
+                                {% endif %}
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            {% if payload_info.text %}
+                            <h6>Text Content:</h6>
+                            <div class="payload-hex">{{ payload_info.text }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="mt-3">
+                        <h6>Complete Payload Data (JSON):</h6>
+                        <div class="yaml-content">{{ payload_info.data | safe_json(indent=2) }}</div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Protobuf JSON Tab -->
+                <div class="tab-pane fade" id="protobuf-json" role="tabpanel">
+                    <h6><i class="bi bi-code-square"></i> Complete Protobuf Decode (JSON)</h6>
+                    <div class="yaml-content">{{ raw_analysis.protobuf_fields | safe_json(indent=2) }}</div>
+
+                </div>
+
+                <!-- Raw Hex Tab -->
+                <div class="tab-pane fade" id="raw-hex" role="tabpanel">
+                    <h6><i class="bi bi-file-binary"></i> Raw Packet Data ({{ raw_analysis.size_bytes }} bytes)</h6>
+                    {% if raw_analysis.raw_hex %}
+                        <div class="payload-hex">{{ raw_analysis.raw_hex }}</div>
+                        <div class="mt-3">
+                            <h6>Hex Analysis:</h6>
+                            <table class="table table-sm">
+                                <tr><th>Size:</th><td>{{ raw_analysis.size_bytes }} bytes</td></tr>
+                                <tr><th>Format:</th><td>Protobuf (Protocol Buffers)</td></tr>
+                                <tr><th>Encoding:</th><td>Binary with varint and length-delimited fields</td></tr>
+                            </table>
+                            <div class="alert alert-info">
+                                <small>
+                                    <i class="bi bi-info-circle"></i>
+                                    This is the raw protobuf-encoded payload as received from MQTT.
+                                    The structure follows the Meshtastic protobuf schema definitions.
+                                </small>
+                            </div>
+                        </div>
+                    {% else %}
+                        <div class="alert alert-warning">
+                            <i class="bi bi-exclamation-triangle"></i> No raw packet data available
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}

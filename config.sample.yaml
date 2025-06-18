@@ -1,0 +1,45 @@
+# Sample configuration for Malla (rename to 'config.yaml' and adjust as needed)
+# All fields are optional – defaults are shown below. Each setting can also be
+# overridden via environment variables using the `MALLA_` prefix. For example,
+# to override `host`, set `MALLA_HOST=127.0.0.1`.
+
+# Display name shown in the navigation bar and browser title
+name: "Malla"
+
+# Markdown content rendered on the dashboard homepage
+home_markdown: |
+  # Welcome to Malla
+  This content is written in **Markdown** and will appear at the top of the
+  dashboard. You can use standard Markdown formatting.
+
+# Flask / server options ----------------------------------------------------
+
+# Secret key used by Flask for session signing (change for production!)
+secret_key: "dev-secret-key-change-in-production"
+
+# SQLite database file path (relative or absolute)
+database_file: "meshtastic_history.db"
+
+# Host interface and port for the web server
+host: "0.0.0.0"
+port: 5008
+
+# Enable Flask debug mode (do **not** use in production)
+debug: false
+
+# Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+# log_level: "INFO"
+
+# ---------------------------------------------------------------------------
+# MQTT capture settings (used by malla-capture)
+# ---------------------------------------------------------------------------
+
+# mqtt_broker_address: "127.0.0.1"
+# mqtt_port: 1883
+# mqtt_username: ""  # optional
+# mqtt_password: ""  # optional
+# mqtt_topic_prefix: "msh"
+# mqtt_topic_suffix: "/+/+/+/#"
+
+# Default channel key used for decrypting secondary channels (base64)
+# default_channel_key: "1PG7OiApB1nwvP+rz05pAQ=="

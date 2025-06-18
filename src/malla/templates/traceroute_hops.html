@@ -1,0 +1,869 @@
+{% extends "base.html" %}
+{% from "macros.html" import node_picker %}
+
+{% block title %}Traceroute RF Hop Analysis - Malla{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/node-picker.css') }}">
+<style>
+    .node-selector {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+    .hop-analysis-card {
+        border-left: 4px solid #0d6efd;
+    }
+    .signal-badge {
+        font-size: 0.8rem;
+    }
+    .distance-display {
+        font-weight: bold;
+        color: #0d6efd;
+    }
+    .no-data {
+        text-align: center;
+        padding: 2rem;
+        color: #6c757d;
+    }
+    .loading-spinner {
+        display: none;
+        text-align: center;
+        padding: 2rem;
+    }
+    .traceroute-item {
+        border-bottom: 1px solid #dee2e6;
+        padding: 0.75rem 0;
+    }
+    .traceroute-item:last-child {
+        border-bottom: none;
+    }
+    .chart-container {
+        height: 300px;
+        margin: 1rem 0;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1><i class="bi bi-broadcast-pin"></i> Traceroute RF Hop Analysis</h1>
+        <p class="text-muted">Analyze radio frequency hops between any two nodes using traceroute data</p>
+    </div>
+</div>
+
+<!-- Node Selection -->
+<div class="row">
+    <div class="col-md-6">
+        <div class="node-selector">
+            <h5><i class="bi bi-1-circle"></i> Select First Node</h5>
+            {{ node_picker(
+                field_name="node1",
+                field_id="node1-select",
+                label="",
+                selected_value="",
+                selected_display="",
+                placeholder="Choose first node..."
+            ) }}
+            <div id="node1-info" class="mt-2 text-muted"></div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="node-selector">
+            <h5><i class="bi bi-2-circle"></i> Select Second Node</h5>
+            <select id="node2-select" class="form-select">
+                <option value="">Choose second node...</option>
+            </select>
+            <div id="node2-info" class="mt-2 text-muted"></div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <button id="analyze-btn" class="btn btn-primary btn-lg" disabled>
+            <i class="bi bi-search"></i> Analyze RF Hop
+        </button>
+        <div class="loading-spinner" id="loading">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>Analyzing traceroute data...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Results Section -->
+<div id="results-section" style="display: none;">
+    <!-- Summary Card -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card hop-analysis-card">
+                <div class="card-header">
+                    <h5><i class="bi bi-bar-chart"></i> RF Hop Summary</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="text-center">
+                                <h3 id="total-hops" class="text-primary">-</h3>
+                                <small class="text-muted">Total Hops Seen</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center">
+                                <h3 id="avg-snr" class="text-success">-</h3>
+                                <small class="text-muted">Average SNR (dB)</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center">
+                                <h3 id="geo-distance" class="distance-display">-</h3>
+                                <small class="text-muted">Geographic Distance</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center">
+                                <h3 id="last-seen" class="text-info">-</h3>
+                                <small class="text-muted">Last Seen</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div id="direction-info"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Signal Quality Chart -->
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h6><i class="bi bi-graph-up"></i> SNR Over Time</h6>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="snr-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h6><i class="bi bi-pie-chart"></i> Direction Distribution</h6>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="direction-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Traceroute Details -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6><i class="bi bi-list-ul"></i> Individual Traceroutes</h6>
+                    <span id="traceroute-count" class="badge bg-primary">0</span>
+                </div>
+                <div class="card-body">
+                    <div id="traceroute-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- No Data Message -->
+<div id="no-data-section" class="no-data" style="display: none;">
+    <i class="bi bi-exclamation-triangle text-warning" style="font-size: 3rem;"></i>
+    <h4 class="mt-3">No RF Hop Data Found</h4>
+    <p>No traceroutes found containing a direct RF hop between these two nodes.<br>
+       This could mean they're not directly connected via radio frequency.</p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
+<script>
+    let availableNodes = [];
+    let relatedNodes = [];
+    let snrChart = null;
+    let directionChart = null;
+
+    // Load available nodes on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        loadAvailableNodes();
+        setupEventListeners();
+        
+        // Check for URL parameters and auto-select nodes if present
+        checkURLParameters();
+    });
+
+    function checkURLParameters() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const fromNode = urlParams.get('from_node');
+        const toNode = urlParams.get('to_node');
+        
+        if (fromNode && toNode) {
+            // Store the parameters to use after nodes are loaded
+            window.autoSelectNodes = {
+                fromNode: fromNode,
+                toNode: toNode
+            };
+        }
+    }
+
+    function setupEventListeners() {
+        const node1Input = document.getElementById('node1-select_value'); // Hidden input for node picker
+        const node2Select = document.getElementById('node2-select');
+        const analyzeBtn = document.getElementById('analyze-btn');
+
+        // Listen for changes on the hidden input (updated by node picker)
+        node1Input.addEventListener('change', function() {
+            updateNodeInfo('node1', this.value);
+            loadRelatedNodes(this.value);
+            checkAnalyzeButton();
+            updateURLFromSelections();
+        });
+
+        node2Select.addEventListener('change', function() {
+            updateNodeInfo('node2', this.value);
+            checkAnalyzeButton();
+            updateURLFromSelections();
+        });
+
+        analyzeBtn.addEventListener('click', function() {
+            analyzeHop();
+        });
+    }
+
+    function checkAnalyzeButton() {
+        const node1 = document.getElementById('node1-select_value').value; // Hidden input for node picker
+        const node2 = document.getElementById('node2-select').value;
+        const analyzeBtn = document.getElementById('analyze-btn');
+        
+        analyzeBtn.disabled = !node1 || !node2 || node1 === node2;
+    }
+
+    function loadAvailableNodes() {
+        fetch('/api/traceroute-hops/nodes')
+            .then(response => response.json())
+            .then(data => {
+                availableNodes = data.nodes;
+                populateNodeSelects();
+            })
+            .catch(error => {
+                console.error('Error loading nodes:', error);
+            });
+    }
+
+    function loadRelatedNodes(nodeId) {
+        const node2Select = document.getElementById('node2-select');
+        
+        if (!nodeId) {
+            // Reset to show all nodes
+            populateNode2Select(availableNodes);
+            return Promise.resolve();
+        }
+
+        // Show loading state
+        node2Select.innerHTML = '<option value="">Loading related nodes...</option>';
+        node2Select.disabled = true;
+
+        return fetch(`/api/traceroute/related-nodes/${nodeId}`)
+            .then(response => response.json())
+            .then(data => {
+                relatedNodes = data.related_nodes || [];
+                populateNode2Select(relatedNodes);
+                node2Select.disabled = false;
+                
+                // Update node1 info to show how many related nodes were found
+                updateNode1InfoWithRelatedCount(nodeId, relatedNodes.length);
+            })
+            .catch(error => {
+                console.error('Error loading related nodes:', error);
+                // Fallback to all nodes
+                populateNode2Select(availableNodes);
+                node2Select.disabled = false;
+            });
+    }
+
+    function populateNodeSelects() {
+        // Node1 is now handled by the node picker, so we don't need to populate it manually
+        // Just populate node2 with all nodes initially
+        populateNode2Select(availableNodes);
+        
+        // Auto-select nodes from URL parameters if present
+        if (window.autoSelectNodes) {
+            const { fromNode, toNode } = window.autoSelectNodes;
+            
+            // Convert node IDs to integers for comparison
+            const fromNodeInt = parseInt(fromNode);
+            const toNodeInt = parseInt(toNode);
+            
+            // Find and select the nodes
+            const fromNodeExists = availableNodes.find(n => n.node_id == fromNodeInt);
+            const toNodeExists = availableNodes.find(n => n.node_id == toNodeInt);
+            
+            if (fromNodeExists && toNodeExists) {
+                // Set the node picker value and display
+                const node1Input = document.getElementById('node1-select_value');
+                const node1Display = document.getElementById('node1-select');
+                node1Input.value = fromNodeInt;
+                node1Display.value = fromNodeExists.display_name;
+                
+                // Update node info displays
+                updateNodeInfo('node1', fromNodeInt);
+                
+                // Load related nodes for the first node, then select the second node
+                loadRelatedNodes(fromNodeInt).then(() => {
+                    const node2Select = document.getElementById('node2-select');
+                    node2Select.value = toNodeInt;
+                    updateNodeInfo('node2', toNodeInt);
+                    
+                    // Enable analyze button and trigger analysis
+                    checkAnalyzeButton();
+                    
+                    // Auto-trigger analysis after a short delay to ensure UI is ready
+                    setTimeout(() => {
+                        if (!document.getElementById('analyze-btn').disabled) {
+                            analyzeHop();
+                        }
+                    }, 500);
+                });
+                
+                // Clear the auto-select data
+                delete window.autoSelectNodes;
+            } else {
+                console.warn('One or both nodes from URL parameters not found in available nodes');
+                if (!fromNodeExists) console.warn('From node not found:', fromNode);
+                if (!toNodeExists) console.warn('To node not found:', toNode);
+            }
+        }
+    }
+
+    function populateNode2Select(nodes) {
+        const node2Select = document.getElementById('node2-select');
+        const currentValue = node2Select.value;
+
+        // Clear existing options (except the first one)
+        node2Select.innerHTML = '<option value="">Choose second node...</option>';
+
+        nodes.forEach(node => {
+            // Create option text with traceroute count if available
+            let optionText = node.display_name;
+            if (node.traceroute_count) {
+                optionText += ` (${node.traceroute_count} traceroutes)`;
+            }
+            
+            const option = new Option(optionText, node.node_id);
+            node2Select.add(option);
+        });
+
+        // Restore previous selection if it still exists
+        if (currentValue && nodes.find(n => n.node_id == currentValue)) {
+            node2Select.value = currentValue;
+        }
+    }
+
+    function updateNodeInfo(nodeType, nodeId) {
+        const infoDiv = document.getElementById(`${nodeType}-info`);
+        
+        if (!nodeId) {
+            infoDiv.innerHTML = '';
+            return;
+        }
+
+        const node = availableNodes.find(n => n.node_id == nodeId);
+        if (node) {
+            let info = `<strong>${node.hex_id}</strong>`;
+            if (node.location) {
+                info += ` • <i class="bi bi-geo-alt"></i> ${node.location.latitude.toFixed(4)}, ${node.location.longitude.toFixed(4)}`;
+            }
+            if (node.hw_model) {
+                info += ` • ${node.hw_model}`;
+            }
+            infoDiv.innerHTML = info;
+        }
+    }
+
+    function updateNode1InfoWithRelatedCount(nodeId, relatedCount) {
+        const infoDiv = document.getElementById('node1-info');
+        const node = availableNodes.find(n => n.node_id == nodeId);
+        
+        if (node) {
+            let info = `<strong>${node.hex_id}</strong>`;
+            if (node.location) {
+                info += ` • <i class="bi bi-geo-alt"></i> ${node.location.latitude.toFixed(4)}, ${node.location.longitude.toFixed(4)}`;
+            }
+            if (node.hw_model) {
+                info += ` • ${node.hw_model}`;
+            }
+            
+            // Add related nodes count
+            if (relatedCount > 0) {
+                info += ` • <i class="bi bi-diagram-3"></i> ${relatedCount} related nodes`;
+            } else {
+                info += ` • <i class="bi bi-exclamation-triangle text-warning"></i> No related nodes found`;
+            }
+            
+            infoDiv.innerHTML = info;
+        }
+    }
+
+    function analyzeHop() {
+        const node1Id = document.getElementById('node1-select_value').value; // Hidden input for node picker
+        const node2Id = document.getElementById('node2-select').value;
+
+        // Update URL with selected nodes
+        updateURL(node1Id, node2Id);
+
+        // Show loading
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('results-section').style.display = 'none';
+        document.getElementById('no-data-section').style.display = 'none';
+
+        // Fetch hop analysis data
+        fetch(`/api/traceroute/link/${node1Id}/${node2Id}`)
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('loading').style.display = 'none';
+                
+                if (data.traceroutes && data.traceroutes.length > 0) {
+                    try {
+                        displayResults(data);
+                    } catch (error) {
+                        console.error('Error displaying results:', error);
+                        alert('Error displaying results: ' + error.message);
+                        document.getElementById('no-data-section').style.display = 'block';
+                    }
+                } else {
+                    document.getElementById('no-data-section').style.display = 'block';
+                }
+            })
+            .catch(error => {
+                console.error('Error analyzing hop:', error);
+                document.getElementById('loading').style.display = 'none';
+                alert('Error analyzing hop: ' + error.message);
+                document.getElementById('no-data-section').style.display = 'block';
+            });
+    }
+
+    function updateURL(node1Id, node2Id) {
+        if (node1Id && node2Id) {
+            const url = new URL(window.location);
+            url.searchParams.set('from_node', node1Id);
+            url.searchParams.set('to_node', node2Id);
+            window.history.pushState({}, '', url);
+        }
+    }
+
+    function updateURLFromSelections() {
+        const node1Id = document.getElementById('node1-select_value').value; // Hidden input for node picker
+        const node2Id = document.getElementById('node2-select').value;
+        
+        if (node1Id && node2Id) {
+            updateURL(node1Id, node2Id);
+        } else {
+            // Clear URL parameters if nodes are not fully selected
+            const url = new URL(window.location);
+            url.searchParams.delete('from_node');
+            url.searchParams.delete('to_node');
+            window.history.pushState({}, '', url);
+        }
+    }
+
+    function getNodeDisplayInfo(nodeId) {
+        const node = availableNodes.find(n => n.node_id == nodeId);
+        if (node) {
+            return {
+                name: node.display_name,
+                hex_id: node.hex_id,
+                location: node.location,
+                hw_model: node.hw_model
+            };
+        }
+        return {
+            name: `Node !${parseInt(nodeId).toString(16).padStart(8, '0')}`,
+            hex_id: `!${parseInt(nodeId).toString(16).padStart(8, '0')}`,
+            location: null,
+            hw_model: null
+        };
+    }
+
+    function createNodeLink(nodeId, displayText, includeTooltip = true) {
+        const nodeInfo = getNodeDisplayInfo(nodeId);
+        let tooltip = '';
+        
+        if (includeTooltip) {
+            tooltip = `title="${nodeInfo.name}`;
+            if (nodeInfo.location) {
+                tooltip += `\nLocation: ${nodeInfo.location.latitude.toFixed(4)}, ${nodeInfo.location.longitude.toFixed(4)}`;
+            }
+            if (nodeInfo.hw_model) {
+                tooltip += `\nHardware: ${nodeInfo.hw_model}`;
+            }
+            tooltip += `\nClick to view details"`;
+        }
+        
+        return `<a href="/node/${nodeId}" ${tooltip} class="text-decoration-none">${displayText || nodeInfo.name}</a>`;
+    }
+
+    function formatNodeIdForDisplay(nodeId) {
+        const nodeInfo = getNodeDisplayInfo(nodeId);
+        // Extract just the short name and hex ID for compact display
+        const shortName = nodeInfo.name.split(' (')[0]; // Get name before hex ID if present
+        const hexId = nodeInfo.hex_id.substring(1, 5); // Get first 4 chars after !
+        return `${shortName} (${hexId})`;
+    }
+
+    function displayResults(data) {
+        document.getElementById('results-section').style.display = 'block';
+
+        // Update summary
+        document.getElementById('total-hops').textContent = data.total_attempts;
+        document.getElementById('avg-snr').textContent = data.avg_snr ? `${data.avg_snr.toFixed(1)}` : 'N/A';
+        document.getElementById('last-seen').textContent = getRelativeTime(data.traceroutes[0]?.timestamp);
+
+        // Calculate and display geographic distance
+        const geoDistance = calculateGeoDistance(data.from_node_id, data.to_node_id);
+        document.getElementById('geo-distance').textContent = geoDistance;
+
+        // Display direction information with proper node formatting
+        displayDirectionInfo(data.direction_counts, data.from_node_id, data.to_node_id);
+
+        // Update charts
+        updateSNRChart(data.traceroutes);
+        updateDirectionChart(data.direction_counts);
+
+        // Display traceroute list
+        displayTracerouteList(data.traceroutes, data.from_node_name, data.to_node_name);
+        document.getElementById('traceroute-count').textContent = data.traceroutes.length;
+    }
+
+    function calculateGeoDistance(node1Id, node2Id) {
+        const node1 = availableNodes.find(n => n.node_id == node1Id);
+        const node2 = availableNodes.find(n => n.node_id == node2Id);
+
+        if (!node1?.location || !node2?.location) {
+            return 'N/A';
+        }
+
+        const lat1 = node1.location.latitude;
+        const lon1 = node1.location.longitude;
+        const lat2 = node2.location.latitude;
+        const lon2 = node2.location.longitude;
+
+        // Haversine formula
+        const R = 6371; // Earth's radius in km
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        const distance = R * c;
+
+        if (distance < 1) {
+            return `${(distance * 1000).toFixed(0)}m`;
+        } else {
+            return `${distance.toFixed(2)}km`;
+        }
+    }
+
+    function displayDirectionInfo(directionCounts, fromNodeId, toNodeId) {
+        const directionDiv = document.getElementById('direction-info');
+        
+        // Create formatted node links for the direction display
+        const fromNodeLink = createNodeLink(fromNodeId, formatNodeIdForDisplay(fromNodeId));
+        const toNodeLink = createNodeLink(toNodeId, formatNodeIdForDisplay(toNodeId));
+        
+        let html = `<strong>Link Analysis:</strong> `;
+        html += `${fromNodeLink} ↔ ${toNodeLink}<br>`;
+        
+        const directions = Object.keys(directionCounts);
+        if (directions.length > 1) {
+            html += '<span class="badge bg-success signal-badge">Bidirectional Link</span>';
+        } else if (directions.length === 1) {
+            html += '<span class="badge bg-warning signal-badge">Unidirectional Link</span>';
+        } else {
+            html += '<span class="badge bg-secondary signal-badge">No Data</span>';
+        }
+        
+        // Show traffic distribution if bidirectional
+        if (directions.length > 1) {
+            html += '<br><small class="text-muted mt-1 d-block">';
+            directions.forEach(direction => {
+                const count = directionCounts[direction];
+                const percentage = (count / Object.values(directionCounts).reduce((a, b) => a + b, 0) * 100).toFixed(1);
+                html += `${direction}: ${count} traceroutes (${percentage}%)<br>`;
+            });
+            html += '</small>';
+        }
+        
+        directionDiv.innerHTML = html;
+    }
+
+    function updateSNRChart(traceroutes) {
+        const ctx = document.getElementById('snr-chart').getContext('2d');
+        
+        if (snrChart) {
+            snrChart.destroy();
+            snrChart = null;
+        }
+
+        const data = traceroutes
+            .filter(tr => tr.hop_snr !== null)
+            .map(tr => ({
+                x: tr.timestamp_str,
+                y: tr.hop_snr
+            }))
+            .reverse(); // Show most recent first
+
+        snrChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: data.map(d => d.x),
+                datasets: [{
+                    label: 'SNR (dB)',
+                    data: data.map(d => d.y),
+                    borderColor: '#0d6efd',
+                    backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                    tension: 0.1,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        },
+                        ticks: {
+                            maxTicksLimit: 10,
+                            callback: function(value, index, values) {
+                                // Show only every nth label to avoid crowding
+                                const step = Math.ceil(data.length / 8);
+                                return index % step === 0 ? this.getLabelForValue(value) : '';
+                            }
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'SNR (dB)'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: function(context) {
+                                return data[context[0].dataIndex].x;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function updateDirectionChart(directionCounts) {
+        const ctx = document.getElementById('direction-chart').getContext('2d');
+        
+        if (directionChart) {
+            directionChart.destroy();
+            directionChart = null;
+        }
+
+        const labels = Object.keys(directionCounts);
+        const data = Object.values(directionCounts);
+
+        directionChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: [
+                        '#0d6efd',
+                        '#6f42c1',
+                        '#20c997',
+                        '#fd7e14'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+    }
+
+    function displayTracerouteList(traceroutes, fromNodeName, toNodeName) {
+        const listDiv = document.getElementById('traceroute-list');
+        
+        if (traceroutes.length === 0) {
+            listDiv.innerHTML = '<p class="text-muted">No traceroutes found.</p>';
+            return;
+        }
+
+        let html = '';
+        traceroutes.forEach((tr, index) => {
+            const snrBadgeClass = getSNRBadgeClass(tr.hop_snr);
+            const snrText = tr.hop_snr !== null ? `${tr.hop_snr.toFixed(1)} dB` : 'N/A';
+            
+            // Create route display using structured data
+            let routeDisplay = '';
+            if (tr.route_hops && tr.route_hops.length > 0) {
+                // Filter out the last hop if it has no SNR (indicating it's incomplete)
+                const hopsToShow = tr.route_hops.filter((hop, hopIndex) => {
+                    // If this is the last hop and it has no SNR, it's likely incomplete
+                    if (hopIndex === tr.route_hops.length - 1 && (hop.snr === null || hop.snr === undefined)) {
+                        return false; // Exclude incomplete final hop
+                    }
+                    return true;
+                });
+                
+                routeDisplay = '<div class="table-responsive"><table class="table table-sm table-borderless mb-0" style="font-size: 0.85em;">';
+                routeDisplay += '<thead><tr class="text-muted" style="font-size: 0.75em;">';
+                routeDisplay += '<th style="width: 12%;">Hop</th>';
+                routeDisplay += '<th style="width: 30%;">From</th>';
+                routeDisplay += '<th style="width: 30%;">To</th>';
+                routeDisplay += '<th style="width: 13%;">SNR</th>';
+                routeDisplay += '<th style="width: 15%;">Direction</th>';
+                routeDisplay += '</tr></thead><tbody>';
+                
+                hopsToShow.forEach(hop => {
+                    const rowClass = hop.is_target_hop ? 'table-primary' : '';
+                    const fontWeight = hop.is_target_hop ? 'font-weight: bold; color: #0d6efd;' : '';
+                    
+                    let snrDisplay = '—';
+                    if (hop.snr !== null && hop.snr !== undefined) {
+                        const snrClass = hop.snr >= 0 ? 'text-success' : 'text-danger';
+                        snrDisplay = `<span class="${snrClass}">${hop.snr.toFixed(1)}</span>`;
+                    }
+                    
+                    // Create node links with proper formatting
+                    const fromNodeLink = createNodeLink(hop.from_node_id, hop.from_node_name);
+                    const toNodeLink = createNodeLink(hop.to_node_id, hop.to_node_name);
+                    
+                    // Format direction display
+                    let directionDisplay = '—';
+                    if (hop.direction) {
+                        if (hop.direction === 'forward_rf') {
+                            directionDisplay = '<span class="badge bg-primary" style="font-size: 0.7em;">Forward</span>';
+                        } else if (hop.direction === 'return_rf') {
+                            directionDisplay = '<span class="badge bg-success" style="font-size: 0.7em;">Return</span>';
+                        } else {
+                            directionDisplay = `<span class="badge bg-secondary" style="font-size: 0.7em;">${hop.direction}</span>`;
+                        }
+                    }
+                    
+                    routeDisplay += `<tr class="${rowClass}">`;
+                    routeDisplay += `<td><small class="text-muted">#${hop.hop_number}</small></td>`;
+                    routeDisplay += `<td style="${fontWeight}"><small>${fromNodeLink}</small></td>`;
+                    routeDisplay += `<td style="${fontWeight}"><small>${toNodeLink}</small></td>`;
+                    routeDisplay += `<td><small>${snrDisplay}</small></td>`;
+                    routeDisplay += `<td><small>${directionDisplay}</small></td>`;
+                    routeDisplay += '</tr>';
+                });
+                
+                // Add warning row if we filtered out incomplete hops
+                if (hopsToShow.length < tr.route_hops.length) {
+                    const filteredHop = tr.route_hops[tr.route_hops.length - 1];
+                    const destinationNodeLink = createNodeLink(filteredHop.to_node_id, filteredHop.to_node_name, false);
+                    routeDisplay += `<tr class="table-warning">`;
+                    routeDisplay += `<td colspan="5" class="text-center" style="font-size: 0.8em;">`;
+                    routeDisplay += `<i class="bi bi-exclamation-triangle"></i> `;
+                    routeDisplay += `<strong>Incomplete</strong> - Last hop to ${destinationNodeLink} not confirmed`;
+                    routeDisplay += `</td></tr>`;
+                }
+                
+                routeDisplay += '</tbody></table></div>';
+            } else {
+                // Fallback to complete_path_display if route_hops not available
+                routeDisplay = tr.complete_path_display || 'Route data unavailable';
+            }
+            
+            html += `
+                <div class="card mb-2">
+                    <div class="card-body p-3">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <div class="d-flex align-items-center">
+                                    <span class="badge ${snrBadgeClass} me-2">${snrText}</span>
+                                    <small class="text-muted">${getRelativeTime(tr.timestamp)}</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4 text-md-end">
+                                <div class="d-flex flex-column align-items-end">
+                                    <small class="text-muted mb-1">
+                                        <strong>From:</strong> ${createNodeLink(tr.from_node_id, tr.from_node_name)} 
+                                        ${tr.gateway_node_name ? `(via ${tr.gateway_node_name})` : ''}
+                                    </small>
+                                    <small class="text-muted mb-1">
+                                        <strong>To:</strong> ${createNodeLink(tr.to_node_id, tr.to_node_name)}
+                                    </small>
+                                    ${tr.id ? `<a href="/packet/${tr.id}" class="btn btn-sm btn-outline-primary" title="View packet details">
+                                        <i class="bi bi-info-circle"></i> Packet Details
+                                    </a>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            ${routeDisplay}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        listDiv.innerHTML = html;
+        
+        // Re-initialize tooltips for the new content
+        reinitializeTooltips();
+    }
+
+    function getSNRBadgeClass(snr) {
+        if (snr === null || snr === undefined) return 'bg-secondary';
+        if (snr >= 5) return 'bg-success';
+        if (snr >= 0) return 'bg-warning';
+        return 'bg-danger';
+    }
+
+    function getRelativeTime(timestamp) {
+        const now = Date.now() / 1000;
+        const diff = now - timestamp;
+        
+        if (diff < 60) return 'Just now';
+        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+        if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+        return `${Math.floor(diff / 86400)}d ago`;
+    }
+</script>
+{% endblock %} 

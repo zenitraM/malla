@@ -1,0 +1,792 @@
+{% extends "base.html" %}
+{% from "macros.html" import node_link, node_badge, gateway_link, protocol_badge, signal_indicator %}
+
+{% block title %}{{ node.node_name }} - Node Details{% endblock %}
+
+{% block extra_css %}
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    .card-metric {
+        text-align: center;
+    }
+    .metric-value {
+        font-size: 2rem;
+        font-weight: bold;
+    }
+    .metric-label {
+        color: #6c757d;
+        font-size: 0.875rem;
+    }
+    .signal-indicator {
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: bold;
+    }
+    .signal-excellent { background-color: #d4edda; color: #155724; }
+    .signal-good { background-color: #fff3cd; color: #856404; }
+    .signal-fair { background-color: #f8d7da; color: #721c24; }
+    .signal-poor { background-color: #f5c6cb; color: #721c24; }
+    .protocol-badge {
+        font-size: 0.75rem;
+        padding: 4px 8px;
+    }
+    .neighbor-card {
+        border-left: 4px solid #007bff;
+        margin-bottom: 0.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="/">Home</a></li>
+                    <li class="breadcrumb-item"><a href="/nodes">Nodes</a></li>
+                    <li class="breadcrumb-item active">{{ node.node_name }}</li>
+                </ol>
+            </nav>
+            <h1>
+                <i class="bi bi-router"></i> {{ node.node_name }}
+                {% if node.last_seen_relative == "Just now" or "minute" in node.last_seen_relative %}
+                    <span class="badge bg-success">Online</span>
+                {% elif "hour" in node.last_seen_relative %}
+                    <span class="badge bg-warning">Recent</span>
+                {% else %}
+                    <span class="badge bg-secondary">Offline</span>
+                {% endif %}
+            </h1>
+            <p class="text-muted">
+                Node ID: {{ node.hex_id }} ({{ node.node_id }})
+                • Last seen: {{ node.last_seen_relative }}
+            </p>
+        </div>
+    </div>
+
+    <!-- Overview Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card card-metric">
+                <div class="card-body">
+                    <div class="metric-value">{{ node.total_packets }}</div>
+                    <div class="metric-label">Total Packets</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card card-metric">
+                <div class="card-body">
+                    <div class="metric-value">{{ node.unique_destinations or 0 }}</div>
+                    <div class="metric-label">Destinations</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card card-metric">
+                <div class="card-body">
+                    <div class="metric-value">
+                        {% if node.avg_rssi %}{{ node.avg_rssi }}{% else %}?{% endif %}
+                    </div>
+                    <div class="metric-label">Avg RSSI (dBm)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card card-metric">
+                <div class="card-body">
+                    <div class="metric-value">
+                        {% if node.avg_hops %}{{ node.avg_hops }}{% else %}?{% endif %}
+                    </div>
+                    <div class="metric-label">Avg Hops</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Node Information -->
+        <div class="col-lg-8">
+            <!-- Basic Information -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5><i class="bi bi-info-circle"></i> Node Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Node Name:</th>
+                                    <td><strong>{{ node.node_name }}</strong></td>
+                                </tr>
+                                <tr>
+                                    <th>Node ID (Hex):</th>
+                                    <td><code>{{ node.hex_id }}</code></td>
+                                </tr>
+                                <tr>
+                                    <th>Node ID (Dec):</th>
+                                    <td><code>{{ node.node_id }}</code></td>
+                                </tr>
+                                {% if node.hw_model %}
+                                <tr>
+                                    <th>Hardware Model:</th>
+                                    <td>{{ node.hw_model }}</td>
+                                </tr>
+                                {% endif %}
+                                {% if node.role %}
+                                <tr>
+                                    <th>Role:</th>
+                                    <td>{{ node.role }}</td>
+                                </tr>
+                                {% endif %}
+                                {% if node.mac_address %}
+                                <tr>
+                                    <th>MAC Address:</th>
+                                    <td><code>{{ node.mac_address }}</code></td>
+                                </tr>
+                                {% endif %}
+                                <tr>
+                                    <th>First Seen:</th>
+                                    <td>{{ node.first_seen }}</td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Last Seen:</th>
+                                    <td>{{ node.last_seen }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Avg Signal:</th>
+                                    <td>
+                                        {% if node.avg_rssi %}
+                                            {% if node.avg_rssi >= -60 %}
+                                                <span class="signal-indicator signal-excellent">{{ node.avg_rssi }} dBm</span>
+                                            {% elif node.avg_rssi >= -70 %}
+                                                <span class="signal-indicator signal-good">{{ node.avg_rssi }} dBm</span>
+                                            {% elif node.avg_rssi >= -80 %}
+                                                <span class="signal-indicator signal-fair">{{ node.avg_rssi }} dBm</span>
+                                            {% else %}
+                                                <span class="signal-indicator signal-poor">{{ node.avg_rssi }} dBm</span>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="text-muted">Unknown</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Avg SNR:</th>
+                                    <td>
+                                        {% if node.avg_snr %}
+                                            {% if node.avg_snr > 5 %}
+                                                <span class="signal-indicator signal-excellent">{{ node.avg_snr }} dB</span>
+                                            {% elif node.avg_snr > 0 %}
+                                                <span class="signal-indicator signal-good">{{ node.avg_snr }} dB</span>
+                                            {% else %}
+                                                <span class="signal-indicator signal-poor">{{ node.avg_snr }} dB</span>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="text-muted">Unknown</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Firmware Version:</th>
+                                    <td>
+                                        <span class="text-muted">Not available</span>
+                                        <i class="bi bi-info-circle text-muted ms-1"
+                                           data-bs-toggle="tooltip"
+                                           data-bs-placement="top"
+                                           title="Firmware version information is not transmitted in standard nodeinfo packets. It would require admin access to query device metadata."></i>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Unique Gateways:</th>
+                                    <td>{{ node.unique_gateways }}</td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Location Information -->
+            {% if location %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5><i class="bi bi-geo-alt"></i> Location Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Latitude:</th>
+                                    <td>{{ "%.6f"|format(location.latitude) }}°</td>
+                                </tr>
+                                <tr>
+                                    <th>Longitude:</th>
+                                    <td>{{ "%.6f"|format(location.longitude) }}°</td>
+                                </tr>
+                                {% if location.altitude %}
+                                <tr>
+                                    <th>Altitude:</th>
+                                    <td>{{ location.altitude }} m</td>
+                                </tr>
+                                {% endif %}
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Location Updated:</th>
+                                    <td>{{ location.timestamp }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Time Ago:</th>
+                                    <td>{{ location.timestamp_relative }}</td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Current Location Map -->
+                    <div class="mt-3">
+                        <div id="current-location-map" style="height: 300px; border: 1px solid #dee2e6; border-radius: 0.375rem; margin-bottom: 15px;"></div>
+                        <a href="https://www.google.com/maps?q={{ location.latitude }},{{ location.longitude }}"
+                           target="_blank" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-map"></i> View on Google Maps
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Location History Map -->
+            <div class="card mb-4" id="location-history-card" style="display: none;">
+                <div class="card-header">
+                    <h5><i class="bi bi-map"></i> Location History Map</h5>
+                    <small class="text-muted">Historical GPS coordinates sent by this node</small>
+                </div>
+                <div class="card-body">
+                    <div id="location-history-map" style="height: 400px; border: 1px solid #dee2e6; border-radius: 0.375rem;">
+                        <div class="d-flex align-items-center justify-content-center h-100">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-2 text-muted">Loading location history...</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <small class="text-muted">
+                                    <i class="bi bi-info-circle"></i>
+                                    Map shows historical GPS coordinates reported by this node.
+                                    Recent locations are shown in <span style="color: #28a745;">green</span>,
+                                    older locations in <span style="color: #dc3545;">red</span>.
+                                    Click markers for details.
+                                </small>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <small class="text-muted" id="location-count">
+                                    Loading location data...
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Direct Receptions Graph (Gateway only) -->
+            {% include "components/direct_receptions.html" %}
+
+            <!-- Protocol Breakdown -->
+            {% if protocols %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5><i class="bi bi-graph-up"></i> Protocol Usage</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Protocol</th>
+                                    <th>Count</th>
+                                    <th>Percentage</th>
+                                    <th>Avg RSSI</th>
+                                    <th>Avg SNR</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for protocol in protocols %}
+                                <tr>
+                                    <td>
+                                        <span class="badge bg-secondary protocol-badge">{{ protocol.protocol }}</span>
+                                    </td>
+                                    <td>{{ protocol.count }}</td>
+                                    <td>
+                                        {% set percentage = (protocol.count / node.total_packets * 100) %}
+                                        {% set percentage_str = "%.1f"|format(percentage) %}
+                                        {{ percentage_str }}%
+                                        <div class="progress" style="height: 8px;">
+                                            <div class="progress-bar" data-width="{{ percentage_str }}"></div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        {% if protocol.avg_rssi %}
+                                            {{ protocol.avg_rssi }} dBm
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if protocol.avg_snr %}
+                                            {{ protocol.avg_snr }} dB
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Recent Packets -->
+            {% if recent_packets %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5><i class="bi bi-clock-history"></i> Recent Packets</h5>
+                    <small class="text-muted">Last 20 packets from this node</small>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Protocol</th>
+                                    <th>To Node</th>
+                                    <th>Gateway</th>
+                                    <th>RSSI</th>
+                                    <th>SNR</th>
+                                    <th>Hops</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for packet in recent_packets %}
+                                <tr>
+                                    <td>
+                                        <small>{{ packet.timestamp_relative }}</small>
+                                    </td>
+                                    <td>
+                                        {{ protocol_badge(packet.protocol) }}
+                                    </td>
+                                    <td>
+                                        {% if packet.to_node_id %}
+                                            {{ node_link(packet.to_node_id, packet.to_node_name) }}
+                                        {% else %}
+                                            {{ packet.to_node_name or "Unknown" }}
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if packet.is_grouped %}
+                                            <span class="text-info">{{ packet.gateway_display }}</span>
+                                            {% if packet.gateway_list %}
+                                                <i class="bi bi-info-circle text-muted"
+                                                   data-bs-toggle="tooltip"
+                                                   data-bs-placement="top"
+                                                   title="Gateways: {{ packet.gateway_list|join(', ') }}"></i>
+                                            {% endif %}
+                                        {% else %}
+                                            {% if packet.gateway_node_id %}
+                                                {{ node_link(packet.gateway_node_id, packet.gateway_name) }}
+                                            {% else %}
+                                                {{ packet.gateway_id or "Unknown" }}
+                                            {% endif %}
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if packet.rssi %}
+                                            {% if packet.is_grouped %}
+                                                <span class="text-info">{{ packet.rssi }}</span>
+                                            {% else %}
+                                                {{ packet.rssi }} dBm
+                                            {% endif %}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if packet.snr %}
+                                            {% if packet.is_grouped %}
+                                                <span class="text-info">{{ packet.snr }}</span>
+                                            {% else %}
+                                                {{ packet.snr }} dB
+                                            {% endif %}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if packet.hop_count is not none %}
+                                            {{ packet.hop_count }}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <a href="/packet/{{ packet.id }}" class="btn btn-sm btn-outline-primary">View</a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-3">
+                        <a href="/packets?from_node={{ node.node_id }}" class="btn btn-outline-primary">
+                            <i class="bi bi-box"></i> View All Packets from This Node
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Neighbors & Analytics -->
+        <div class="col-lg-4">
+            <!-- Received Gateways -->
+            {% if received_gateways %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5><i class="bi bi-broadcast"></i> Received Gateways</h5>
+                    <small class="text-muted">Gateways that have received packets from this node</small>
+                </div>
+                <div class="card-body">
+                    {% for gateway in received_gateways %}
+                    <div class="neighbor-card card">
+                        <div class="card-body p-2">
+                            <h6 class="card-title mb-1">
+                                {% if gateway.gateway_node_id %}
+                                    {{ node_link(gateway.gateway_node_id, gateway.display_name) }}
+                                {% else %}
+                                    {{ gateway.display_name }}
+                                {% endif %}
+                                {% if gateway.is_direct %}
+                                    <span class="badge bg-success ms-1" title="Direct connection (0 hops)">Direct</span>
+                                {% endif %}
+                            </h6>
+                            <div class="row">
+                                <div class="col-6">
+                                    <small><strong>Packets:</strong> {{ gateway.packet_count }}</small>
+                                </div>
+                                <div class="col-6">
+                                    <small><strong>Hops:</strong> {{ gateway.hop_display }}</small>
+                                </div>
+                            </div>
+                            <div class="row mt-1">
+                                <div class="col-6">
+                                    <small><strong>Last:</strong> {{ gateway.last_received_relative }}</small>
+                                </div>
+                                <div class="col-6">
+                                    {% if gateway.is_direct and gateway.direct_packet_count > 0 %}
+                                        <small><strong>Direct:</strong> {{ gateway.direct_packet_count }} pkts</small>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% if gateway.avg_rssi or gateway.avg_snr %}
+                            <div class="row mt-1">
+                                <div class="col-6">
+                                    {% if gateway.avg_rssi %}
+                                        <small><strong>RSSI:</strong> {{ gateway.avg_rssi }} dBm</small>
+                                        {% if gateway.is_direct %}
+                                            <i class="bi bi-info-circle text-muted"
+                                               data-bs-toggle="tooltip"
+                                               title="Signal strength for direct connections (0 hops)"></i>
+                                        {% endif %}
+                                    {% endif %}
+                                </div>
+                                <div class="col-6">
+                                    {% if gateway.avg_snr %}
+                                        <small><strong>SNR:</strong> {{ gateway.avg_snr }} dB</small>
+                                        {% if gateway.is_direct %}
+                                            <i class="bi bi-info-circle text-muted"
+                                               data-bs-toggle="tooltip"
+                                               title="Signal quality for direct connections (0 hops)"></i>
+                                        {% endif %}
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Quick Actions -->
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="bi bi-lightning"></i> Quick Actions</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        <a href="/packets?from_node={{ node.node_id }}" class="btn btn-outline-primary">
+                            <i class="bi bi-box"></i> View All Packets
+                        </a>
+                        {% if location %}
+                        <a href="/map?highlight={{ node.node_id }}" class="btn btn-outline-info">
+                            <i class="bi bi-map"></i> View on Map
+                        </a>
+                        {% endif %}
+                        <a href="/traceroute?from_node={{ node.node_id }}" class="btn btn-outline-warning">
+                            <i class="bi bi-route"></i> View Traceroutes
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Direct Receptions Chart Component -->
+<script src="{{ url_for('static', filename='js/direct_receptions.js') }}"></script>
+
+<!-- Location data for JavaScript -->
+{% if location %}
+<script id="location-data" type="application/json">
+{
+    "latitude": {{ location.latitude }},
+    "longitude": {{ location.longitude }},
+    {% if location.altitude %}"altitude": {{ location.altitude }},{% endif %}
+    "timestamp": "{{ location.timestamp }}",
+    "timestamp_relative": "{{ location.timestamp_relative }}",
+    "node_name": "{{ node.node_name }}"
+}
+</script>
+{% endif %}
+
+<script data-node-id="{{ node.node_id }}">
+document.addEventListener('DOMContentLoaded', function() {
+    // Set progress bar widths from data attributes
+    document.querySelectorAll('.progress-bar[data-width]').forEach(function(bar) {
+        const width = bar.getAttribute('data-width');
+        bar.style.width = width + '%';
+    });
+
+    // Load current location map if location data exists
+    loadCurrentLocationMap();
+
+    // Load location history map
+    loadLocationHistoryMap();
+});
+
+function loadCurrentLocationMap() {
+    const currentLocationContainer = document.getElementById('current-location-map');
+    if (!currentLocationContainer) {
+        return; // No current location data available
+    }
+
+    // Get location data from the JSON script tag
+    const locationDataScript = document.getElementById('location-data');
+    if (!locationDataScript) {
+        return; // No location data available
+    }
+
+    const currentLocation = JSON.parse(locationDataScript.textContent);
+
+    // Initialize map centered on current location
+    const currentMap = L.map('current-location-map').setView([
+        currentLocation.latitude,
+        currentLocation.longitude
+    ], 15);
+
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(currentMap);
+
+    // Add marker for current location
+    const marker = L.marker([currentLocation.latitude, currentLocation.longitude]).addTo(currentMap);
+
+    // Create popup content
+    const popupContent = `
+        <div>
+            <strong>${currentLocation.node_name}</strong><br>
+            <strong>Current Location</strong><br>
+            <strong>Coordinates:</strong> ${currentLocation.latitude.toFixed(6)}, ${currentLocation.longitude.toFixed(6)}<br>
+            ${currentLocation.altitude ? `<strong>Altitude:</strong> ${currentLocation.altitude}m<br>` : ''}
+            <strong>Updated:</strong> ${currentLocation.timestamp_relative}<br>
+            <small><strong>Recorded:</strong> ${currentLocation.timestamp}</small>
+        </div>
+    `;
+    marker.bindPopup(popupContent).openPopup();
+}
+
+async function loadLocationHistoryMap() {
+    const scriptTag = document.querySelector('script[data-node-id]');
+    const nodeId = scriptTag.getAttribute('data-node-id');
+    const mapContainer = document.getElementById('location-history-map');
+    const cardContainer = document.getElementById('location-history-card');
+    const locationCount = document.getElementById('location-count');
+
+    try {
+        // Fetch location history data
+        const response = await fetch(`/api/node/${nodeId}/location-history?limit=100`);
+        const data = await response.json();
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        if (!data.location_history || data.location_history.length === 0) {
+            // No location data available, hide the card
+            return;
+        }
+
+        // Show the card now that we have data
+        cardContainer.style.display = 'block';
+
+        // Clear loading content
+        mapContainer.innerHTML = '';
+
+        // Initialize map centered on the most recent location
+        const mostRecentLocation = data.location_history[0];
+        const map = L.map('location-history-map').setView([
+            mostRecentLocation.latitude,
+            mostRecentLocation.longitude
+        ], 13);
+
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // Calculate age-based colors and add markers
+        const now = Date.now() / 1000; // Current time in seconds
+        const oldestTime = Math.min(...data.location_history.map(loc => loc.timestamp));
+        const newestTime = Math.max(...data.location_history.map(loc => loc.timestamp));
+        const timeRange = newestTime - oldestTime;
+
+        const pathCoords = [];
+
+        data.location_history.forEach((location, index) => {
+            // Calculate age-based color (green for recent, red for old)
+            const age = (now - location.timestamp) / 3600; // Age in hours
+            let markerColor;
+            let radius = 6;
+
+            if (age < 1) {
+                markerColor = '#28a745'; // Green for < 1 hour
+                radius = 8;
+            } else if (age < 24) {
+                markerColor = '#ffc107'; // Yellow for < 24 hours
+                radius = 7;
+            } else if (age < 168) { // 1 week
+                markerColor = '#fd7e14'; // Orange for < 1 week
+                radius = 6;
+            } else {
+                markerColor = '#dc3545'; // Red for > 1 week
+                radius = 5;
+            }
+
+            // Create circle marker
+            const marker = L.circleMarker([location.latitude, location.longitude], {
+                radius: radius,
+                fillColor: markerColor,
+                color: '#fff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8
+            }).addTo(map);
+
+            // Create popup content
+            const popupContent = `
+                <div>
+                    <strong>Location #${data.location_history.length - index}</strong><br>
+                    <small class="text-muted">${location.timestamp_str}</small><br>
+                    <strong>Coordinates:</strong> ${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}<br>
+                    ${location.altitude ? `<strong>Altitude:</strong> ${location.altitude}m<br>` : ''}
+                    <small><strong>Recorded:</strong> ${location.timestamp_str}</small>
+                </div>
+            `;
+            marker.bindPopup(popupContent);
+
+            // Add to path coordinates (in chronological order for path)
+            pathCoords.unshift([location.latitude, location.longitude]);
+        });
+
+        // Draw path line if we have multiple points
+        if (pathCoords.length > 1) {
+            L.polyline(pathCoords, {
+                color: '#007bff',
+                weight: 2,
+                opacity: 0.6,
+                dashArray: '5, 5' // Dashed line to show movement path
+            }).addTo(map);
+        }
+
+        // Fit map to show all markers
+        if (data.location_history.length > 1) {
+            const bounds = L.latLngBounds(data.location_history.map(loc => [loc.latitude, loc.longitude]));
+            map.fitBounds(bounds, { padding: [20, 20] });
+        }
+
+        // Update location count
+        locationCount.textContent = `${data.location_history.length} location points found`;
+
+    } catch (error) {
+        console.error('Error loading location history:', error);
+
+        // Show error in map container
+        mapContainer.innerHTML = `
+            <div class="d-flex align-items-center justify-content-center h-100">
+                <div class="text-center text-danger">
+                    <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
+                    <div class="mt-2">Error loading location history</div>
+                    <div class="small">${error.message}</div>
+                </div>
+            </div>
+        `;
+
+        // Still show the card even on error so users can see what went wrong
+        cardContainer.style.display = 'block';
+        locationCount.textContent = 'Error loading location data';
+    }
+}
+
+// ========================= Direct Receptions Chart =========================
+// Initialize Direct Receptions Chart Component
+let directReceptionsChart;
+
+document.addEventListener('DOMContentLoaded', function() {
+    const scriptTag = document.querySelector('script[data-node-id]');
+    const nodeId = scriptTag.getAttribute('data-node-id');
+
+    if (nodeId && window.DirectReceptionsChart) {
+        directReceptionsChart = new DirectReceptionsChart(nodeId);
+        directReceptionsChart.initialize();
+    }
+});
+</script>
+{% endblock %}

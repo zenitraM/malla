@@ -1,0 +1,450 @@
+{% extends "base.html" %}
+{% from "components/table_layout_macros.html" import fullscreen_table_container, filter_section, table_controls_section, table_stats_section, table_layout_styles %}
+
+{% block title %}Nodes - Malla{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modern-table.css') }}">
+{{ table_layout_styles() }}
+{% endblock %}
+
+{% block content %}
+<!-- Override the base template's container to make this page full-width/full-height -->
+</div> <!-- Close the base template's container -->
+
+{% call fullscreen_table_container("nodesTable", "Network Nodes", "bi bi-diagram-3", "toggleSidebar") %}
+    <!-- Main table content -->
+    <div id="nodesTable" class="modern-table-container"></div>
+{% endcall %}
+
+<!-- Sidebar content (will be injected into the sidebar) -->
+<div id="sidebarContent" style="display: none;">
+    {% call filter_section("filtersForm", "Node Filters") %}
+        <div class="row g-3">
+            <div class="col-12">
+                <label for="search" class="form-label">Search</label>
+                <input type="text" class="form-control form-control-sm" id="search" name="search" placeholder="Search by name, ID, or hardware...">
+            </div>
+            <div class="col-12">
+                <label for="role" class="form-label">Role</label>
+                <select class="form-select form-select-sm" id="role" name="role">
+                    <option value="">All Roles</option>
+                    <!-- Options will be loaded dynamically -->
+                </select>
+            </div>
+            <div class="col-12">
+                <label for="hw_model" class="form-label">Hardware Model</label>
+                <select class="form-select form-select-sm" id="hw_model" name="hw_model">
+                    <option value="">All Hardware</option>
+                    <!-- Options will be loaded dynamically -->
+                </select>
+            </div>
+            <div class="col-12">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="active_only" name="active_only" value="1">
+                    <label class="form-check-label" for="active_only">
+                        <i class="bi bi-activity"></i> Active nodes only (24h)
+                    </label>
+                </div>
+            </div>
+            <div class="col-12">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="named_only" name="named_only" value="1">
+                    <label class="form-check-label" for="named_only">
+                        <i class="bi bi-tag"></i> Named nodes only
+                    </label>
+                </div>
+            </div>
+        </div>
+    {% endcall %}
+
+    {% set table_controls = [
+        {"class": "btn-primary", "id": "applyFilters", "icon": "bi bi-search", "text": "Apply Filters", "type": "button"},
+        {"class": "btn-outline-secondary", "id": "clearFilters", "icon": "bi bi-x-circle", "text": "Clear Filters", "type": "button"},
+        {"class": "btn-outline-info", "id": "refreshTable", "icon": "bi bi-arrow-clockwise", "text": "Refresh", "type": "button"},
+        {"class": "btn-outline-success", "id": "shareFilters", "icon": "bi bi-share", "text": "Share", "type": "button"}
+    ] %}
+    {{ table_controls_section(table_controls) }}
+
+    {% set stats_items = [
+        {"label": "Total Nodes", "id": "statsTotal", "default": "0"},
+        {"label": "Active (24h)", "id": "statsActive", "default": "0"},
+        {"label": "Named", "id": "statsNamed", "default": "0"},
+        {"label": "Last Update", "id": "statsLastUpdate", "default": "--"}
+    ] %}
+    {{ table_stats_section("tableStats", stats_items) }}
+
+    <!-- Legend Section -->
+    <div class="sidebar-section">
+        <h6><i class="bi bi-palette"></i> Legend</h6>
+        <div class="legend-content">
+            <div class="legend-item">
+                <span class="badge bg-primary me-2">Client</span>
+                <span class="badge bg-success me-2">Router</span>
+                <span class="badge bg-warning me-2">Repeater</span>
+            </div>
+            <div class="legend-item mt-2">
+                <span class="text-success me-2">≥ -60 dBm (Excellent)</span>
+                <span class="text-info me-2">-70 to -60 dBm (Good)</span>
+            </div>
+            <div class="legend-item">
+                <span class="text-warning me-2">-80 to -70 dBm (Fair)</span>
+                <span class="text-danger me-2">< -80 dBm (Poor)</span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/url-filter-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modern-table.js') }}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Move sidebar content into the actual sidebar FIRST
+    const sidebarContent = document.getElementById('sidebarContent');
+    const sidebarContainer = document.querySelector('.sidebar-content');
+    if (sidebarContent && sidebarContainer) {
+        sidebarContainer.innerHTML = sidebarContent.innerHTML;
+        sidebarContent.remove();
+    }
+
+    // Initialize URL filter manager AFTER sidebar content is moved
+    const urlManager = new URLFilterManager();
+
+    // Load hardware models and roles dynamically
+    loadHardwareModels();
+    loadNodeRoles();
+
+    // Initialize sidebar toggle functionality
+    const toggleBtn = document.getElementById('toggleSidebar');
+    const closeBtn = document.getElementById('closeSidebar');
+    const sidebar = document.querySelector('.table-sidebar');
+
+    function toggleSidebar() {
+        sidebar.classList.toggle('collapsed');
+        const icon = toggleBtn.querySelector('i');
+        if (sidebar.classList.contains('collapsed')) {
+            icon.className = 'bi bi-layout-sidebar-inset';
+        } else {
+            icon.className = 'bi bi-layout-sidebar-inset-reverse';
+        }
+    }
+
+    toggleBtn.addEventListener('click', toggleSidebar);
+    closeBtn.addEventListener('click', toggleSidebar);
+
+    // Load hardware models from API
+    async function loadHardwareModels() {
+        try {
+            const response = await fetch('/api/meshtastic/hardware-models');
+            const data = await response.json();
+
+            if (data.hardware_models) {
+                const select = document.getElementById('hw_model');
+                // Keep the "All Hardware" option
+                const allOption = select.querySelector('option[value=""]');
+                select.innerHTML = '';
+                select.appendChild(allOption);
+
+                // Add hardware model options
+                data.hardware_models.forEach(([value, displayName]) => {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = displayName;
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading hardware models:', error);
+        }
+    }
+
+    // Load node roles from API
+    async function loadNodeRoles() {
+        try {
+            const response = await fetch('/api/meshtastic/node-roles');
+            const data = await response.json();
+
+            if (data.node_roles) {
+                const select = document.getElementById('role');
+                // Keep the "All Roles" option
+                const allOption = select.querySelector('option[value=""]');
+                select.innerHTML = '';
+                select.appendChild(allOption);
+
+                // Add role options
+                data.node_roles.forEach(([value, displayName]) => {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = displayName;
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading node roles:', error);
+        }
+    }
+
+    // Apply URL parameters after options are loaded
+    Promise.all([loadHardwareModels(), loadNodeRoles()]).then(async () => {
+        const hasParams = await urlManager.applyURLParameters();
+
+        // Add form field listeners for automatic filtering
+        addFormFieldListeners();
+
+        if (hasParams) {
+            // Wait a bit for all fields to be set, then apply filters
+            setTimeout(() => {
+                applyCurrentFilters();
+            }, 500);
+        }
+    });
+
+    // Initialize the modern table
+    const table = new ModernTable('nodesTable', {
+        endpoint: '/api/nodes/data',
+        enableSearch: false,
+        enablePagination: true,
+        pageSize: 25,
+        columns: [
+            {
+                key: 'hex_id',
+                title: 'Node ID',
+                sortable: true,
+                render: (value, row) => {
+                    return `<a href="/node/${row.node_id}" class="text-decoration-none font-monospace" title="View node details">
+                                <small>${value}</small>
+                            </a>`;
+                }
+            },
+            {
+                key: 'node_name',
+                title: 'Name',
+                sortable: true,
+                render: (value, row) => {
+                    const displayName = value || 'Unnamed';
+                    return `<a href="/node/${row.node_id}" class="text-decoration-none" title="View node details">
+                                ${displayName}
+                            </a>`;
+                }
+            },
+            {
+                key: 'hw_model',
+                title: 'Hardware',
+                sortable: true,
+                render: (value, row) => {
+                    if (value && value !== 'Unknown') {
+                        return `<span class="badge bg-info">${value}</span>`;
+                    }
+                    return `<span class="badge bg-light text-dark">Unknown</span>`;
+                }
+            },
+            {
+                key: 'role',
+                title: 'Role',
+                sortable: true,
+                render: (value, row) => {
+                    if (value && value !== 'Unknown') {
+                        let badgeClass = 'bg-secondary';
+                        if (value === 'CLIENT') badgeClass = 'bg-primary';
+                        else if (value === 'ROUTER') badgeClass = 'bg-success';
+                        else if (value === 'REPEATER') badgeClass = 'bg-warning';
+                        else if (value === 'CLIENT_MUTE') badgeClass = 'bg-secondary';
+                        else if (value === 'ROUTER_CLIENT') badgeClass = 'bg-info';
+                        else if (value === 'SENSOR') badgeClass = 'bg-dark';
+
+                        return `<span class="badge ${badgeClass}">${value}</span>`;
+                    }
+                    return `<span class="badge bg-light text-dark">Unknown</span>`;
+                }
+            },
+            {
+                key: 'last_packet_str',
+                title: 'Last Seen',
+                sortable: true,
+                sortKey: 'last_packet_time',
+                render: (value, row) => {
+                    if (value && value !== 'Never') {
+                        return `<small>${value}</small>`;
+                    }
+                    return `<span class="text-muted">Never</span>`;
+                }
+            },
+            {
+                key: 'packet_count_24h',
+                title: '24h Activity',
+                sortable: true,
+                render: (value, row) => {
+                    const count = parseInt(value) || 0;
+                    if (count > 0) {
+                        let badgeClass = 'bg-success';
+                        if (count < 10) badgeClass = 'bg-warning';
+                        else if (count < 50) badgeClass = 'bg-info';
+
+                        return `<span class="badge ${badgeClass}">${count}</span>`;
+                    }
+                    return `<span class="badge bg-light text-dark">0</span>`;
+                }
+            },
+            {
+                key: 'avg_rssi',
+                title: 'Avg RSSI',
+                sortable: true,
+                render: (value, row) => {
+                    if (value !== null && value !== '' && value !== 'N/A') {
+                        const rssiValue = parseFloat(value);
+                        const colorClass = getRssiColorClass(rssiValue);
+                        return `<span class="${colorClass}">${value} dBm</span>`;
+                    }
+                    return '<span class="text-muted">N/A</span>';
+                }
+            },
+            {
+                key: 'avg_snr',
+                title: 'Avg SNR',
+                sortable: true,
+                render: (value, row) => {
+                    if (value !== null && value !== '' && value !== 'N/A') {
+                        const snrValue = parseFloat(value);
+                        const colorClass = getSnrColorClass(snrValue);
+                        return `<span class="${colorClass}">${value} dB</span>`;
+                    }
+                    return '<span class="text-muted">N/A</span>';
+                }
+            },
+            {
+                key: 'node_id',
+                title: 'Actions',
+                sortable: false,
+                render: (value, row) => {
+                    // Create filtered URLs using the URL manager
+                    const packetsUrl = urlManager.createFilteredURL('/packets', {
+                        from_node: value
+                    });
+                    const tracerouteUrl = urlManager.createFilteredURL('/traceroute', {
+                        from_node: value
+                    });
+
+                    return `
+                        <div class="btn-group" role="group">
+                            <a href="/node/${value}"
+                               class="btn btn-sm btn-outline-primary" title="View node details">
+                                <i class="bi bi-info-circle"></i>
+                            </a>
+                            <a href="${packetsUrl}"
+                               class="btn btn-sm btn-outline-secondary" title="View packets from this node">
+                                <i class="bi bi-envelope"></i>
+                            </a>
+                            <a href="${tracerouteUrl}"
+                               class="btn btn-sm btn-outline-info" title="View traceroutes from this node">
+                                <i class="bi bi-diagram-3"></i>
+                            </a>
+                        </div>`;
+                }
+            }
+        ]
+    });
+
+    // Filter handling
+    const filtersForm = document.getElementById('filtersForm');
+    const applyFiltersBtn = document.getElementById('applyFilters');
+    const clearFiltersBtn = document.getElementById('clearFilters');
+    const refreshBtn = document.getElementById('refreshTable');
+
+    // Apply current filters (used both for manual application and URL parameter application)
+    function applyCurrentFilters() {
+        const filters = urlManager.getCurrentFilters();
+        table.setFilters(filters);
+        updateStats();
+
+        // Update URL with current filters
+        urlManager.updateURL(filters);
+    }
+
+    // Add event listeners to all form fields for automatic filtering
+    function addFormFieldListeners() {
+        if (filtersForm) {
+            // Add listeners to all form inputs
+            const formInputs = filtersForm.querySelectorAll('input, select');
+            formInputs.forEach(input => {
+                if (input.type === 'checkbox') {
+                    input.addEventListener('change', function() {
+                        // Small delay to ensure checkbox state is updated
+                        setTimeout(applyCurrentFilters, 10);
+                    });
+                } else {
+                    // For text inputs, select fields, etc.
+                    input.addEventListener('change', function() {
+                        applyCurrentFilters();
+                    });
+
+                    // Also trigger on input for text fields (real-time filtering)
+                    if (input.type === 'text' || input.type === 'search') {
+                        let debounceTimer;
+                        input.addEventListener('input', function() {
+                            clearTimeout(debounceTimer);
+                            debounceTimer = setTimeout(applyCurrentFilters, 300);
+                        });
+                    }
+                }
+            });
+        }
+    }
+
+    // Apply filters
+    applyFiltersBtn.addEventListener('click', applyCurrentFilters);
+
+    // Clear filters
+    clearFiltersBtn.addEventListener('click', function() {
+        urlManager.clearFilters();
+        table.clearFilters();
+        updateStats();
+    });
+
+    // Refresh table
+    refreshBtn.addEventListener('click', function() {
+        table.refresh();
+        updateStats();
+    });
+
+    // Update stats
+    function updateStats() {
+        document.getElementById('statsTotal').textContent = table.state.totalCount || '0';
+        const activeCount = table.state.data.filter(node => parseInt(node.packet_count_24h) > 0).length;
+        const namedCount = table.state.data.filter(node => node.node_name && node.node_name !== 'Unnamed').length;
+        document.getElementById('statsActive').textContent = activeCount;
+        document.getElementById('statsNamed').textContent = namedCount;
+        document.getElementById('statsLastUpdate').textContent = new Date().toLocaleTimeString();
+    }
+
+    // Helper functions for signal quality color coding
+    function getRssiColorClass(rssi) {
+        if (rssi >= -60) return 'text-success'; // Excellent
+        if (rssi >= -70) return 'text-info';    // Good
+        if (rssi >= -80) return 'text-warning'; // Fair
+        return 'text-danger';                   // Poor
+    }
+
+    function getSnrColorClass(snr) {
+        if (snr > 5) return 'text-success';     // Excellent
+        if (snr > 0) return 'text-info';       // Good
+        if (snr > -5) return 'text-warning';   // Fair
+        return 'text-danger';                  // Poor
+    }
+
+    // Initialize tooltips after table loads
+    table.on('dataLoaded', function() {
+        // Initialize Bootstrap tooltips
+        const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl);
+        });
+        updateStats();
+    });
+
+    // Initial load
+    table.loadData();
+});
+</script>
+{% endblock %}

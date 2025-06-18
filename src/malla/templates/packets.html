@@ -1,0 +1,510 @@
+{% extends "base.html" %}
+{% from "macros.html" import node_picker, gateway_picker %}
+{% from "components/table_layout_macros.html" import fullscreen_table_container, filter_section, table_controls_section, grouping_section, table_stats_section, table_layout_styles %}
+
+{% block title %}Packets - Malla{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/node-picker.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modern-table.css') }}">
+{{ table_layout_styles() }}
+{% endblock %}
+
+{% block content %}
+<!-- Override the base template's container to make this page full-width/full-height -->
+</div> <!-- Close the base template's container -->
+
+{% call fullscreen_table_container("packetsTable", "Packets", "bi bi-envelope", "toggleSidebar") %}
+    <!-- Main table content -->
+    <div id="packetsTable" class="modern-table-container"></div>
+{% endcall %}
+
+<!-- Sidebar content (will be injected into the sidebar) -->
+<div id="sidebarContent" style="display: none;">
+    {% call filter_section("filtersForm", "Packet Filters") %}
+        <div class="row g-3">
+            <div class="col-12">
+                <label for="start_time" class="form-label">Start Time</label>
+                <input type="datetime-local" class="form-control form-control-sm" id="start_time" name="start_time">
+            </div>
+            <div class="col-12">
+                <label for="end_time" class="form-label">End Time</label>
+                <input type="datetime-local" class="form-control form-control-sm" id="end_time" name="end_time">
+            </div>
+            <div class="col-12">
+                {{ node_picker(
+                    field_name="from_node",
+                    label="From Node",
+                    selected_value="",
+                    selected_display="",
+                    placeholder="All nodes"
+                ) }}
+            </div>
+            <div class="col-12">
+                {{ node_picker(
+                    field_name="to_node",
+                    label="To Node",
+                    selected_value="",
+                    selected_display="",
+                    placeholder="All destination nodes"
+                ) }}
+            </div>
+            <div class="col-12">
+                {{ gateway_picker(
+                    field_name="gateway_id",
+                    label="Gateway (Receiver)",
+                    selected_value="",
+                    selected_display="",
+                    placeholder="All gateways"
+                ) }}
+            </div>
+            <div class="col-12">
+                <label for="portnum" class="form-label">Packet Type</label>
+                <select class="form-select form-select-sm" id="portnum" name="portnum">
+                    <option value="">All Types</option>
+                    <!-- Options will be loaded dynamically -->
+                </select>
+            </div>
+            <div class="col-12">
+                <label for="hop_count" class="form-label">Hop Count</label>
+                <select class="form-select form-select-sm" id="hop_count" name="hop_count">
+                    <option value="">Any Hops</option>
+                    <option value="0">Direct (0 hops)</option>
+                    <option value="1">1 hop</option>
+                    <option value="2">2 hops</option>
+                    <option value="3">3 hops</option>
+                    <option value="99">4+ hops</option>
+                </select>
+            </div>
+            <div class="col-12">
+                <label for="min_rssi" class="form-label">Min RSSI</label>
+                <input type="number" class="form-control form-control-sm" id="min_rssi" name="min_rssi" placeholder="-120">
+            </div>
+        </div>
+    {% endcall %}
+
+    {{ grouping_section("group_packets", "Group by Packet ID", "Group packets with the same mesh packet ID") }}
+
+    {% set table_controls = [
+        {"class": "btn-primary", "id": "applyFilters", "icon": "bi bi-search", "text": "Apply Filters", "type": "button"},
+        {"class": "btn-outline-secondary", "id": "clearFilters", "icon": "bi bi-x-circle", "text": "Clear Filters", "type": "button"},
+        {"class": "btn-outline-info", "id": "refreshTable", "icon": "bi bi-arrow-clockwise", "text": "Refresh", "type": "button"},
+    ] %}
+    {{ table_controls_section(table_controls) }}
+
+    {% set stats_items = [
+        {"label": "Total Packets", "id": "statsTotal", "default": "0"},
+        {"label": "Filtered", "id": "statsFiltered", "default": "0"},
+        {"label": "Grouped", "id": "statsGrouped", "default": "0"},
+        {"label": "Last Update", "id": "statsLastUpdate", "default": "--"}
+    ] %}
+    {{ table_stats_section("tableStats", stats_items) }}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/url-filter-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modern-table.js') }}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Move sidebar content into the actual sidebar FIRST
+    const sidebarContent = document.getElementById('sidebarContent');
+    const sidebarContainer = document.querySelector('.sidebar-content');
+    if (sidebarContent && sidebarContainer) {
+        sidebarContainer.innerHTML = sidebarContent.innerHTML;
+        sidebarContent.remove();
+    }
+
+    // Initialize URL filter manager AFTER sidebar content is moved
+    const urlManager = new URLFilterManager();
+
+    // Initialize sidebar toggle functionality
+    const toggleBtn = document.getElementById('toggleSidebar');
+    const closeBtn = document.getElementById('closeSidebar');
+    const sidebar = document.querySelector('.table-sidebar');
+
+    function toggleSidebar() {
+        sidebar.classList.toggle('collapsed');
+        const icon = toggleBtn.querySelector('i');
+        if (sidebar.classList.contains('collapsed')) {
+            icon.className = 'bi bi-layout-sidebar-inset';
+        } else {
+            icon.className = 'bi bi-layout-sidebar-inset-reverse';
+        }
+    }
+
+    toggleBtn.addEventListener('click', toggleSidebar);
+    closeBtn.addEventListener('click', toggleSidebar);
+
+    // Initialize node and gateway pickers
+    if (window.initializeAllPickers) {
+        window.initializeAllPickers();
+    }
+
+    // Load packet types from API
+    async function loadPacketTypes() {
+        try {
+            const response = await fetch('/api/meshtastic/packet-types');
+            const data = await response.json();
+
+            if (data.packet_types) {
+                const select = document.getElementById('portnum');
+                // Keep the "All Types" option
+                const allOption = select.querySelector('option[value=""]');
+                select.innerHTML = '';
+                select.appendChild(allOption);
+
+                // Add packet type options
+                data.packet_types.forEach(([value, displayName]) => {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = displayName;
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading packet types:', error);
+        }
+    }
+
+    // Initialize URL parameters and table
+    async function initializePageWithFilters() {
+        // Load packet types first
+        await loadPacketTypes();
+
+        // Small delay to ensure DOM is updated
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Apply URL parameters after packet types are loaded
+        const hasParams = await urlManager.applyURLParameters();
+
+        // Add form field listeners for automatic filtering
+        addFormFieldListeners();
+
+        if (hasParams) {
+            // If we have URL parameters, apply filters first then load data
+            // This prevents the initial unfiltered request
+            setTimeout(() => {
+                applyCurrentFilters();
+            }, 100);
+        } else {
+            // Only load data without filters if no URL parameters
+            table.loadData();
+        }
+    }
+
+    // Initialize the modern table
+    const table = new ModernTable('packetsTable', {
+        endpoint: '/api/packets/data',
+        enableSearch: false,
+        enablePagination: true,
+        pageSize: 25,
+        deferInitialLoad: true,  // Defer loading until after URL parameters are applied
+        columns: [
+            {
+                key: 'timestamp',
+                title: 'Timestamp',
+                sortable: true,
+                render: (value, row) => {
+                    return `<a href="/packet/${row.id}" class="text-decoration-none" title="View packet details">
+                                <small>${value}</small>
+                            </a>`;
+                }
+            },
+            {
+                key: 'from_node',
+                title: 'From',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.from_node_id) {
+                        // Use the short name from API response
+                        const shortName = row.from_node_short || row.from_node_id.toString(16).padStart(8, '0').slice(-4);
+                        return `<a href="/node/${row.from_node_id}" class="text-decoration-none node-link"
+                                   data-node-id="${row.from_node_id}" data-bs-toggle="tooltip"
+                                   data-bs-placement="top" data-bs-html="true"
+                                   data-bs-title="Loading..." title="View node details">
+                                    ${shortName}
+                                </a>`;
+                    }
+                    return `<span class="text-muted">Unknown</span>`;
+                }
+            },
+            {
+                key: 'to_node',
+                title: 'To',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.to_node_id) {
+                        // Use the short name from API response
+                        const shortName = row.to_node_short || row.to_node_id.toString(16).padStart(8, '0').slice(-4);
+                        return `<a href="/node/${row.to_node_id}" class="text-decoration-none node-link"
+                                   data-node-id="${row.to_node_id}" data-bs-toggle="tooltip"
+                                   data-bs-placement="top" data-bs-html="true"
+                                   data-bs-title="Loading..." title="View node details">
+                                    ${shortName}
+                                </a>`;
+                    }
+                    return `<span class="text-muted">Broadcast</span>`;
+                }
+            },
+            {
+                key: 'portnum_name',
+                title: 'Type',
+                sortable: true,
+                render: (value, row) => {
+                    if (value) {
+                        // Map common port names to more readable versions
+                        const typeMap = {
+                            'TEXT_MESSAGE_APP': 'Text',
+                            'POSITION_APP': 'Position',
+                            'NODEINFO_APP': 'Node Info',
+                            'ROUTING_APP': 'Routing',
+                            'ADMIN_APP': 'Admin',
+                            'TELEMETRY_APP': 'Telemetry',
+                            'TRACEROUTE_APP': 'Traceroute',
+                            'NEIGHBORINFO_APP': 'Neighbor Info'
+                        };
+                        const displayName = typeMap[value] || value;
+                        return `<span class="badge bg-secondary">${displayName}</span>`;
+                    }
+                    return `<span class="text-muted">Unknown</span>`;
+                }
+            },
+            {
+                key: 'gateway',
+                title: 'Gateway',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.is_grouped) {
+                        // For grouped packets, show gateway count
+                        const count = row.gateway_count;
+                        if (count > 1) {
+                            return `<span class="badge bg-info" title="Multiple gateways: ${row.gateway_list}">
+                                                ${count} gateways
+                                            </span>`;
+                        } else {
+                            return `<span class="badge bg-info">${value}</span>`;
+                        }
+                        return `<span class="text-muted">N/A</span>`;
+                    } else {
+                        // For individual packets, show gateway short name with link
+                        const gatewayName = row.gateway_name;
+                        const gatewayNodeId = row.gateway_node_id;
+
+                        if (value && value.startsWith('!') && gatewayNodeId) {
+                            // Use last 4 hex digits as short name
+                            const shortName = value.substring(value.length - 4).toUpperCase();
+                            return `<a href="/node/${gatewayNodeId}" class="text-decoration-none node-link"
+                                       data-node-id="${gatewayNodeId}" data-bs-toggle="tooltip"
+                                       data-bs-placement="top" data-bs-html="true"
+                                       data-bs-title="Loading..." title="View node details">
+                                        ${shortName}
+                                    </a>`;
+                        } else if (gatewayName && gatewayNodeId) {
+                            // Extract short name from gateway name if available
+                            const parenMatch = gatewayName.match(/\(([^)]+)\)$/);
+                            const shortName = parenMatch ? parenMatch[1] : gatewayName.substring(0, 4).toUpperCase();
+                            return `<a href="/node/${gatewayNodeId}" class="text-decoration-none node-link"
+                                       data-node-id="${gatewayNodeId}" data-bs-toggle="tooltip"
+                                       data-bs-placement="top" data-bs-html="true"
+                                       data-bs-title="Loading..." title="View node details">
+                                        ${shortName}
+                                    </a>`;
+                        }
+                        return value || 'N/A';
+                    }
+                }
+            },
+            {
+                key: 'rssi',
+                title: 'RSSI',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.is_grouped) {
+                        return value && value !== 'N/A' ?
+                            `<span>${value}</span>` :
+                            `<span class="text-muted">N/A</span>`;
+                    } else if (value !== null && value !== '' && value !== 'N/A') {
+                        const rssiValue = parseFloat(value);
+                        const colorClass = getRssiColorClass(rssiValue);
+                        return `<span class="${colorClass}">${value} dBm</span>`;
+                    }
+                    return '<span class="text-muted">N/A</span>';
+                }
+            },
+            {
+                key: 'snr',
+                title: 'SNR',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.is_grouped) {
+                        return value && value !== 'N/A' ?
+                            `<span>${value}</span>` :
+                            `<span class="text-muted">N/A</span>`;
+                    } else if (value !== null && value !== '' && value !== 'N/A') {
+                        const snrValue = parseFloat(value);
+                        const colorClass = getSnrColorClass(snrValue);
+                        return `<span class="${colorClass}">${value} dB</span>`;
+                    }
+                    return '<span class="text-muted">N/A</span>';
+                }
+            },
+            {
+                key: 'hops',
+                title: 'Hops',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.is_grouped) {
+                        return value && value !== 'N/A' ?
+                            `<span class="text-info">${value}</span>` :
+                            `<span class="text-muted">N/A</span>`;
+                    } else if (value !== null && value !== '') {
+                        const hops = parseInt(value);
+                        if (hops === 0) {
+                            return `<span class="badge bg-success">Direct</span>`;
+                        } else if (hops <= 2) {
+                            return `<span class="badge bg-info">${hops}</span>`;
+                        } else {
+                            return `<span class="badge bg-warning">${hops}</span>`;
+                        }
+                    }
+                    return `<span class="text-muted">N/A</span>`;
+                }
+            },
+            {
+                key: 'size',
+                title: 'Size',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.is_grouped) {
+                        return value ? `<small class="text-info">${value}</small>` : `<span class="text-muted">N/A</span>`;
+                    } else {
+                        return value ? `<small>${value}</small>` : `<span class="text-muted">N/A</span>`;
+                    }
+                }
+            },
+            {
+                key: 'id',
+                title: 'Actions',
+                sortable: false,
+                render: (value, row) => {
+                    return `<a href="/packet/${value}" class="btn btn-sm btn-outline-primary" title="View packet details">
+                                <i class="bi bi-eye"></i>
+                            </a>`;
+                }
+            }
+        ]
+    });
+
+    // Filter handling
+    const filtersForm = document.getElementById('filtersForm');
+    const applyFiltersBtn = document.getElementById('applyFilters');
+    const clearFiltersBtn = document.getElementById('clearFilters');
+    const refreshBtn = document.getElementById('refreshTable');
+    const groupPacketsCheckbox = document.getElementById('group_packets');
+
+    // Apply current filters (used both for manual application and URL parameter application)
+    function applyCurrentFilters() {
+        const filters = urlManager.getCurrentFilters();
+        table.setFilters(filters);
+        updateStats();
+
+        // Update URL with current filters
+        urlManager.updateURL(filters);
+    }
+
+    // Add event listeners to all form fields for automatic filtering
+    function addFormFieldListeners() {
+        if (filtersForm) {
+            // Add listeners to all form inputs
+            const formInputs = filtersForm.querySelectorAll('input, select');
+            formInputs.forEach(input => {
+                if (input.type === 'checkbox') {
+                    input.addEventListener('change', function() {
+                        // Small delay to ensure checkbox state is updated
+                        setTimeout(applyCurrentFilters, 10);
+                    });
+                } else {
+                    // For text inputs, select fields, etc.
+                    input.addEventListener('change', function() {
+                        applyCurrentFilters();
+                    });
+
+                    // Also trigger on input for text fields (real-time filtering)
+                    if (input.type === 'text' || input.type === 'search') {
+                        let debounceTimer;
+                        input.addEventListener('input', function() {
+                            clearTimeout(debounceTimer);
+                            debounceTimer = setTimeout(applyCurrentFilters, 300);
+                        });
+                    }
+                }
+            });
+        }
+    }
+
+    // Apply filters
+    applyFiltersBtn.addEventListener('click', applyCurrentFilters);
+
+    // Clear filters
+    clearFiltersBtn.addEventListener('click', function() {
+        urlManager.clearFilters();
+        table.clearFilters();
+        updateStats();
+    });
+
+    // Refresh table
+    refreshBtn.addEventListener('click', function() {
+        table.refresh();
+        updateStats();
+    });
+
+    // Handle grouping toggle
+    groupPacketsCheckbox.addEventListener('change', function() {
+        table.loadData();
+        updateStats();
+
+        // Update URL when grouping changes
+        const currentFilters = urlManager.getCurrentFilters();
+        urlManager.updateURL(currentFilters);
+    });
+
+    // Update stats
+    function updateStats() {
+        document.getElementById('statsTotal').textContent = table.state.totalCount || '0';
+        document.getElementById('statsFiltered').textContent = table.state.data.length || '0';
+        document.getElementById('statsGrouped').textContent = groupPacketsCheckbox.checked ? 'Yes' : 'No';
+        document.getElementById('statsLastUpdate').textContent = new Date().toLocaleTimeString();
+    }
+
+    // Helper functions for signal quality color coding
+    function getRssiColorClass(rssi) {
+        if (rssi >= -60) return 'text-success'; // Excellent
+        if (rssi >= -70) return 'text-info';    // Good
+        if (rssi >= -80) return 'text-warning'; // Fair
+        return 'text-danger';                   // Poor
+    }
+
+    function getSnrColorClass(snr) {
+        if (snr > 5) return 'text-success';     // Excellent
+        if (snr > 0) return 'text-info';       // Good
+        if (snr > -5) return 'text-warning';   // Fair
+        return 'text-danger';                  // Poor
+    }
+
+    // Initialize tooltips after table loads
+    table.on('dataLoaded', function() {
+        // Initialize Bootstrap tooltips
+        const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl);
+        });
+        updateStats();
+    });
+
+    // Initial load
+    initializePageWithFilters();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,27 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include malla-web
+include malla-capture
+include uv.lock
+include .python-version
+include .envrc
+
+# Include source code
+recursive-include src *.py
+recursive-include src/malla/templates *.html
+recursive-include src/malla/static *.css *.js *.png *.jpg *.gif *.ico
+
+# Include tests
+recursive-include tests *.py
+
+# Include documentation
+recursive-include docs *.md *.rst *.txt
+
+# Exclude compiled files
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude __pycache__
+global-exclude .git*
+global-exclude .DS_Store 

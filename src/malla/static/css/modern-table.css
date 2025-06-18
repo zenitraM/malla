@@ -1,0 +1,410 @@
+/* Modern Table Styles using Bootstrap */
+
+.modern-table-container {
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    overflow: hidden;
+}
+
+.modern-filters-card {
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+.filters-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+    color: white;
+    border-radius: 0.5rem 0.5rem 0 0;
+}
+
+.filters-title {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.filters-body {
+    padding: 1.5rem;
+}
+
+.modern-table-card {
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    overflow: hidden;
+}
+
+/* Modern table styling */
+.modern-table {
+    width: 100%;
+    margin-bottom: 0;
+    color: #212529;
+    border-collapse: collapse;
+}
+
+.modern-table thead th {
+    background: linear-gradient(135deg, #343a40 0%, #495057 100%);
+    color: white;
+    border: none;
+    font-weight: 600;
+    padding: 1rem 0.75rem;
+    position: relative;
+    user-select: none;
+    vertical-align: bottom;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.modern-table thead th.sortable {
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.modern-table thead th.sortable:hover {
+    background: linear-gradient(135deg, #495057 0%, #6c757d 100%);
+}
+
+.modern-table thead th.sorted {
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+}
+
+.modern-table tbody td {
+    padding: 0.75rem;
+    vertical-align: middle;
+    border-top: 1px solid #dee2e6;
+}
+
+.modern-table tbody tr:nth-of-type(odd) {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.modern-table tbody tr:hover {
+    background-color: rgba(0, 123, 255, 0.075);
+}
+
+/* Sort indicators */
+.sort-indicator {
+    margin-left: 0.5rem;
+    opacity: 0.7;
+}
+
+.sorted .sort-indicator {
+    opacity: 1;
+}
+
+/* Search bar styling */
+.table-search-bar {
+    background: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+}
+
+/* Pagination using Bootstrap */
+.modern-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    background: #f8f9fa;
+    border-top: 1px solid #dee2e6;
+}
+
+.pagination-info {
+    color: #6c757d;
+    font-size: 0.875rem;
+}
+
+.pagination-controls {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.pagination-btn {
+    display: inline-block;
+    padding: 0.375rem 0.75rem;
+    margin-left: -1px;
+    line-height: 1.25;
+    color: #007bff;
+    text-decoration: none;
+    background-color: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
+    transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.pagination-btn:hover {
+    z-index: 2;
+    color: #0056b3;
+    text-decoration: none;
+    background-color: #e9ecef;
+    border-color: #dee2e6;
+}
+
+.pagination-btn:disabled {
+    color: #6c757d;
+    pointer-events: none;
+    background-color: #fff;
+    border-color: #dee2e6;
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.pagination-btn.active {
+    z-index: 3;
+    color: #fff;
+    background-color: #007bff;
+    border-color: #007bff;
+}
+
+/* Loading and empty states */
+.loading-spinner {
+    width: 2rem;
+    height: 2rem;
+    border: 0.25rem solid #f3f4f6;
+    border-top: 0.25rem solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #6c757d;
+}
+
+.empty-state-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.empty-state-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.empty-state-description {
+    font-size: 0.875rem;
+}
+
+/* Signal quality indicators using Bootstrap colors */
+.signal-excellent {
+    color: #198754 !important; /* Bootstrap success */
+}
+
+.signal-good {
+    color: #0dcaf0 !important; /* Bootstrap info */
+}
+
+.signal-fair {
+    color: #ffc107 !important; /* Bootstrap warning */
+}
+
+.signal-poor {
+    color: #dc3545 !important; /* Bootstrap danger */
+}
+
+/* Modern badges using Bootstrap */
+.modern-badge {
+    display: inline-block;
+    padding: 0.35em 0.65em;
+    font-size: 0.75em;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: baseline;
+    border-radius: 0.25rem;
+}
+
+.modern-badge-primary {
+    color: #fff;
+    background-color: #007bff;
+}
+
+.modern-badge-secondary {
+    color: #fff;
+    background-color: #6c757d;
+}
+
+.modern-badge-success {
+    color: #fff;
+    background-color: #198754;
+}
+
+.modern-badge-danger {
+    color: #fff;
+    background-color: #dc3545;
+}
+
+.modern-badge-warning {
+    color: #000;
+    background-color: #ffc107;
+}
+
+.modern-badge-info {
+    color: #000;
+    background-color: #0dcaf0;
+}
+
+/* Action buttons using Bootstrap */
+.action-buttons {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.action-btn {
+    display: inline-block;
+    font-weight: 400;
+    line-height: 1.5;
+    color: #007bff;
+    text-align: center;
+    text-decoration: none;
+    vertical-align: middle;
+    cursor: pointer;
+    user-select: none;
+    background-color: transparent;
+    border: 1px solid #007bff;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    border-radius: 0.25rem;
+    transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.action-btn:hover {
+    color: #fff;
+    background-color: #007bff;
+    border-color: #007bff;
+    transform: translateY(-1px);
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.15);
+}
+
+.action-btn-primary {
+    color: #fff;
+    background-color: #007bff;
+    border-color: #007bff;
+}
+
+.action-btn-primary:hover {
+    color: #fff;
+    background-color: #0056b3;
+    border-color: #004085;
+}
+
+/* Filter form styling */
+.filter-group {
+    margin-bottom: 1rem;
+}
+
+.filter-group label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-weight: 500;
+    color: #495057;
+}
+
+.filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.btn-modern {
+    display: inline-block;
+    font-weight: 400;
+    line-height: 1.5;
+    text-align: center;
+    text-decoration: none;
+    vertical-align: middle;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid transparent;
+    padding: 0.375rem 0.75rem;
+    font-size: 1rem;
+    border-radius: 0.375rem;
+    transition: all 0.2s ease;
+}
+
+.btn-modern-primary {
+    color: #fff;
+    background-color: #007bff;
+    border-color: #007bff;
+}
+
+.btn-modern-primary:hover {
+    color: #fff;
+    background-color: #0056b3;
+    border-color: #004085;
+}
+
+.btn-modern-secondary {
+    color: #6c757d;
+    background-color: transparent;
+    border-color: #6c757d;
+}
+
+.btn-modern-secondary:hover {
+    color: #fff;
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .modern-pagination {
+        flex-direction: column;
+        gap: 1rem;
+        text-align: center;
+    }
+
+    .filters-body .row {
+        margin: 0;
+    }
+
+    .filters-body .col-md-3,
+    .filters-body .col-md-6 {
+        padding: 0.25rem;
+    }
+
+    .filter-actions {
+        justify-content: center;
+    }
+
+    .modern-table {
+        font-size: 0.875rem;
+    }
+
+    .modern-table thead th,
+    .modern-table tbody td {
+        padding: 0.5rem 0.25rem;
+    }
+}
+
+/* Table wrapper for horizontal scrolling */
+.table-wrapper {
+    overflow-x: auto;
+}
+
+/* Ensure proper spacing for form controls */
+.form-check-inline {
+    margin-right: 1rem;
+}
+
+.form-check-inline .form-check-input {
+    margin-right: 0.5rem;
+}

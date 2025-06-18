@@ -1,0 +1,202 @@
+.node-picker-container {
+    position: relative;
+}
+
+.node-picker-input {
+    padding-right: 35px; /* Make room for clear button */
+}
+
+.node-picker-clear {
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 10;
+    border: none;
+    background: transparent;
+    padding: 2px 6px;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.node-picker-clear:hover {
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 3px;
+}
+
+.node-picker-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1050;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.node-picker-dropdown.show {
+    display: block !important;
+}
+
+.node-picker-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #f8f9fa;
+    transition: background-color 0.15s ease-in-out;
+}
+
+.node-picker-item:last-child {
+    border-bottom: none;
+}
+
+.node-picker-item:hover,
+.node-picker-item.active {
+    background-color: #f8f9fa;
+}
+
+.node-picker-item-name {
+    font-weight: 500;
+    color: #212529;
+}
+
+.node-picker-item-id {
+    font-size: 0.875rem;
+    color: #6c757d;
+    font-family: monospace;
+}
+
+.node-picker-item-details {
+    font-size: 0.75rem;
+    color: #6c757d;
+    margin-top: 2px;
+}
+
+.node-picker-loading,
+.node-picker-no-results {
+    padding: 12px;
+    text-align: center;
+    color: #6c757d;
+}
+
+.node-picker-loading .spinner-border {
+    width: 1rem;
+    height: 1rem;
+}
+
+/* Focus styles */
+.node-picker-input:focus {
+    border-color: #86b7fe;
+    outline: 0;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+/* Keyboard navigation */
+.node-picker-item.keyboard-active {
+    background-color: #e9ecef;
+}
+
+/* Gateway Picker Styles (similar to node picker) */
+.gateway-picker-container {
+    position: relative;
+}
+
+.gateway-picker-input {
+    padding-right: 35px; /* Make room for clear button */
+}
+
+.gateway-picker-clear {
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 10;
+    border: none;
+    background: transparent;
+    padding: 2px 6px;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.gateway-picker-clear:hover {
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 3px;
+}
+
+.gateway-picker-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1050;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.gateway-picker-dropdown.show {
+    display: block !important;
+}
+
+.gateway-picker-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #f8f9fa;
+    transition: background-color 0.15s ease-in-out;
+}
+
+.gateway-picker-item:last-child {
+    border-bottom: none;
+}
+
+.gateway-picker-item:hover,
+.gateway-picker-item.active {
+    background-color: #f8f9fa;
+}
+
+.gateway-picker-item-name {
+    font-weight: 500;
+    color: #212529;
+}
+
+.gateway-picker-item-id {
+    font-size: 0.875rem;
+    color: #6c757d;
+    font-family: monospace;
+}
+
+.gateway-picker-item-details {
+    font-size: 0.75rem;
+    color: #6c757d;
+    margin-top: 2px;
+}
+
+.gateway-picker-loading,
+.gateway-picker-no-results {
+    padding: 12px;
+    text-align: center;
+    color: #6c757d;
+}
+
+.gateway-picker-loading .spinner-border {
+    width: 1rem;
+    height: 1rem;
+}
+
+/* Focus styles */
+.gateway-picker-input:focus {
+    border-color: #86b7fe;
+    outline: 0;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+/* Keyboard navigation */
+.gateway-picker-item.keyboard-active {
+    background-color: #e9ecef;
+} 

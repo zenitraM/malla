@@ -1,0 +1,17 @@
+{
+    "recommendations": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "detachhead.basedpyright",
+        "ms-python.pytest",
+        "ms-vscode.test-adapter-converter",
+        "ms-python.vscode-pylance"
+    ],
+    "unwantedRecommendations": [
+        "ms-python.black-formatter",
+        "ms-python.isort",
+        "ms-python.flake8",
+        "ms-python.pylint",
+        "ms-python.mypy-type-checker"
+    ]
+}

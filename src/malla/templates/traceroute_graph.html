@@ -1,0 +1,1215 @@
+{% extends "base.html" %}
+{% from "components/sidebar_macros.html" import sidebar_container, selected_details_section, search_section, controls_section, stats_section, legend_section, sidebar_styles %}
+
+{% block content %}
+<!-- Override the base template's container to make this page full-width/full-height -->
+</div> <!-- Close the base template's container -->
+
+<div class="graph-container">
+    <!-- Main Graph Area -->
+    <div class="graph-main">
+        <div id="loadingSpinner" class="loading-overlay">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2 text-muted">Building network graph...</p>
+        </div>
+        <div id="networkGraph" class="network-graph"></div>
+        <div id="graphError" class="error-overlay" style="display: none;">
+            <i class="bi bi-exclamation-triangle"></i>
+            <p class="mt-2">Error loading graph data</p>
+        </div>
+    </div>
+
+    <!-- Sidebar -->
+    {% call sidebar_container("sidebar", "Network Graph", "bi bi-diagram-3", "toggleSidebar") %}
+        {{ selected_details_section("clearSelection") }}
+
+        <!-- Hover Details -->
+        <div class="sidebar-section">
+            <h6><i class="bi bi-eye"></i> Hover Details</h6>
+            <div id="hoverDetails" class="hover-details">
+                <small class="text-muted">Hover over nodes or links for details</small>
+            </div>
+        </div>
+
+        {{ search_section("nodeSearch", "clearSearch", "searchResults") }}
+
+        {% set graph_controls = [
+            {"class": "btn-outline-secondary", "onclick": "centerGraph()", "icon": "bi bi-arrows-move", "text": "Center Graph"},
+            {"class": "btn-outline-secondary", "onclick": "resetZoom()", "icon": "bi bi-zoom-out", "text": "Reset Zoom"},
+            {"class": "btn-outline-primary", "onclick": "refreshGraph()", "icon": "bi bi-arrow-clockwise", "text": "Refresh"}
+        ] %}
+        {{ controls_section(graph_controls) }}
+
+        <!-- Filters -->
+        <div class="sidebar-section">
+            <h6><i class="bi bi-funnel"></i> Filters</h6>
+            <form id="filterForm">
+                <div class="mb-3">
+                    <label for="hours" class="form-label">Time Period</label>
+                    <select class="form-select form-select-sm" id="hours" name="hours">
+                        <option value="1" {% if hours == 1 %}selected{% endif %}>Last Hour</option>
+                        <option value="6" {% if hours == 6 %}selected{% endif %}>Last 6 Hours</option>
+                        <option value="24" {% if hours == 24 %}selected{% endif %}>Last 24 Hours</option>
+                        <option value="72" {% if hours == 72 %}selected{% endif %}>Last 3 Days</option>
+                        <option value="168" {% if hours == 168 %}selected{% endif %}>Last Week</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label for="min_snr" class="form-label">Minimum SNR (dB)</label>
+                    <select class="form-select form-select-sm" id="min_snr" name="min_snr">
+                        <option value="-200" {% if min_snr == -200 %}selected{% endif %}>No Limit</option>
+                        <option value="-99" {% if min_snr == -99 %}selected{% endif %}>≥ -99 dB</option>
+                        <option value="-40" {% if min_snr == -40 %}selected{% endif %}>≥ -40 dB</option>
+                        <option value="-30" {% if min_snr == -30 %}selected{% endif %}>≥ -30 dB</option>
+                        <option value="-20" {% if min_snr == -20 %}selected{% endif %}>≥ -20 dB</option>
+                        <option value="-10" {% if min_snr == -10 %}selected{% endif %}>≥ -10 dB</option>
+                        <option value="0" {% if min_snr == 0 %}selected{% endif %}>≥ 0 dB</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="include_indirect" name="include_indirect" {% if include_indirect %}checked{% endif %}>
+                        <label class="form-check-label" for="include_indirect">
+                            Multi-hop Connections
+                        </label>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm w-100">
+                    <i class="bi bi-arrow-clockwise"></i> Update Graph
+                </button>
+            </form>
+        </div>
+
+        <!-- Graph Stats -->
+        <div class="sidebar-section">
+            <h6><i class="bi bi-bar-chart"></i> Statistics</h6>
+            <div id="graphStats" class="stats-content">
+                <div><strong>Nodes:</strong> <span id="statsNodes">0</span></div>
+                <div><strong>Links:</strong> <span id="statsLinks">0</span></div>
+                <div><strong>Time Period:</strong> <span id="statsTimePeriod">24h</span></div>
+                <div><strong>Last Update:</strong> <span id="statsLastUpdate">--</span></div>
+            </div>
+        </div>
+
+        {% set legend_items = [
+            {"type": "icon", "class": "bi bi-circle-fill text-primary", "text": "Active nodes"},
+            {"type": "line", "class": "direct", "text": "Direct RF links"},
+            {"type": "line", "class": "indirect", "text": "Multi-hop paths"}
+        ] %}
+        {% call legend_section(legend_items) %}
+            <div class="legend-item mt-2">
+                <small class="text-muted">Node size = traffic volume<br>
+                Link thickness = signal strength<br>
+                Colors = SNR quality</small>
+            </div>
+        {% endcall %}
+    {% endcall %}
+</div>
+
+<!-- Hide the footer for this page -->
+<style>
+.footer {
+    display: none !important;
+}
+
+.graph-container {
+    position: fixed;
+    top: 56px; /* Height of navbar */
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    background: #f8f9fa;
+    z-index: 1;
+}
+
+.graph-main {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    order: 1;
+}
+
+.network-graph {
+    width: 100%;
+    height: 100%;
+}
+
+.loading-overlay, .error-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: rgba(248, 249, 250, 0.9);
+    z-index: 100;
+}
+
+.error-overlay {
+    color: #dc3545;
+}
+
+/* Node labels styling */
+.node-label {
+    font-size: 12px;
+    font-weight: bold;
+    fill: #333;
+    text-anchor: middle;
+    pointer-events: none;
+    text-shadow: 1px 1px 2px rgba(255,255,255,0.8);
+}
+
+.node-label.highlighted {
+    font-size: 14px;
+    fill: #007bff;
+    font-weight: 900;
+}
+
+.node.selected circle {
+    stroke: #007bff;
+    stroke-width: 4;
+}
+
+.link.selected {
+    stroke: #007bff !important;
+    stroke-width: 4 !important;
+}
+
+/* Additional mobile adjustments specific to graph */
+@media (max-width: 768px) {
+    .graph-container {
+        flex-direction: column;
+        top: 56px;
+    }
+
+    .graph-main {
+        order: 1;
+        flex: 1;
+    }
+}
+</style>
+
+{{ sidebar_styles() }}
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+let currentGraph = null;
+let simulation = null;
+let selectedNode = null;
+let selectedLink = null;
+let searchResults = [];
+
+// Make currentGraph globally accessible for debugging
+window.currentGraph = null;
+
+// Initialize the page
+document.addEventListener('DOMContentLoaded', function() {
+    // Wait for jQuery to be available
+    function waitForJQuery() {
+        if (typeof $ !== 'undefined') {
+            initializeInterface();
+            loadGraph();
+        } else {
+            setTimeout(waitForJQuery, 50);
+        }
+    }
+
+    waitForJQuery();
+});
+
+function initializeInterface() {
+    // Handle filter form submission
+    $('#filterForm').on('submit', function(e) {
+        e.preventDefault();
+        loadGraph();
+    });
+
+    // Handle sidebar toggle
+    $('#toggleSidebar').on('click', function() {
+        const sidebar = document.getElementById('sidebar');
+        const icon = this.querySelector('i');
+        const isMobile = window.innerWidth <= 768;
+
+        sidebar.classList.toggle('collapsed');
+
+        if (sidebar.classList.contains('collapsed')) {
+            if (isMobile) {
+                icon.className = 'bi bi-chevron-up';
+            } else {
+                icon.className = 'bi bi-chevron-left';
+            }
+        } else {
+            if (isMobile) {
+                icon.className = 'bi bi-chevron-down';
+            } else {
+                icon.className = 'bi bi-chevron-right';
+            }
+        }
+
+        // Trigger resize after animation
+        setTimeout(() => {
+            if (simulation) {
+                const container = document.getElementById('networkGraph');
+                const containerRect = container.getBoundingClientRect();
+                const width = containerRect.width;
+                const height = containerRect.height;
+
+                // Update SVG dimensions
+                d3.select('#networkGraph svg')
+                    .attr('width', width)
+                    .attr('height', height);
+
+                simulation.force('center', d3.forceCenter(width / 2, height / 2));
+                simulation.alpha(0.3).restart();
+
+                // Update stored dimensions
+                window.graphWidth = width;
+                window.graphHeight = height;
+            }
+        }, 300);
+    });
+
+    // Handle window resize to update toggle button icon
+    $(window).on('resize', function() {
+        const sidebar = document.getElementById('sidebar');
+        const icon = document.querySelector('#toggleSidebar i');
+        const isMobile = window.innerWidth <= 768;
+
+        if (sidebar && icon) {
+            if (sidebar.classList.contains('collapsed')) {
+                icon.className = isMobile ? 'bi bi-chevron-up' : 'bi bi-chevron-left';
+            } else {
+                icon.className = isMobile ? 'bi bi-chevron-down' : 'bi bi-chevron-right';
+            }
+        }
+    });
+
+    // Handle clear selection button
+    $('#clearSelection').on('click', function() {
+        clearSelection();
+    });
+
+    // Handle node search
+    $('#nodeSearch').on('input', function() {
+        const query = this.value.toLowerCase().trim();
+        if (query.length > 0) {
+            searchNodes(query);
+        } else {
+            clearSearchResults();
+        }
+    });
+
+    $('#clearSearch').on('click', function() {
+        $('#nodeSearch').val('');
+        clearSearchResults();
+        clearSelection();
+    });
+}
+
+function loadGraph() {
+    showLoading();
+
+    // Get filter parameters
+    const params = new URLSearchParams();
+    document.querySelectorAll('#filterForm input, #filterForm select').forEach(function(element) {
+        const value = element.value;
+        if (value && element.type !== 'checkbox') {
+            params.append(element.name, value);
+        } else if (element.type === 'checkbox' && element.checked) {
+            params.append(element.name, 'true');
+        }
+    });
+
+    fetch(`/api/traceroute/graph?${params.toString()}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                showError(data.error);
+                return;
+            }
+
+            currentGraph = data;
+            window.currentGraph = data; // Also set global reference
+
+            // Ensure container is ready before rendering
+            const container = document.getElementById('networkGraph');
+            if (container) {
+                const containerRect = container.getBoundingClientRect();
+                if (containerRect.width === 0 || containerRect.height === 0) {
+                    setTimeout(() => {
+                        renderGraph(data);
+                        updateStats(data.stats);
+                        hideLoading();
+                    }, 100);
+                } else {
+                    renderGraph(data);
+                    updateStats(data.stats);
+                    hideLoading();
+                }
+            } else {
+                renderGraph(data);
+                updateStats(data.stats);
+                hideLoading();
+            }
+        })
+        .catch(error => {
+            console.error('Error loading graph:', error);
+            showError('Failed to load graph data');
+        });
+}
+
+function renderGraph(data) {
+    try {
+        console.log('renderGraph called with data:', data);
+
+        const container = d3.select('#networkGraph');
+        container.selectAll('*').remove(); // Clear previous graph
+
+        if (!data.nodes || data.nodes.length === 0) {
+            console.log('No nodes found in data');
+            container.append('div')
+                .attr('class', 'loading-overlay')
+                .html('<i class="bi bi-diagram-3"></i><br>No network data found for the selected criteria');
+            return;
+        }
+
+        console.log('Found', data.nodes.length, 'nodes and', data.links ? data.links.length : 0, 'links');
+
+        // Ensure container has proper dimensions
+        const containerRect = container.node().getBoundingClientRect();
+        let width = containerRect.width;
+        let height = containerRect.height;
+
+        // If dimensions are 0, wait a bit and try again
+        if (width === 0 || height === 0) {
+            // Force a layout recalculation
+            container.node().offsetHeight; // Trigger reflow
+
+            // Try again after a brief moment
+            setTimeout(() => {
+                const newRect = container.node().getBoundingClientRect();
+                width = newRect.width;
+                height = newRect.height;
+
+                // If still 0, use reasonable defaults based on viewport
+                if (width === 0 || height === 0) {
+                    width = Math.max(800, window.innerWidth - 400);  // Leave space for sidebar
+                    height = Math.max(600, window.innerHeight - 200); // Leave space for navbar/footer
+                }
+
+                // Update the SVG dimensions if they were created with fallback values
+                if (window.graphSvg) {
+                    window.graphSvg
+                        .attr('width', width)
+                        .attr('height', height);
+
+                    // Update stored dimensions
+                    window.graphWidth = width;
+                    window.graphHeight = height;
+
+                    // Update simulation center
+                    if (simulation) {
+                        simulation.force('center', d3.forceCenter(width / 2, height / 2));
+                        simulation.alpha(0.3).restart();
+                    }
+                }
+            }, 50);
+        }
+
+        // Use current dimensions (might be 0 initially, but will be corrected above)
+        if (width === 0 || height === 0) {
+            width = Math.max(800, window.innerWidth - 400);  // Leave space for sidebar
+            height = Math.max(600, window.innerHeight - 200); // Leave space for navbar/footer
+        }
+
+        console.log('Graph container dimensions:', {width, height});
+
+        // Create SVG first
+        const svg = container.append('svg')
+            .attr('width', width)
+            .attr('height', height)
+            .style('width', '100%')
+            .style('height', '100%');
+
+        // Create the g element
+        const g = svg.append('g');
+
+        // Now create zoom behavior that can reference g
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 4])
+            .on('zoom', (event) => {
+                g.attr('transform', event.transform);
+            });
+
+        // Apply zoom behavior to SVG
+        svg.call(zoom);
+
+        // Initialize with identity transform to avoid NaN values
+        svg.call(zoom.transform, d3.zoomIdentity);
+
+        // Color scales
+        const snrColorScale = d3.scaleSequential(d3.interpolateRdYlGn)
+            .domain([-30, 10]); // SNR range
+
+                // Set up geographical positioning if location data is available
+        const nodesWithLocation = data.nodes.filter(n => n.location);
+        const nodesWithoutLocation = data.nodes.filter(n => !n.location);
+
+        console.log(`Nodes with location: ${nodesWithLocation.length}, without: ${nodesWithoutLocation.length}`);
+
+                if (nodesWithLocation.length > 0) {
+            // Calculate geographical bounds using 80th percentile to focus on main cluster
+            const latitudes = nodesWithLocation.map(n => n.location.latitude).sort((a, b) => a - b);
+            const longitudes = nodesWithLocation.map(n => n.location.longitude).sort((a, b) => a - b);
+
+            // Use 10th to 90th percentile to exclude outliers and focus on main cluster
+            const percentile10 = Math.floor(latitudes.length * 0.1);
+            const percentile90 = Math.floor(latitudes.length * 0.9);
+
+            const minLat = latitudes[percentile10];
+            const maxLat = latitudes[percentile90];
+            const minLng = longitudes[percentile10];
+            const maxLng = longitudes[percentile90];
+
+            console.log(`Using 10th-90th percentile bounds: lat ${minLat} to ${maxLat}, lng ${minLng} to ${maxLng}`);
+            console.log(`Total nodes: ${nodesWithLocation.length}, excluded outliers: ${percentile10 * 2}`);
+
+            // Calculate the geographical span
+            const latSpan = maxLat - minLat;
+            const lngSpan = maxLng - minLng;
+
+            // Add padding based on the geographical span to give more breathing room
+            const latPadding = Math.max(latSpan * 0.3, 0.005); // 30% padding or 0.005 degrees minimum
+            const lngPadding = Math.max(lngSpan * 0.3, 0.005);
+
+            // Expand the domain to include padding
+            const paddedMinLat = minLat - latPadding;
+            const paddedMaxLat = maxLat + latPadding;
+            const paddedMinLng = minLng - lngPadding;
+            const paddedMaxLng = maxLng + lngPadding;
+
+            // Create scales to map lat/lng to screen coordinates with better spacing
+            const screenPadding = Math.min(width, height) * 0.05; // Smaller screen padding
+            const xScale = d3.scaleLinear()
+                .domain([paddedMinLng, paddedMaxLng])
+                .range([screenPadding, width - screenPadding]);
+            const yScale = d3.scaleLinear()
+                .domain([paddedMaxLat, paddedMinLat]) // Flip Y axis (north = up)
+                .range([screenPadding, height - screenPadding]);
+
+            // Set initial positions based on geographical coordinates
+            nodesWithLocation.forEach(node => {
+                const lat = node.location.latitude;
+                const lng = node.location.longitude;
+
+                // Clamp outlier coordinates to the focused bounds to keep them visible
+                const clampedLat = Math.max(paddedMinLat, Math.min(paddedMaxLat, lat));
+                const clampedLng = Math.max(paddedMinLng, Math.min(paddedMaxLng, lng));
+
+                node.x = xScale(clampedLng);
+                node.y = yScale(clampedLat);
+
+                // Fix positions initially to prevent random movement
+                node.fx = node.x;
+                node.fy = node.y;
+
+                // Log if this node was clamped (outlier)
+                if (lat !== clampedLat || lng !== clampedLng) {
+                    console.log(`Clamped outlier node ${node.name}: (${lat}, ${lng}) -> (${clampedLat}, ${clampedLng})`);
+                }
+            });
+
+            // For nodes without location, don't fix their positions - let them be positioned
+            // by the force simulation based on their connections to nodes with locations
+            nodesWithoutLocation.forEach(node => {
+                // Start them near the center but don't fix them
+                node.x = width / 2 + (Math.random() - 0.5) * 100;
+                node.y = height / 2 + (Math.random() - 0.5) * 100;
+                // Don't set fx/fy - let the simulation position them
+            });
+
+            console.log('Set geographical positions for nodes with location data');
+        }
+
+        // Create force simulation
+        simulation = d3.forceSimulation(data.nodes)
+            .force('link', d3.forceLink(data.links).id(d => d.id).distance(d => Math.max(80, 250 - d.strength * 15)))
+            .force('charge', d3.forceManyBody().strength(-400))
+            .force('center', d3.forceCenter(width / 2, height / 2))
+            .force('collision', d3.forceCollide().radius(d => d.size + 20));
+
+        // If we have geographical positioning, adjust forces and release fixed positions
+        if (nodesWithLocation.length > 0) {
+            // Adjust forces for geographical layout
+            simulation
+                .force('charge', d3.forceManyBody().strength(-200)) // Moderate repulsion
+                .force('center', null) // Remove centering force
+                .force('link', d3.forceLink(data.links).id(d => d.id)
+                    .distance(d => Math.max(100, 300 - d.strength * 20)) // Longer links for better spacing
+                    .strength(0.7)); // Moderate link strength
+
+            // Release fixed positions for nodes with location after initial layout
+            // This allows small adjustments while maintaining geographical structure
+            setTimeout(() => {
+                nodesWithLocation.forEach(node => {
+                    node.fx = null;
+                    node.fy = null;
+                });
+                // Restart with lower alpha for gentle adjustment
+                simulation.alpha(0.2).restart();
+            }, 1500);
+        }
+
+        console.log('Created simulation with', data.nodes.length, 'nodes');
+
+        // Create links
+        const link = g.append('g')
+            .attr('class', 'links')
+            .selectAll('line')
+            .data(data.links)
+            .join('line')
+            .attr('class', 'link')
+            .attr('stroke', d => snrColorScale(d.avg_snr))
+            .attr('stroke-width', d => Math.max(1, d.strength))
+            .attr('stroke-opacity', 0.8)
+            .style('cursor', 'pointer')
+            .on('mouseover', function(event, d) {
+                showLinkHoverDetails(d);
+            })
+            .on('mouseout', function() {
+                clearHoverDetails();
+            })
+            .on('click', function(event, d) {
+                event.stopPropagation();
+                if (selectedLink === d) {
+                    clearSelection();
+                } else {
+                    selectLink(d);
+                }
+            });
+
+        console.log('Created', data.links.length, 'links');
+
+        // Add indirect connections if present
+        if (data.indirect_connections && data.indirect_connections.length > 0) {
+            const indirectLink = g.append('g')
+                .attr('class', 'indirect-links')
+                .selectAll('line')
+                .data(data.indirect_connections)
+                .join('line')
+                .attr('class', 'link indirect')
+                .attr('stroke', '#6c757d')
+                .attr('stroke-width', d => Math.max(1, d.strength))
+                .attr('stroke-opacity', 0.4)
+                .attr('stroke-dasharray', '5,5')
+                .style('cursor', 'pointer')
+                .on('mouseover', function(event, d) {
+                    showLinkHoverDetails(d);
+                })
+                .on('mouseout', function() {
+                    clearHoverDetails();
+                })
+                .on('click', function(event, d) {
+                    event.stopPropagation();
+                    if (selectedLink === d) {
+                        clearSelection();
+                    } else {
+                        selectLink(d);
+                    }
+                });
+
+            console.log('Created', data.indirect_connections.length, 'indirect connections');
+        }
+
+        // Create nodes
+        const node = g.append('g')
+            .attr('class', 'nodes')
+            .selectAll('g')
+            .data(data.nodes)
+            .join('g')
+            .attr('class', 'node')
+            .style('cursor', 'pointer')
+            .call(d3.drag()
+                .on('start', dragstarted)
+                .on('drag', dragged)
+                .on('end', dragended))
+            .on('mouseover', function(event, d) {
+                showNodeHoverDetails(d);
+            })
+            .on('mouseout', function() {
+                clearHoverDetails();
+            })
+            .on('click', function(event, d) {
+                event.stopPropagation();
+                if (selectedNode && selectedNode.id === d.id) {
+                    clearSelection();
+                } else {
+                    selectNode(d);
+                }
+            });
+
+        console.log('Created node groups');
+
+        // Add circles for nodes
+        node.append('circle')
+            .attr('r', d => d.size)
+            .attr('fill', d => d.avg_snr ? snrColorScale(d.avg_snr) : '#6c757d')
+            .attr('stroke', '#fff')
+            .attr('stroke-width', 2);
+
+        console.log('Added circles to nodes');
+
+        // Add labels - show complete names
+        node.append('text')
+            .attr('class', 'node-label')
+            .text(d => d.name)
+            .attr('dy', d => d.size + 15)
+            .style('font-size', '12px');
+
+        console.log('Added labels to nodes');
+
+        // Add click handler to SVG background to clear selection
+        svg.on('click', function(event) {
+            if (event.target === this) {
+                clearSelection();
+            }
+        });
+
+        // Update positions on simulation tick
+        simulation.on('tick', () => {
+            link
+                .attr('x1', d => d.source.x)
+                .attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x)
+                .attr('y2', d => d.target.y);
+
+            if (data.indirect_connections && data.indirect_connections.length > 0) {
+                d3.selectAll('.indirect-links line')
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+            }
+
+            node.attr('transform', d => `translate(${d.x},${d.y})`);
+        });
+
+        // Auto-center the graph after initial simulation stabilizes
+        let hasAutoCentered = false;
+        simulation.on('end', () => {
+            if (!hasAutoCentered) {
+                hasAutoCentered = true;
+                setTimeout(() => {
+                    console.log('Auto-centering graph after simulation end');
+                    centerGraph();
+                }, 100);
+            }
+        });
+
+        console.log('Set up simulation event handlers');
+
+        // Store references for utility functions
+        window.graphSvg = svg;
+        window.graphG = g;
+        window.graphZoom = zoom;
+        window.graphWidth = width;
+        window.graphHeight = height;
+        window.graphNodes = node;
+        window.graphLinks = link;
+
+        console.log('renderGraph completed successfully. Stored references:', {
+            graphSvg: !!window.graphSvg,
+            graphG: !!window.graphG,
+            graphZoom: !!window.graphZoom,
+            simulation: !!simulation,
+            width: window.graphWidth,
+            height: window.graphHeight
+        });
+
+    } catch (error) {
+        console.error('Error in renderGraph:', error);
+        console.error('Error stack:', error.stack);
+        showError('Failed to render graph: ' + error.message);
+    }
+}
+
+function searchNodes(query) {
+    if (!currentGraph || !currentGraph.nodes) {
+        return;
+    }
+
+    const results = currentGraph.nodes.filter(node => {
+        const nodeIdHex = node.id.toString(16).padStart(8, '0');
+        return node.name.toLowerCase().includes(query) ||
+               nodeIdHex.includes(query) ||
+               node.id.toString().includes(query);
+    }).slice(0, 10); // Limit to 10 results
+
+    searchResults = results;
+    displaySearchResults(results);
+}
+
+function displaySearchResults(results) {
+    const container = document.getElementById('searchResults');
+
+    if (results.length === 0) {
+        container.innerHTML = '<small class="text-muted">No nodes found</small>';
+        return;
+    }
+
+    container.innerHTML = results.map((node, index) => {
+        const nodeIdHex = node.id.toString(16).padStart(8, '0');
+        return `
+            <div class="search-result-item" onclick="selectSearchResult(${index})">
+                <div><strong>${node.name}</strong></div>
+                <small class="text-muted">!${nodeIdHex} • ${node.connections} connections</small>
+            </div>
+        `;
+    }).join('');
+}
+
+function selectSearchResult(index) {
+    const node = searchResults[index];
+    if (!node) return;
+
+    // Highlight the selected result
+    document.querySelectorAll('.search-result-item').forEach((item, i) => {
+        item.classList.toggle('selected', i === index);
+    });
+
+    // Focus on the node in the graph and select it
+    focusOnNode(node);
+    selectNode(node);
+}
+
+function focusOnNode(targetNode) {
+    console.log('focusOnNode called with:', targetNode);
+
+    if (!window.graphSvg || !window.graphZoom || !simulation) {
+        console.log('Missing dependencies:', {
+            graphSvg: !!window.graphSvg,
+            graphZoom: !!window.graphZoom,
+            simulation: !!simulation
+        });
+        return;
+    }
+
+    // Find the node in the simulation
+    const simNode = simulation.nodes().find(n => n.id === targetNode.id);
+    if (!simNode) {
+        console.log('Node not found in simulation:', targetNode.id);
+        console.log('Available nodes:', simulation.nodes().map(n => ({id: n.id, name: n.name})));
+        return;
+    }
+
+    console.log('Found simulation node:', simNode);
+
+    // Ensure simulation has stable positions
+    if (simulation.alpha() > 0.1) {
+        console.log('Stabilizing simulation...');
+        // Let the simulation run for a bit to get stable positions
+        for (let i = 0; i < 100; ++i) simulation.tick();
+    }
+
+    console.log('Node position:', {x: simNode.x, y: simNode.y});
+    console.log('Graph dimensions:', {width: window.graphWidth, height: window.graphHeight});
+
+    // Ensure we have valid graph dimensions
+    let graphWidth = window.graphWidth;
+    let graphHeight = window.graphHeight;
+
+    if (!graphWidth || !graphHeight || graphWidth === 0 || graphHeight === 0) {
+        // Recalculate dimensions from the container
+        const container = document.getElementById('networkGraph');
+        if (container) {
+            const containerRect = container.getBoundingClientRect();
+            graphWidth = containerRect.width;
+            graphHeight = containerRect.height;
+
+            // Update stored dimensions
+            window.graphWidth = graphWidth;
+            window.graphHeight = graphHeight;
+
+            console.log('Recalculated graph dimensions:', {width: graphWidth, height: graphHeight});
+        }
+    }
+
+    // Ensure we have valid dimensions before proceeding
+    if (!graphWidth || !graphHeight || graphWidth === 0 || graphHeight === 0) {
+        console.log('Cannot focus on node: invalid graph dimensions');
+        return;
+    }
+
+    // Calculate zoom and pan to center on the node
+    const scale = 2.0;
+    const translateX = graphWidth / 2 - scale * simNode.x;
+    const translateY = graphHeight / 2 - scale * simNode.y;
+    const translate = [translateX, translateY];
+
+    console.log('Calculated transform:', {
+        scale,
+        translate,
+        translateX,
+        translateY,
+        graphWidth,
+        graphHeight,
+        nodeX: simNode.x,
+        nodeY: simNode.y
+    });
+
+    // Apply the transform using the stored zoom behavior
+    const transform = d3.zoomIdentity.translate(translateX, translateY).scale(scale);
+
+    console.log('Applying transform:', transform);
+    console.log('Transform toString:', transform.toString());
+
+    // Use the zoom behavior's transform method properly
+    window.graphSvg.transition().duration(750)
+        .call(window.graphZoom.transform, transform);
+}
+
+function selectNode(node) {
+    clearSelection();
+
+    selectedNode = node;
+    selectedLink = null;
+
+    // Highlight the node visually
+    d3.selectAll('.node')
+        .filter(d => d.id === node.id)
+        .classed('selected', true);
+
+    // Show detailed information
+    showSelectedNodeDetails(node);
+}
+
+function selectLink(link) {
+    clearSelection();
+
+    selectedLink = link;
+    selectedNode = null;
+
+    // Highlight the link visually
+    d3.selectAll('.link')
+        .filter(d => d === link)
+        .classed('selected', true);
+
+    // Show detailed information
+    showSelectedLinkDetails(link);
+}
+
+function clearSelection() {
+    selectedNode = null;
+    selectedLink = null;
+
+    // Clear visual highlights
+    d3.selectAll('.node').classed('selected', false);
+    d3.selectAll('.link').classed('selected', false);
+    d3.selectAll('.node-label').classed('highlighted', false);
+
+    // Clear search result highlights
+    document.querySelectorAll('.search-result-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+
+    // Hide selected details
+    document.getElementById('selectedDetails').style.display = 'none';
+}
+
+function clearSearchResults() {
+    document.getElementById('searchResults').innerHTML = '';
+    searchResults = [];
+}
+
+function showSelectedNodeDetails(node) {
+    const nodeIdHex = node.id.toString(16).padStart(8, '0');
+    const content = `
+        <div class="row">
+            <div class="col-12">
+                <h6>${node.name}</h6>
+                <p class="text-muted">Node ID: !${nodeIdHex}</p>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-6">
+                <strong>Connections:</strong><br>
+                <span class="h5 text-primary">${node.connections}</span>
+            </div>
+            <div class="col-6">
+                <strong>Packets:</strong><br>
+                <span class="h5 text-info">${node.packet_count}</span>
+            </div>
+        </div>
+        <div class="row mt-2">
+            <div class="col-6">
+                <strong>Avg SNR:</strong><br>
+                <span class="h6 ${node.avg_snr ? (node.avg_snr > -10 ? 'text-success' : 'text-warning') : 'text-muted'}">${node.avg_snr ? node.avg_snr + ' dB' : 'N/A'}</span>
+            </div>
+            <div class="col-6">
+                <strong>Last Seen:</strong><br>
+                <small class="text-muted">${new Date(node.last_seen * 1000).toLocaleString()}</small>
+            </div>
+        </div>
+        <div class="row mt-2">
+            <div class="col-12">
+                <a href="/node/${node.id}" class="btn btn-primary btn-sm">
+                    <i class="bi bi-router"></i> View Node Details
+                </a>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('selectedDetailsContent').innerHTML = content;
+    document.getElementById('selectedDetails').style.display = 'block';
+}
+
+function showSelectedLinkDetails(link) {
+    const sourceNode = currentGraph.nodes.find(n => n.id === link.source.id || n.id === link.source);
+    const targetNode = currentGraph.nodes.find(n => n.id === link.target.id || n.id === link.target);
+
+    const content = `
+        <div class="row">
+            <div class="col-12">
+                <h6>${sourceNode ? sourceNode.name : link.source} ↔ ${targetNode ? targetNode.name : link.target}</h6>
+                <p class="text-muted">${link.type === 'direct' ? 'Direct RF Link' : 'Multi-hop Connection'}</p>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-6">
+                <strong>Average SNR:</strong><br>
+                <span class="h5 ${link.avg_snr > -10 ? 'text-success' : 'text-warning'}">${link.avg_snr} dB</span>
+            </div>
+            <div class="col-6">
+                <strong>Packets:</strong><br>
+                <span class="h5 text-info">${link.packet_count || link.path_count || 0}</span>
+            </div>
+        </div>
+        ${link.hop_count ? `
+        <div class="row mt-2">
+            <div class="col-6">
+                <strong>Hop Count:</strong><br>
+                <span class="h6 text-primary">${link.hop_count}</span>
+            </div>
+        </div>
+        ` : ''}
+        <div class="row mt-2">
+            <div class="col-6">
+                <strong>Last Seen:</strong><br>
+                <small class="text-muted">${new Date(link.last_seen * 1000).toLocaleString()}</small>
+            </div>
+            <div class="col-6">
+                <a href="/traceroute-hops?from_node=${link.source.id}&to_node=${link.target.id}" class="btn btn-outline-primary btn-sm">
+                    <i class="bi bi-diagram-3"></i> View Link
+                </a>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('selectedDetailsContent').innerHTML = content;
+    document.getElementById('selectedDetails').style.display = 'block';
+}
+
+function showNodeHoverDetails(node) {
+    const nodeIdHex = node.id.toString(16).padStart(8, '0');
+    const content = `
+        <div><strong>${node.name}</strong></div>
+        <div class="text-muted">!${nodeIdHex}</div>
+        <hr class="my-2">
+        <div><strong>Connections:</strong> ${node.connections}</div>
+        <div><strong>Packets:</strong> ${node.packet_count}</div>
+        <div><strong>Avg SNR:</strong> ${node.avg_snr ? node.avg_snr + ' dB' : 'N/A'}</div>
+        <div><strong>Last Seen:</strong><br>
+        <small>${new Date(node.last_seen * 1000).toLocaleString()}</small></div>
+    `;
+
+    document.getElementById('hoverDetails').innerHTML = content;
+}
+
+function showLinkHoverDetails(link) {
+    const sourceNode = currentGraph.nodes.find(n => n.id === link.source.id || n.id === link.source);
+    const targetNode = currentGraph.nodes.find(n => n.id === link.target.id || n.id === link.target);
+
+    const content = `
+        <div><strong>Link</strong></div>
+        <div class="text-muted">${sourceNode ? sourceNode.name : link.source} ↔ ${targetNode ? targetNode.name : link.target}</div>
+        <hr class="my-2">
+        <div><strong>Type:</strong> ${link.type === 'direct' ? 'Direct RF' : 'Multi-hop'}</div>
+        <div><strong>Avg SNR:</strong> ${link.avg_snr} dB</div>
+        <div><strong>Packets:</strong> ${link.packet_count || link.path_count || 0}</div>
+        ${link.hop_count ? `<div><strong>Hops:</strong> ${link.hop_count}</div>` : ''}
+        <div><strong>Last Seen:</strong><br>
+        <small>${new Date(link.last_seen * 1000).toLocaleString()}</small></div>
+    `;
+
+    document.getElementById('hoverDetails').innerHTML = content;
+}
+
+function clearHoverDetails() {
+    document.getElementById('hoverDetails').innerHTML = '<small class="text-muted">Hover over nodes or links for details</small>';
+}
+
+function getNodeName(nodeRef) {
+    if (typeof nodeRef === 'object' && nodeRef.name) {
+        return nodeRef.name;
+    }
+    // Find node by ID in current graph
+    const node = currentGraph.nodes.find(n => n.id === nodeRef);
+    return node ? node.name : `!${nodeRef.toString(16).padStart(8, '0')}`;
+}
+
+// Drag functions
+function dragstarted(event, d) {
+    if (!event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+}
+
+function dragged(event, d) {
+    d.fx = event.x;
+    d.fy = event.y;
+}
+
+function dragended(event, d) {
+    if (!event.active) simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+}
+
+// Utility functions
+function centerGraph() {
+    console.log('centerGraph called');
+
+    if (!window.graphSvg || !window.graphG || !window.graphZoom) {
+        console.log('Missing dependencies for centerGraph:', {
+            graphSvg: !!window.graphSvg,
+            graphG: !!window.graphG,
+            graphZoom: !!window.graphZoom
+        });
+        return;
+    }
+
+    // Ensure we have valid graph dimensions
+    let graphWidth = window.graphWidth;
+    let graphHeight = window.graphHeight;
+
+    if (!graphWidth || !graphHeight || graphWidth === 0 || graphHeight === 0) {
+        const container = document.getElementById('networkGraph');
+        if (container) {
+            const containerRect = container.getBoundingClientRect();
+            graphWidth = containerRect.width;
+            graphHeight = containerRect.height;
+            window.graphWidth = graphWidth;
+            window.graphHeight = graphHeight;
+        }
+    }
+
+    if (!graphWidth || !graphHeight || graphWidth === 0 || graphHeight === 0) {
+        console.log('Cannot center graph: invalid dimensions');
+        return;
+    }
+
+    try {
+        const bounds = window.graphG.node().getBBox();
+        console.log('Graph bounds:', bounds);
+        console.log('Container dimensions:', {width: graphWidth, height: graphHeight});
+
+        // Calculate scale with better margins for geographical layouts
+        // Use a more conservative scale factor to avoid over-zooming
+        const marginFactor = 0.85; // Leave 15% margin
+        const scaleX = (graphWidth * marginFactor) / bounds.width;
+        const scaleY = (graphHeight * marginFactor) / bounds.height;
+        const scale = Math.min(scaleX, scaleY, 2.0); // Cap at 2x zoom to avoid over-zooming
+
+        const translateX = graphWidth / 2 - scale * (bounds.x + bounds.width / 2);
+        const translateY = graphHeight / 2 - scale * (bounds.y + bounds.height / 2);
+
+        console.log('Center transform:', {scale, translateX, translateY, bounds});
+
+        const transform = d3.zoomIdentity.translate(translateX, translateY).scale(scale);
+
+        window.graphSvg.transition().duration(750)
+            .call(window.graphZoom.transform, transform);
+    } catch (error) {
+        console.error('Error in centerGraph:', error);
+    }
+}
+
+function resetZoom() {
+    console.log('resetZoom called');
+
+    if (!window.graphSvg || !window.graphZoom) {
+        console.log('Missing dependencies for resetZoom');
+        return;
+    }
+
+    window.graphSvg.transition().duration(750)
+        .call(window.graphZoom.transform, d3.zoomIdentity);
+}
+
+function refreshGraph() {
+    loadGraph();
+}
+
+function showLoading() {
+    document.getElementById('loadingSpinner').style.display = 'flex';
+    document.getElementById('networkGraph').style.display = 'none';
+    document.getElementById('graphError').style.display = 'none';
+}
+
+function hideLoading() {
+    document.getElementById('loadingSpinner').style.display = 'none';
+    document.getElementById('networkGraph').style.display = 'block';
+}
+
+function showError(message) {
+    document.getElementById('loadingSpinner').style.display = 'none';
+    document.getElementById('networkGraph').style.display = 'none';
+    const errorDiv = document.getElementById('graphError');
+    errorDiv.style.display = 'flex';
+    errorDiv.querySelector('p').textContent = message;
+}
+
+function updateStats(stats) {
+    const statsContent = `
+        <div><strong>Links:</strong> ${stats.links_found}</div>
+        <div><strong>Packets:</strong> ${stats.packets_with_rf_hops}</div>
+        <div><strong>RF Hops:</strong> ${stats.total_rf_hops}</div>
+    `;
+    document.getElementById('graphStats').innerHTML = statsContent;
+}
+
+// Handle window resize
+window.addEventListener('resize', function() {
+    if (simulation && currentGraph) {
+        setTimeout(() => {
+            const container = document.getElementById('networkGraph');
+            const containerRect = container.getBoundingClientRect();
+            const width = containerRect.width;
+            const height = containerRect.height;
+
+            // Update SVG dimensions
+            d3.select('#networkGraph svg')
+                .attr('width', width)
+                .attr('height', height);
+
+            // Update simulation center
+            simulation.force('center', d3.forceCenter(width / 2, height / 2));
+            simulation.alpha(0.3).restart();
+
+            // Update stored dimensions
+            window.graphWidth = width;
+            window.graphHeight = height;
+        }, 100);
+    }
+});
+</script>
+
+<!-- Re-open the container for the footer (which we're hiding anyway) -->
+<div class="container mt-4" style="display: none;">
+{% endblock %}

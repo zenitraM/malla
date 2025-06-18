@@ -1,0 +1,524 @@
+{% extends "base.html" %}
+{% from "macros.html" import node_picker, gateway_picker %}
+{% from "components/table_layout_macros.html" import fullscreen_table_container, filter_section, table_controls_section, grouping_section, table_stats_section, table_layout_styles %}
+
+{% block title %}Traceroute - Malla{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/node-picker.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modern-table.css') }}">
+{{ table_layout_styles() }}
+{% endblock %}
+
+{% block content %}
+<!-- Override the base template's container to make this page full-width/full-height -->
+</div> <!-- Close the base template's container -->
+
+{% call fullscreen_table_container("tracerouteTable", "Traceroute Analysis", "bi bi-map", "toggleSidebar") %}
+    <!-- Main table content -->
+    <div id="tracerouteTable" class="modern-table-container"></div>
+{% endcall %}
+
+<!-- Sidebar content (will be injected into the sidebar) -->
+<div id="sidebarContent" style="display: none;">
+    {% call filter_section("filtersForm", "Traceroute Filters") %}
+        <div class="row g-3">
+            <div class="col-12">
+                <label for="start_time" class="form-label">Start Time</label>
+                <input type="datetime-local" class="form-control form-control-sm" id="start_time" name="start_time">
+            </div>
+            <div class="col-12">
+                <label for="end_time" class="form-label">End Time</label>
+                <input type="datetime-local" class="form-control form-control-sm" id="end_time" name="end_time">
+            </div>
+            <div class="col-12">
+                {{ node_picker(
+                    field_name="from_node",
+                    label="Source Node",
+                    selected_value="",
+                    selected_display="",
+                    placeholder="All source nodes"
+                ) }}
+            </div>
+            <div class="col-12">
+                {{ node_picker(
+                    field_name="to_node",
+                    label="Destination Node",
+                    selected_value="",
+                    selected_display="",
+                    placeholder="All destination nodes"
+                ) }}
+            </div>
+            <div class="col-12">
+                {{ node_picker(
+                    field_name="route_node",
+                    label="Route Node",
+                    selected_value="",
+                    selected_display="",
+                    placeholder="All route nodes"
+                ) }}
+                <div class="form-text">
+                    <small class="text-muted">Filter by nodes that appear anywhere in the traceroute path</small>
+                </div>
+            </div>
+            <div class="col-12">
+                {{ gateway_picker(
+                    field_name="gateway_id",
+                    label="Gateway",
+                    selected_value="",
+                    selected_display="",
+                    placeholder="All gateways"
+                ) }}
+            </div>
+            <div class="col-12">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="return_path_only" name="return_path_only" value="1">
+                    <label class="form-check-label" for="return_path_only">
+                        <i class="bi bi-arrow-return-left"></i> Return path only
+                    </label>
+                    <div class="form-text">
+                        <small class="text-muted">Show only traceroutes with return path data (completed round trip)</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endcall %}
+
+    {{ grouping_section("group_packets", "Group by Packet ID", "Group traceroutes with the same packet ID") }}
+
+    {% set table_controls = [
+        {"class": "btn-primary", "id": "applyFilters", "icon": "bi bi-search", "text": "Apply Filters", "type": "button"},
+        {"class": "btn-outline-secondary", "id": "clearFilters", "icon": "bi bi-x-circle", "text": "Clear Filters", "type": "button"},
+        {"class": "btn-outline-info", "id": "refreshTable", "icon": "bi bi-arrow-clockwise", "text": "Refresh", "type": "button"},
+    ] %}
+    {{ table_controls_section(table_controls) }}
+
+    {% set stats_items = [
+        {"label": "Total Traceroutes", "id": "statsTotal", "default": "0"},
+        {"label": "Filtered", "id": "statsFiltered", "default": "0"},
+        {"label": "Grouped", "id": "statsGrouped", "default": "0"},
+        {"label": "Last Update", "id": "statsLastUpdate", "default": "--"}
+    ] %}
+    {{ table_stats_section("tableStats", stats_items) }}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/url-filter-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modern-table.js') }}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Move sidebar content into the actual sidebar FIRST
+    const sidebarContent = document.getElementById('sidebarContent');
+    const sidebarContainer = document.querySelector('.sidebar-content');
+    if (sidebarContent && sidebarContainer) {
+        sidebarContainer.innerHTML = sidebarContent.innerHTML;
+        sidebarContent.remove();
+    }
+
+    // Initialize URL filter manager AFTER sidebar content is moved
+    const urlManager = new URLFilterManager();
+
+    // Expose urlManager to global scope for debugging and testing
+    window.urlManager = urlManager;
+
+    // Initialize sidebar toggle functionality
+    const toggleBtn = document.getElementById('toggleSidebar');
+    const closeBtn = document.getElementById('closeSidebar');
+    const sidebar = document.querySelector('.table-sidebar');
+
+    function toggleSidebar() {
+        sidebar.classList.toggle('collapsed');
+        const icon = toggleBtn.querySelector('i');
+        if (sidebar.classList.contains('collapsed')) {
+            icon.className = 'bi bi-layout-sidebar-inset';
+        } else {
+            icon.className = 'bi bi-layout-sidebar-inset-reverse';
+        }
+    }
+
+    toggleBtn.addEventListener('click', toggleSidebar);
+    closeBtn.addEventListener('click', toggleSidebar);
+
+    // Initialize node pickers after DOM is ready
+    if (window.initializeAllPickers) {
+        window.initializeAllPickers();
+    }
+
+    // Apply current filters (used both for manual application and URL parameter application)
+    function applyCurrentFilters() {
+        const filters = urlManager.getCurrentFilters();
+        table.setFilters(filters);
+        updateStats();
+
+        // Update URL with current filters
+        urlManager.updateURL(filters);
+    }
+
+    // Expose applyCurrentFilters to global scope for event handlers
+    window.applyCurrentFilters = applyCurrentFilters;
+
+    // Add event listeners to all form fields for automatic filtering
+    function addFormFieldListeners() {
+        console.log('Adding form field listeners');
+        const filtersForm = document.getElementById('filtersForm');
+        if (filtersForm) {
+            console.log('Found filtersForm, adding listeners to form inputs');
+            // Add listeners to all form inputs
+            const formInputs = filtersForm.querySelectorAll('input, select');
+            formInputs.forEach(input => {
+                if (input.type === 'checkbox') {
+                    input.addEventListener('change', function() {
+                        // Small delay to ensure checkbox state is updated
+                        setTimeout(applyCurrentFilters, 10);
+                    });
+                } else {
+                    // For text inputs, select fields, etc.
+                    input.addEventListener('change', function() {
+                        applyCurrentFilters();
+                    });
+
+                    // Also trigger on input for text fields and hidden fields (real-time filtering)
+                    if (input.type === 'text' || input.type === 'search' || input.type === 'hidden' || input.type === 'datetime-local') {
+                        let debounceTimer;
+                        input.addEventListener('input', function() {
+                            clearTimeout(debounceTimer);
+                            // For hidden inputs (node pickers), apply immediately without debounce
+                            if (input.type === 'hidden') {
+                                applyCurrentFilters();
+                            } else {
+                                debounceTimer = setTimeout(applyCurrentFilters, 300);
+                            }
+                        });
+                    }
+                }
+            });
+        } else {
+            console.log('filtersForm not found');
+        }
+    }
+
+    // Initialize URL parameters and table
+    async function initializePageWithFilters() {
+        // Small delay to ensure DOM is updated and sidebar content is moved
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Apply URL parameters after pickers are initialized
+        const hasParams = await urlManager.applyURLParameters();
+
+        // Add form field listeners for automatic filtering
+        addFormFieldListeners();
+
+        if (hasParams) {
+            // If we have URL parameters, apply filters first then load data
+            // This prevents the initial unfiltered request
+            setTimeout(() => {
+                applyCurrentFilters();
+            }, 100);
+        } else {
+            // Only load data explicitly if ModernTable deferred the initial load
+            if (table.options.deferInitialLoad) {
+                table.loadData();
+            }
+        }
+    }
+
+    // Initialize the modern table
+    const table = new ModernTable('tracerouteTable', {
+        endpoint: '/api/traceroute/data',
+        pageSize: 25,
+        searchPlaceholder: 'Search traceroutes...',
+        emptyMessage: 'No traceroutes found',
+        deferInitialLoad: {{ 'true' if defer_initial_load else 'false' }},
+        columns: [
+            {
+                key: 'timestamp',
+                title: 'Timestamp',
+                sortable: true,
+                render: (value, row) => {
+                    return `<a href="/packet/${row.id}" class="text-decoration-none" title="View packet details">
+                                <small>${value}</small>
+                            </a>`;
+                }
+            },
+            {
+                key: 'from_node',
+                title: 'From',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.from_node_id) {
+                        // Use the short name from API response
+                        const shortName = row.from_node_short || `${row.from_node_id.toString(16).padStart(8, '0')}`.slice(-4);
+                        return `<a href="/node/${row.from_node_id}" class="text-decoration-none node-link"
+                                   data-node-id="${row.from_node_id}" data-bs-toggle="tooltip"
+                                   data-bs-placement="top" data-bs-html="true"
+                                   data-bs-title="Loading..." title="View node details">
+                                    ${shortName}
+                                </a>`;
+                    } else {
+                        return value || 'Unknown';
+                    }
+                }
+            },
+            {
+                key: 'to_node',
+                title: 'To',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.to_node_id && row.to_node_id !== 4294967295) {
+                        // Use the short name from API response
+                        const shortName = row.to_node_short || row.to_node_id.toString(16).padStart(8, '0').slice(-4);
+                        return `<a href="/node/${row.to_node_id}" class="text-decoration-none node-link"
+                                   data-node-id="${row.to_node_id}" data-bs-toggle="tooltip"
+                                   data-bs-placement="top" data-bs-html="true"
+                                   data-bs-title="Loading..." title="View node details">
+                                    ${shortName}
+                                </a>`;
+                    } else {
+                        return value || 'Broadcast';
+                    }
+                }
+            },
+                        {
+                key: 'route',
+                title: 'Route',
+                sortable: false,
+                render: (value, row) => {
+                    // Build route display client-side from structured data
+                    if (row.route_nodes && row.route_names &&
+                        Array.isArray(row.route_nodes) && Array.isArray(row.route_names) &&
+                        row.route_nodes.length > 0 && row.route_names.length > 0) {
+
+                        // Create clickable links for each node in the route
+                        const routeParts = row.route_names.map((nodeName, index) => {
+                            const nodeId = row.route_nodes[index];
+                            if (nodeId) {
+                                return `<a href="/node/${nodeId}" class="text-decoration-none node-link"
+                                           data-node-id="${nodeId}" data-bs-toggle="tooltip"
+                                           data-bs-placement="top" data-bs-html="true"
+                                           data-bs-title="Loading..." title="View node details">
+                                            ${nodeName}
+                                        </a>`;
+                            }
+                            return nodeName;
+                        });
+
+                        return routeParts.join(' → ');
+                    }
+
+                    // Fallback for no route data
+                    return `<span class="text-muted">No route data</span>`;
+                }
+            },
+            {
+                key: 'gateway',
+                title: 'Gateway',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.is_grouped) {
+                        // For grouped packets, show gateway count
+                        const count = row.gateway_count;
+                        if (count > 1) {
+                            return `<span class="badge bg-info" title="Multiple gateways: ${row.gateway_list}">
+                                                ${count} gateways
+                                            </span>`;
+                        } else if (count === 1) {
+                            return `<span class="badge bg-info">1 gateway</span>`;
+                        } else {
+                            return `<span class="text-muted">N/A</span>`;
+                        }
+                    } else {
+                        // For individual packets, show gateway short name with link
+                        const gatewayName = row.gateway_name;
+                        const gatewayNodeId = row.gateway_node_id;
+
+                        if (value && value.startsWith('!') && gatewayNodeId) {
+                            // Use last 4 hex digits as short name
+                            const shortName = value.substring(value.length - 4).toUpperCase();
+                            return `<a href="/node/${gatewayNodeId}" class="text-decoration-none node-link"
+                                       data-node-id="${gatewayNodeId}" data-bs-toggle="tooltip"
+                                       data-bs-placement="top" data-bs-html="true"
+                                       data-bs-title="Loading..." title="View node details">
+                                        ${shortName}
+                                    </a>`;
+                        } else if (gatewayName && gatewayNodeId) {
+                            // Extract short name from gateway name if available
+                            const parenMatch = gatewayName.match(/\(([^)]+)\)$/);
+                            const shortName = parenMatch ? parenMatch[1] : gatewayName.substring(0, 4).toUpperCase();
+                            return `<a href="/node/${gatewayNodeId}" class="text-decoration-none node-link"
+                                       data-node-id="${gatewayNodeId}" data-bs-toggle="tooltip"
+                                       data-bs-placement="top" data-bs-html="true"
+                                       data-bs-title="Loading..." title="View node details">
+                                        ${shortName}
+                                    </a>`;
+                        }
+                        return value || 'N/A';
+                    }
+                }
+            },
+            {
+                key: 'rssi',
+                title: 'RSSI',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.is_grouped) {
+                        return value && value !== 'N/A' ?
+                            `<span>${value}</span>` :
+                            `<span class="text-muted">N/A</span>`;
+                    } else if (value !== null && value !== '' && value !== 'N/A') {
+                        const rssiValue = parseFloat(value);
+                        const colorClass = getRssiColorClass(rssiValue);
+                        return `<span class="${colorClass}">${value} dBm</span>`;
+                    }
+                    return '<span class="text-muted">N/A</span>';
+                }
+            },
+            {
+                key: 'snr',
+                title: 'SNR',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.is_grouped) {
+                        return value && value !== 'N/A' ?
+                            `<span>${value}</span>` :
+                            `<span class="text-muted">N/A</span>`;
+                    } else if (value !== null && value !== '' && value !== 'N/A') {
+                        const snrValue = parseFloat(value);
+                        const colorClass = getSnrColorClass(snrValue);
+                        return `<span class="${colorClass}">${value} dB</span>`;
+                    }
+                    return '<span class="text-muted">N/A</span>';
+                }
+            },
+            {
+                key: 'hops',
+                title: 'Hops',
+                sortable: true,
+                render: (value, row) => {
+                    if (row.is_grouped) {
+                        return value && value !== 'N/A' ?
+                            `<span>${value}</span>` :
+                            `<span class="text-muted">N/A</span>`;
+                    } else if (value !== null && value !== '') {
+                        const hops = parseInt(value);
+                        if (hops === 0) {
+                            return `<span class="badge bg-success">Direct</span>`;
+                        } else if (hops <= 2) {
+                            return `<span class="badge bg-info">${hops}</span>`;
+                        } else {
+                            return `<span class="badge bg-warning">${hops}</span>`;
+                        }
+                    }
+                    return `<span class="text-muted">N/A</span>`;
+                }
+            },
+            {
+                key: 'id',
+                title: 'Actions',
+                sortable: false,
+                render: (value, row) => {
+                    // Create filtered URLs using the URL manager
+                    const hopsUrl = urlManager.createFilteredURL('/traceroute-hops', {
+                        from_node: row.from_node_id,
+                        to_node: row.to_node_id
+                    });
+                    const packetsUrl = urlManager.createFilteredURL('/packets', {
+                        from_node: row.from_node_id,
+                        to_node: row.to_node_id
+                    });
+
+                    return `
+                        <div class="btn-group" role="group">
+                            <a href="/packet/${value}"
+                               class="btn btn-sm btn-outline-info" title="View packet details">
+                                <i class="bi bi-info-circle"></i>
+                            </a>
+                            <a href="${hopsUrl}"
+                               class="btn btn-sm btn-outline-secondary" title="Analyze hops between these nodes">
+                                <i class="bi bi-diagram-3"></i>
+                            </a>
+                            <a href="${packetsUrl}"
+                               class="btn btn-sm btn-outline-primary" title="View packets between these nodes">
+                                <i class="bi bi-arrow-left-right"></i>
+                            </a>
+                        </div>`;
+                }
+            }
+        ]
+    });
+
+    // Set default sort
+    table.state.sortBy = 'timestamp';
+    table.state.sortOrder = 'desc';
+
+    // Filter handling
+    const applyFiltersBtn = document.getElementById('applyFilters');
+    const clearFiltersBtn = document.getElementById('clearFilters');
+    const refreshBtn = document.getElementById('refreshTable');
+    const groupPacketsCheckbox = document.getElementById('group_packets');
+
+    // Apply filters
+    applyFiltersBtn.addEventListener('click', applyCurrentFilters);
+
+    // Clear filters
+    clearFiltersBtn.addEventListener('click', function() {
+        urlManager.clearFilters();
+        table.clearFilters();
+        updateStats();
+    });
+
+    // Refresh table
+    refreshBtn.addEventListener('click', function() {
+        table.refresh();
+        updateStats();
+    });
+
+    // Handle grouping toggle
+    groupPacketsCheckbox.addEventListener('change', function() {
+        table.loadData();
+        updateStats();
+
+        // Update URL when grouping changes
+        const currentFilters = urlManager.getCurrentFilters();
+        urlManager.updateURL(currentFilters);
+    });
+
+    // Update stats
+    function updateStats() {
+        document.getElementById('statsTotal').textContent = table.state.totalCount || '0';
+        document.getElementById('statsFiltered').textContent = table.state.data.length || '0';
+        document.getElementById('statsGrouped').textContent = groupPacketsCheckbox.checked ? 'Yes' : 'No';
+        document.getElementById('statsLastUpdate').textContent = new Date().toLocaleTimeString();
+    }
+
+    // Helper functions for signal quality color coding
+    function getRssiColorClass(rssi) {
+        if (rssi >= -60) return 'text-success'; // Excellent
+        if (rssi >= -70) return 'text-info';    // Good
+        if (rssi >= -80) return 'text-warning'; // Fair
+        return 'text-danger';                   // Poor
+    }
+
+    function getSnrColorClass(snr) {
+        if (snr > 5) return 'text-success';     // Excellent
+        if (snr > 0) return 'text-info';       // Good
+        if (snr > -5) return 'text-warning';   // Fair
+        return 'text-danger';                  // Poor
+    }
+
+    // Initialize tooltips after table loads
+    table.on('dataLoaded', function() {
+        // Initialize Bootstrap tooltips
+        const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl);
+        });
+        updateStats();
+    });
+
+    // Initialize page with filters and load data
+    initializePageWithFilters();
+});
+</script>
+{% endblock %}

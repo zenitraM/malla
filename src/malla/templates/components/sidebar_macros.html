@@ -1,0 +1,247 @@
+{# Sidebar macros for reusable components #}
+
+{# Common sidebar structure #}
+{% macro sidebar_container(sidebar_id, title, icon_class, toggle_button_id) %}
+<div id="{{ sidebar_id }}" class="sidebar">
+    <div class="sidebar-header">
+        <h5><i class="{{ icon_class }}"></i> {{ title }}</h5>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="{{ toggle_button_id }}">
+            <i class="bi bi-chevron-right"></i>
+        </button>
+    </div>
+    {{ caller() }}
+</div>
+{% endmacro %}
+
+{# Selected item details section #}
+{% macro selected_details_section(clear_button_id) %}
+<div class="sidebar-section" id="selectedDetails" style="display: none;">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0"><i class="bi bi-info-circle"></i> Selected Item</h6>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="{{ clear_button_id }}" title="Clear selection">
+            <i class="bi bi-x"></i>
+        </button>
+    </div>
+    <div id="selectedDetailsContent" class="selected-details">
+        <!-- Selected item details will appear here -->
+    </div>
+</div>
+{% endmacro %}
+
+{# Search section #}
+{% macro search_section(search_input_id, clear_search_id, search_results_id) %}
+<div class="sidebar-section">
+    <h6><i class="bi bi-search"></i> Search</h6>
+    <div class="input-group input-group-sm">
+        <input type="text" class="form-control" id="{{ search_input_id }}" placeholder="Search...">
+        <button class="btn btn-outline-secondary" type="button" id="{{ clear_search_id }}">
+            <i class="bi bi-x"></i>
+        </button>
+    </div>
+    <div id="{{ search_results_id }}" class="search-results mt-2"></div>
+</div>
+{% endmacro %}
+
+{# Controls section #}
+{% macro controls_section(controls) %}
+<div class="sidebar-section">
+    <h6><i class="bi bi-gear"></i> Controls</h6>
+    <div class="d-grid gap-2">
+        {% for control in controls %}
+        <button type="button" class="btn {{ control.class }} btn-sm" onclick="{{ control.onclick }}" {% if control.id %}id="{{ control.id }}"{% endif %}>
+            <i class="{{ control.icon }}"></i> {{ control.text }}
+        </button>
+        {% endfor %}
+    </div>
+</div>
+{% endmacro %}
+
+{# Stats section #}
+{% macro stats_section(stats_id, stats_items) %}
+<div class="sidebar-section">
+    <h6><i class="bi bi-bar-chart"></i> Statistics</h6>
+    <div id="{{ stats_id }}" class="stats-content">
+        {% for item in stats_items %}
+        <div><strong>{{ item.label }}:</strong> <span id="{{ item.id }}">{{ item.default }}</span></div>
+        {% endfor %}
+    </div>
+</div>
+{% endmacro %}
+
+{# Legend section #}
+{% macro legend_section(legend_items) %}
+<div class="sidebar-section">
+    <h6><i class="bi bi-palette"></i> Legend</h6>
+    <div class="legend-content">
+        {% for item in legend_items %}
+        <div class="legend-item">
+            {% if item.type == "span" %}
+            <{{ item.type }} class="{{ item.class }}"{% if item.style %} style="{{ item.style }}"{% endif %}>{{ item.content }}</{{ item.type }}>
+            {% else %}
+            <i class="{{ item.class }}"></i>
+            {% endif %}
+            <small>{{ item.text }}</small>
+        </div>
+        {% endfor %}
+        {{ caller() if caller }}
+    </div>
+</div>
+{% endmacro %}
+
+{# Sidebar styles macro #}
+{% macro sidebar_styles() %}
+<style>
+.sidebar {
+    width: 350px;
+    background: white;
+    border-left: 1px solid #dee2e6;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    transition: margin-right 0.3s ease;
+    z-index: 1000;
+    order: 2;
+}
+
+.sidebar.collapsed {
+    margin-right: -320px;
+}
+
+.sidebar.collapsed #toggleSidebar {
+    position: fixed;
+    right: 10px;
+    top: 70px;
+    z-index: 1001;
+    background: white;
+    border: 1px solid #dee2e6;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.sidebar-header {
+    padding: 1rem;
+    border-bottom: 1px solid #dee2e6;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f8f9fa;
+}
+
+.sidebar-header h5 {
+    margin: 0;
+    flex-grow: 1;
+}
+
+.sidebar-section {
+    padding: 1rem;
+    border-bottom: 1px solid #f1f3f4;
+}
+
+.sidebar-section h6 {
+    margin-bottom: 0.75rem;
+    color: #495057;
+}
+
+.stats-content {
+    font-size: 0.9rem;
+}
+
+.stats-content div {
+    margin-bottom: 0.25rem;
+}
+
+.legend-content {
+    font-size: 0.9rem;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.legend-item i,
+.legend-item span {
+    margin-right: 0.5rem;
+    flex-shrink: 0;
+}
+
+.legend-line {
+    width: 20px;
+    height: 2px;
+    display: inline-block;
+    margin-right: 0.5rem;
+}
+
+.legend-line.direct {
+    background-color: #28a745;
+}
+
+.legend-line.indirect {
+    background: linear-gradient(90deg, #ffc107 50%, transparent 50%);
+    background-size: 8px 2px;
+}
+
+.search-results {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.selected-details {
+    font-size: 0.9rem;
+}
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 100%;
+        height: 40vh;
+        border-left: none;
+        border-top: 1px solid #dee2e6;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        order: 2;
+        transition: transform 0.3s ease;
+        transform: translateY(0);
+    }
+
+    .sidebar.collapsed {
+        margin-right: 0;
+        transform: translateY(calc(100% - 60px)); /* Show only header */
+    }
+
+    .sidebar.collapsed #toggleSidebar {
+        position: static;
+        right: auto;
+        top: auto;
+        z-index: auto;
+        background: transparent;
+        border: none;
+        box-shadow: none;
+    }
+
+    .sidebar.collapsed .sidebar-header {
+        border-bottom: none;
+    }
+
+    .sidebar-header {
+        flex-shrink: 0;
+    }
+
+    .sidebar-section {
+        flex: 1;
+        overflow-y: auto;
+    }
+
+    /* Update toggle button icon for mobile */
+    .sidebar:not(.collapsed) #toggleSidebar i {
+        transform: rotate(90deg); /* Point down when expanded */
+    }
+
+    .sidebar.collapsed #toggleSidebar i {
+        transform: rotate(-90deg); /* Point up when collapsed */
+    }
+}
+</style>
+{% endmacro %}

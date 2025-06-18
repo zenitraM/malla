@@ -1,0 +1,485 @@
+{% extends "base.html" %}
+
+{% block title %}Longest Links Analysis - Malla{% endblock %}
+
+{% block extra_css %}
+<style>
+    .analysis-card {
+        border-left: 4px solid #0d6efd;
+    }
+    .direct-link-badge {
+        background: #28a745;
+    }
+    .indirect-link-badge {
+        background: #6f42c1;
+    }
+    .distance-display {
+        font-weight: bold;
+        color: #0d6efd;
+        font-size: 1.2em;
+    }
+    .snr-display {
+        font-size: 0.9em;
+    }
+    .hop-count {
+        font-size: 0.8rem;
+        color: #6c757d;
+    }
+    .link-type-tabs .nav-link.active {
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+        color: white;
+    }
+    .table-responsive {
+        max-height: 600px;
+        overflow-y: auto;
+    }
+    .loading-container {
+        text-align: center;
+        padding: 3rem;
+        display: none;
+    }
+    .no-data {
+        text-align: center;
+        padding: 2rem;
+        color: #6c757d;
+    }
+    .link-analysis-btn {
+        padding: 0.2rem 0.5rem;
+        font-size: 0.8rem;
+    }
+    .node-link {
+        color: #0d6efd;
+        text-decoration: none;
+    }
+    .node-link:hover {
+        text-decoration: underline;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1><i class="bi bi-rulers"></i> Longest Links Analysis</h1>
+        <p class="text-muted">Analyze the longest RF links in the mesh network based on geographic distance</p>
+    </div>
+</div>
+
+<!-- Summary Cards -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 id="total-links" class="text-primary">-</h4>
+                <small class="text-muted">Total Links Analyzed</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 id="direct-links" class="text-success">-</h4>
+                <small class="text-muted">Direct RF Links</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 id="longest-direct" class="text-warning">-</h4>
+                <small class="text-muted">Longest Direct Link</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 id="longest-path" class="text-info">-</h4>
+                <small class="text-muted">Longest Path</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filter Controls -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h6><i class="bi bi-funnel"></i> Filter Options</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <label for="min-distance" class="form-label">Minimum Distance (km)</label>
+                        <input type="number" id="min-distance" class="form-control" value="1" min="0" step="0.1">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="min-snr" class="form-label">Minimum SNR (dB)</label>
+                        <input type="number" id="min-snr" class="form-control" value="-200" step="0.1">
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-6">
+                        <label for="max-results" class="form-label">Max Results</label>
+                        <select id="max-results" class="form-select">
+                            <option value="50">50</option>
+                            <option value="100" selected>100</option>
+                            <option value="200">200</option>
+                            <option value="500">500</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 d-flex align-items-end">
+                        <button id="refresh-btn" class="btn btn-primary">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh Analysis
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h6><i class="bi bi-info-circle"></i> Analysis Info</h6>
+            </div>
+            <div class="card-body">
+                <p class="mb-2"><strong>Direct Links:</strong> Single RF hops between two nodes</p>
+                <p class="mb-2"><strong>Indirect Links:</strong> Complete traceroute paths (sum of all hop distances)</p>
+                <p class="mb-0"><small class="text-muted">Distances calculated using GPS coordinates from position packets</small></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Indicator -->
+<div class="loading-container" id="loading">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="mt-2">Analyzing traceroute data and calculating distances...</p>
+</div>
+
+<!-- Link Type Tabs -->
+<div class="row">
+    <div class="col-12">
+        <ul class="nav nav-tabs link-type-tabs" id="linkTypeTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="direct-tab" data-bs-toggle="tab" data-bs-target="#direct-panel" type="button" role="tab">
+                    <span class="badge direct-link-badge me-2">Direct</span>
+                    Single RF Hops
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="indirect-tab" data-bs-toggle="tab" data-bs-target="#indirect-panel" type="button" role="tab">
+                    <span class="badge indirect-link-badge me-2">Indirect</span>
+                    Complete Paths
+                </button>
+            </li>
+        </ul>
+    </div>
+</div>
+
+<!-- Tab Content -->
+<div class="tab-content mt-3">
+    <!-- Direct Links Tab -->
+    <div class="tab-pane fade show active" id="direct-panel" role="tabpanel">
+        <div class="card analysis-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6><i class="bi bi-broadcast"></i> Longest Direct RF Links</h6>
+                <span id="direct-count" class="badge bg-primary">0</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Rank</th>
+                                <th>From Node</th>
+                                <th>To Node</th>
+                                <th>Distance</th>
+                                <th>SNR</th>
+                                <th>Traceroutes</th>
+                                <th>Last Seen</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="direct-links-table">
+                            <!-- Direct links will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="direct-no-data" class="no-data" style="display: none;">
+                    <i class="bi bi-exclamation-triangle text-warning" style="font-size: 3rem;"></i>
+                    <h4 class="mt-3">No Direct Links Found</h4>
+                    <p>No direct RF links found matching your criteria.<br>Try adjusting the filters above.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Indirect Links Tab -->
+    <div class="tab-pane fade" id="indirect-panel" role="tabpanel">
+        <div class="card analysis-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6><i class="bi bi-diagram-3"></i> Longest Complete Paths</h6>
+                <span id="indirect-count" class="badge bg-primary">0</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Rank</th>
+                                <th>From Node</th>
+                                <th>To Node</th>
+                                <th>Total Distance</th>
+                                <th>Hops</th>
+                                <th>Avg SNR</th>
+                                <th>Route</th>
+                                <th>Last Seen</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="indirect-links-table">
+                            <!-- Indirect links will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="indirect-no-data" class="no-data" style="display: none;">
+                    <i class="bi bi-exclamation-triangle text-warning" style="font-size: 3rem;"></i>
+                    <h4 class="mt-3">No Complete Paths Found</h4>
+                    <p>No complete traceroute paths found matching your criteria.<br>Try adjusting the filters above.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    let currentData = null;
+
+    // Load data on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        loadLongestLinks();
+        setupEventListeners();
+    });
+
+    function setupEventListeners() {
+        document.getElementById('refresh-btn').addEventListener('click', loadLongestLinks);
+        
+        // Refresh when filters change
+        document.getElementById('min-distance').addEventListener('change', debounce(loadLongestLinks, 500));
+        document.getElementById('min-snr').addEventListener('change', debounce(loadLongestLinks, 500));
+        document.getElementById('max-results').addEventListener('change', loadLongestLinks);
+    }
+
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    function loadLongestLinks() {
+        const minDistance = parseFloat(document.getElementById('min-distance').value) || 0;
+        const minSnr = parseFloat(document.getElementById('min-snr').value) || -100;
+        const maxResults = parseInt(document.getElementById('max-results').value) || 100;
+
+        // Show loading
+        document.getElementById('loading').style.display = 'block';
+        hideAllTables();
+
+        // Build query parameters
+        const params = new URLSearchParams({
+            min_distance: minDistance,
+            min_snr: minSnr,
+            max_results: maxResults
+        });
+
+        fetch(`/api/longest-links?${params}`)
+            .then(response => response.json())
+            .then(data => {
+                currentData = data;
+                displayResults(data);
+                document.getElementById('loading').style.display = 'none';
+            })
+            .catch(error => {
+                console.error('Error loading longest links:', error);
+                document.getElementById('loading').style.display = 'none';
+                alert('Error loading data: ' + error.message);
+            });
+    }
+
+    function hideAllTables() {
+        document.getElementById('direct-no-data').style.display = 'none';
+        document.getElementById('indirect-no-data').style.display = 'none';
+    }
+
+    function displayResults(data) {
+        // Update summary cards
+        document.getElementById('total-links').textContent = data.summary.total_links;
+        document.getElementById('direct-links').textContent = data.summary.direct_links;
+        document.getElementById('longest-direct').textContent = data.summary.longest_direct || 'N/A';
+        document.getElementById('longest-path').textContent = data.summary.longest_path || 'N/A';
+
+        // Display direct links
+        displayDirectLinks(data.direct_links);
+        
+        // Display indirect links
+        displayIndirectLinks(data.indirect_links);
+
+        // Update tab badges
+        document.getElementById('direct-count').textContent = data.direct_links.length;
+        document.getElementById('indirect-count').textContent = data.indirect_links.length;
+    }
+
+    function displayDirectLinks(links) {
+        const tableBody = document.getElementById('direct-links-table');
+        const noDataDiv = document.getElementById('direct-no-data');
+
+        if (links.length === 0) {
+            tableBody.innerHTML = '';
+            noDataDiv.style.display = 'block';
+            return;
+        }
+
+        noDataDiv.style.display = 'none';
+        
+        let html = '';
+        links.forEach((link, index) => {
+            const snrBadgeClass = getSNRBadgeClass(link.avg_snr);
+            const snrText = link.avg_snr !== null ? `${link.avg_snr.toFixed(1)} dB` : 'N/A';
+            
+            // Handle null distance values
+            const distanceText = link.distance_km !== null ? `${link.distance_km.toFixed(2)} km` : 'Unknown';
+            const isLongDistance = link.distance_km !== null && link.distance_km >= 10;
+            
+            html += `
+                <tr>
+                    <td><strong>${index + 1}</strong></td>
+                    <td>
+                        <a href="/node/${link.from_node_id}" class="node-link" title="${link.from_node_name}">
+                            ${link.from_node_name}
+                        </a>
+                    </td>
+                    <td>
+                        <a href="/node/${link.to_node_id}" class="node-link" title="${link.to_node_name}">
+                            ${link.to_node_name}
+                        </a>
+                    </td>
+                    <td class="${isLongDistance ? 'text-warning fw-bold' : ''}">${distanceText}</td>
+                    <td><span class="badge ${snrBadgeClass}">${snrText}</span></td>
+                    <td class="text-center">${link.traceroute_count}</td>
+                    <td>
+                        <a href="${link.packet_url}" class="btn btn-sm btn-outline-primary" title="View packet details">
+                            <i class="fas fa-eye"></i> Packet ${link.packet_id}
+                        </a>
+                        <a href="/traceroute-hops?from_node=${link.from_node_id}&to_node=${link.to_node_id}" 
+                           class="btn btn-sm btn-outline-info ms-1" title="Analyze this link">
+                            <i class="fas fa-route"></i> Analyze
+                        </a>
+                    </td>
+                </tr>
+            `;
+        });
+
+        tableBody.innerHTML = html;
+    }
+
+    function displayIndirectLinks(links) {
+        const tableBody = document.getElementById('indirect-links-table');
+        const noDataDiv = document.getElementById('indirect-no-data');
+
+        if (links.length === 0) {
+            tableBody.innerHTML = '';
+            noDataDiv.style.display = 'block';
+            return;
+        }
+
+        noDataDiv.style.display = 'none';
+        
+        let html = '';
+        links.forEach((link, index) => {
+            const snrBadgeClass = getSNRBadgeClass(link.avg_snr);
+            const snrText = link.avg_snr !== null ? `${link.avg_snr.toFixed(1)} dB` : 'N/A';
+            
+            // Handle null distance values
+            const distanceText = link.total_distance_km !== null ? `${link.total_distance_km.toFixed(2)} km` : 'Unknown';
+            const isVeryLongPath = link.total_distance_km !== null && link.total_distance_km >= 20;
+            
+            // Format route display
+            let routeDisplay = '';
+            if (link.route_preview && link.route_preview.length > 0) {
+                const maxNodes = 3;
+                const preview = link.route_preview.slice(0, maxNodes);
+                routeDisplay = preview.join(' → ');
+                if (link.route_preview.length > maxNodes) {
+                    routeDisplay += ` (+${link.route_preview.length - maxNodes} more)`;
+                }
+            } else {
+                routeDisplay = 'Direct route';
+            }
+            
+            html += `
+                <tr>
+                    <td><strong>${index + 1}</strong></td>
+                    <td>
+                        <a href="/node/${link.from_node_id}" class="node-link" title="${link.from_node_name}">
+                            ${link.from_node_name}
+                        </a>
+                    </td>
+                    <td>
+                        <a href="/node/${link.to_node_id}" class="node-link" title="${link.to_node_name}">
+                            ${link.to_node_name}
+                        </a>
+                    </td>
+                    <td class="${isVeryLongPath ? 'text-warning fw-bold' : ''}">${distanceText}</td>
+                    <td class="text-center">${link.hop_count}</td>
+                    <td><span class="badge ${snrBadgeClass}">${snrText}</span></td>
+                    <td><small class="text-muted route-preview">${routeDisplay}</small></td>
+                    <td>
+                        <a href="${link.packet_url}" class="btn btn-sm btn-outline-primary" title="View packet details">
+                            <i class="fas fa-eye"></i> Packet ${link.packet_id}
+                        </a>
+                        <a href="/traceroute-hops?from_node=${link.from_node_id}&to_node=${link.to_node_id}" 
+                           class="btn btn-sm btn-outline-info ms-1" title="Analyze this path">
+                            <i class="fas fa-route"></i> Analyze
+                        </a>
+                    </td>
+                </tr>
+            `;
+        });
+
+        tableBody.innerHTML = html;
+    }
+
+    function getSNRBadgeClass(snr) {
+        if (snr === null || snr === undefined) return 'bg-secondary';
+        if (snr >= 5) return 'bg-success';
+        if (snr >= 0) return 'bg-warning';
+        if (snr >= -10) return 'bg-warning text-dark';
+        return 'bg-danger';
+    }
+
+    function getRelativeTime(timestamp) {
+        const now = Date.now() / 1000;
+        const diff = now - timestamp;
+        
+        if (diff < 60) return 'Just now';
+        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+        if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+        if (diff < 2592000) return `${Math.floor(diff / 86400)}d ago`;
+        return `${Math.floor(diff / 2592000)}mo ago`;
+    }
+</script>
+{% endblock %} 

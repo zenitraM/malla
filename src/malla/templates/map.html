@@ -1,0 +1,1155 @@
+{% extends "base.html" %}
+{% from "components/sidebar_macros.html" import sidebar_container, selected_details_section, search_section, controls_section, stats_section, legend_section, sidebar_styles %}
+
+{% block title %}Node Map - Malla{% endblock %}
+
+{% block extra_css %}
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<!-- Leaflet MarkerCluster CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+{% endblock %}
+
+{% block content %}
+<!-- Override the base template's container to make this page full-width/full-height -->
+</div> <!-- Close the base template's container -->
+
+<div class="map-container">
+    <!-- Main Map Area -->
+    <div class="map-main">
+        <div id="mapLoading" class="loading-overlay">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2 text-muted">Loading node locations...</p>
+        </div>
+        <div id="map" class="network-map"></div>
+        <div id="mapError" class="error-overlay" style="display: none;">
+            <i class="bi bi-exclamation-triangle"></i>
+            <p class="mt-2">Error loading map data</p>
+        </div>
+    </div>
+
+    <!-- Sidebar -->
+    {% call sidebar_container("sidebar", "Network Map", "bi bi-map", "toggleSidebar") %}
+        {{ selected_details_section("clearSelection") }}
+
+        <!-- Node Search and List Combined -->
+        <div class="sidebar-section">
+            <h6><i class="bi bi-search"></i> Search & Filter Nodes</h6>
+            <div class="input-group input-group-sm mb-2">
+                <input type="text" class="form-control" id="nodeSearch" placeholder="Search by node name or ID...">
+                <button class="btn btn-outline-secondary" type="button" id="clearSearch">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+
+            <!-- Combined search results and node list -->
+            <div id="nodeListContainer" class="node-list-container">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <small class="text-muted">Nodes (<span id="nodeCount">0</span>)</small>
+                    <small class="text-muted" id="searchResultsCount" style="display: none;">
+                        <span id="searchCount">0</span> results
+                    </small>
+                </div>
+                <div id="nodeList" class="node-list">
+                    <div class="text-center text-muted py-4">
+                        <div class="spinner-border spinner-border-sm" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 small">Loading nodes...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% set map_controls = [
+            {"class": "btn-outline-secondary", "onclick": "fitMapToNodes()", "icon": "bi bi-arrows-move", "text": "Fit All Nodes"},
+            {"class": "btn-outline-info", "onclick": "toggleLinks()", "icon": "bi bi-link-45deg", "text": "Hide RF Links", "id": "linkToggleBtn"},
+            {"class": "btn-outline-primary", "onclick": "refreshMap()", "icon": "bi bi-arrow-clockwise", "text": "Refresh"}
+        ] %}
+        {{ controls_section(map_controls) }}
+
+        <!-- Filters -->
+        <div class="sidebar-section">
+            <h6><i class="bi bi-funnel"></i> Filters</h6>
+            <form id="locationFilterForm">
+                <div class="mb-3">
+                    <label for="maxAge" class="form-label">Max Age</label>
+                    <select class="form-select form-select-sm" id="maxAge" name="maxAge">
+                        <option value="">No Limit</option>
+                        <option value="1">1 Hour</option>
+                        <option value="6">6 Hours</option>
+                        <option value="24">24 Hours</option>
+                        <option value="72">3 Days</option>
+                        <option value="168">1 Week</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm w-100">
+                    <i class="bi bi-funnel"></i> Apply Filters
+                </button>
+            </form>
+        </div>
+
+
+
+        <!-- Map Stats -->
+        <div class="sidebar-section">
+            <h6><i class="bi bi-bar-chart"></i> Statistics</h6>
+            <div id="mapStats" class="stats-content">
+                <div><strong>Nodes:</strong> <span id="statsNodes">0</span></div>
+                <div><strong>With Location:</strong> <span id="statsWithLocation">0</span></div>
+                <div><strong>RF Links:</strong> <span id="statsLinks">0</span></div>
+                <div><strong>Last Update:</strong> <span id="statsLastUpdate">--</span></div>
+            </div>
+        </div>
+
+        {% set map_legend_items = [
+            {"type": "span", "class": "role-color-indicator", "style": "background-color: #007bff;", "content": "", "text": "Client"},
+            {"type": "span", "class": "role-color-indicator", "style": "background-color: #28a745;", "content": "", "text": "Router"},
+            {"type": "span", "class": "role-color-indicator", "style": "background-color: #ffc107;", "content": "", "text": "Repeater"},
+            {"type": "span", "class": "role-color-indicator", "style": "background-color: #6c757d;", "content": "", "text": "Client Mute"},
+            {"type": "span", "class": "role-color-indicator", "style": "background-color: #17a2b8;", "content": "", "text": "Router Client"},
+            {"type": "span", "class": "role-color-indicator", "style": "background-color: #e83e8c;", "content": "", "text": "Sensor"},
+            {"type": "span", "class": "role-color-indicator", "style": "background-color: #dc3545;", "content": "", "text": "Unknown Role"},
+            {"type": "span", "class": "signal-indicator bg-success", "content": "", "text": "Excellent coverage"},
+            {"type": "span", "class": "signal-indicator bg-warning", "content": "", "text": "Good coverage"},
+            {"type": "span", "class": "signal-indicator bg-danger", "content": "", "text": "Limited coverage"}
+        ] %}
+        {% call legend_section(map_legend_items) %}
+            <div class="legend-item mt-2">
+                <small class="text-muted">Node colors indicate role types<br>
+                Click nodes for details<br>
+                RF links show radio connections<br>
+                Clusters group nearby nodes</small>
+            </div>
+        {% endcall %}
+    {% endcall %}
+</div>
+
+<!-- Hide the footer for this page -->
+<style>
+.footer {
+    display: none !important;
+}
+
+.map-container {
+    position: fixed;
+    top: 56px; /* Height of navbar */
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    background: #f8f9fa;
+    z-index: 1;
+}
+
+.map-main {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    order: 1;
+}
+
+.network-map {
+    width: 100%;
+    height: 100%;
+}
+
+.loading-overlay, .error-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: rgba(248, 249, 250, 0.9);
+    z-index: 100;
+}
+
+.error-overlay {
+    color: #dc3545;
+}
+
+.node-list-container {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.node-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.node-list-item {
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    padding: 0.5rem;
+    margin-bottom: 0.25rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    font-size: 0.875rem;
+}
+
+.node-list-item:hover {
+    background-color: #f8f9fa;
+}
+
+.node-list-item.selected {
+    background-color: #e7f3ff;
+    border-color: #0d6efd;
+}
+
+.signal-indicator {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+}
+
+.role-color-indicator {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1px solid white;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.age-indicator {
+    font-size: 0.75rem;
+    padding: 0.1rem 0.3rem;
+    border-radius: 0.25rem;
+    display: inline-block;
+}
+
+.age-fresh { background-color: #d1e7dd; color: #0f5132; }
+.age-recent { background-color: #fff3cd; color: #664d03; }
+.age-old { background-color: #f8d7da; color: #721c24; }
+
+.traceroute-link-info {
+    font-size: 0.9rem;
+    min-width: 250px;
+}
+
+.traceroute-link-info .fw-bold {
+    color: #0d6efd;
+    border-bottom: 1px solid #dee2e6;
+    padding-bottom: 0.25rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Custom marker cluster styles */
+.marker-cluster-small {
+    background-color: rgba(181, 226, 140, 0.6);
+}
+.marker-cluster-small div {
+    background-color: rgba(110, 204, 57, 0.6);
+}
+
+.marker-cluster-medium {
+    background-color: rgba(241, 211, 87, 0.6);
+}
+.marker-cluster-medium div {
+    background-color: rgba(240, 194, 12, 0.6);
+}
+
+.marker-cluster-large {
+    background-color: rgba(253, 156, 115, 0.6);
+}
+.marker-cluster-large div {
+    background-color: rgba(241, 128, 23, 0.6);
+}
+
+/* Custom node marker styles */
+.custom-node-marker {
+    background: transparent !important;
+    border: none !important;
+}
+
+.node-marker-container {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: bold;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.node-marker-container:hover {
+    transform: scale(1.1);
+}
+
+.node-marker-label {
+    font-size: 10px;
+    line-height: 1;
+    max-width: 36px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: center;
+}
+
+/* Additional mobile adjustments specific to map */
+@media (max-width: 768px) {
+    .map-container {
+        flex-direction: column;
+        top: 56px;
+    }
+
+    .map-main {
+        order: 1;
+        flex: 1;
+    }
+}
+</style>
+
+{{ sidebar_styles() }}
+
+{% endblock %}
+
+{% block extra_js %}
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Leaflet MarkerCluster JS -->
+<script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+
+<script>
+let map;
+let nodeMarkers = [];
+let markerClusterGroup;
+let tracerouteLinks = [];
+let nodeData = [];
+let linkData = [];
+let selectedNodeId = null;
+let showLinks = true;
+let precisionCircle = null;
+let searchResults = [];
+let allNodes = [];
+
+// Initialize the page
+document.addEventListener('DOMContentLoaded', function() {
+    // Wait for jQuery to be available
+    function waitForJQuery() {
+        if (typeof $ !== 'undefined') {
+            initializeInterface();
+            initMap();
+        } else {
+            setTimeout(waitForJQuery, 50);
+        }
+    }
+
+    waitForJQuery();
+});
+
+function initializeInterface() {
+    // Handle sidebar toggle
+    $('#toggleSidebar').on('click', function() {
+        const sidebar = document.getElementById('sidebar');
+        const icon = this.querySelector('i');
+        const isMobile = window.innerWidth <= 768;
+
+        sidebar.classList.toggle('collapsed');
+
+        if (sidebar.classList.contains('collapsed')) {
+            if (isMobile) {
+                icon.className = 'bi bi-chevron-up';
+            } else {
+                icon.className = 'bi bi-chevron-left';
+            }
+        } else {
+            if (isMobile) {
+                icon.className = 'bi bi-chevron-down';
+            } else {
+                icon.className = 'bi bi-chevron-right';
+            }
+        }
+
+        // Trigger map resize after animation
+        setTimeout(() => {
+            if (map) {
+                map.invalidateSize();
+            }
+        }, 300);
+    });
+
+    // Handle window resize to update toggle button icon
+    $(window).on('resize', function() {
+        const sidebar = document.getElementById('sidebar');
+        const icon = document.querySelector('#toggleSidebar i');
+        const isMobile = window.innerWidth <= 768;
+
+        if (sidebar && icon) {
+            if (sidebar.classList.contains('collapsed')) {
+                icon.className = isMobile ? 'bi bi-chevron-up' : 'bi bi-chevron-left';
+            } else {
+                icon.className = isMobile ? 'bi bi-chevron-down' : 'bi bi-chevron-right';
+            }
+        }
+    });
+
+    // Handle clear selection button
+    $('#clearSelection').on('click', function() {
+        clearNodeSelection();
+    });
+
+    // Handle node search with unified list
+    $('#nodeSearch').on('input', function() {
+        const query = this.value.toLowerCase().trim();
+        if (query.length > 0) {
+            searchNodes(query);
+        } else {
+            showAllNodes();
+        }
+    });
+
+    $('#clearSearch').on('click', function() {
+        $('#nodeSearch').val('');
+        showAllNodes();
+        clearNodeSelection();
+    });
+
+    // Handle filter form submission
+    $('#locationFilterForm').on('submit', function(e) {
+        e.preventDefault();
+        loadNodeLocations();
+    });
+}
+
+// Initialize the map
+function initMap() {
+    // Create map centered on a default location (will be updated when data loads)
+    map = L.map('map').setView([40.0, -95.0], 4);
+
+    // Add Carto Positron tiles
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 20
+    }).addTo(map);
+
+    // Initialize marker cluster group
+    markerClusterGroup = L.markerClusterGroup({
+        maxClusterRadius: 50, // Cluster markers within 50 pixels
+        spiderfyOnMaxZoom: true,
+        showCoverageOnHover: false,
+        zoomToBoundsOnClick: true,
+        iconCreateFunction: function(cluster) {
+            const childCount = cluster.getChildCount();
+            let className = 'marker-cluster-small';
+            if (childCount > 10) {
+                className = 'marker-cluster-large';
+            } else if (childCount > 5) {
+                className = 'marker-cluster-medium';
+            }
+
+            return new L.DivIcon({
+                html: '<div><span>' + childCount + '</span></div>',
+                className: 'marker-cluster ' + className,
+                iconSize: new L.Point(40, 40)
+            });
+        }
+    });
+    map.addLayer(markerClusterGroup);
+
+    // Load node data
+    loadNodeLocations();
+}
+
+// Build filter parameters from form
+function buildFilterParams() {
+    const form = document.getElementById('locationFilterForm');
+    const formData = new FormData(form);
+    const params = new URLSearchParams();
+
+    // Handle max age filter
+    const maxAge = formData.get('maxAge');
+    if (maxAge) {
+        const hours = parseInt(maxAge);
+        params.append('max_age_hours', hours.toString());
+    }
+
+    return params;
+}
+
+// Load node locations from API
+async function loadNodeLocations() {
+    try {
+        showLoading();
+
+        const params = buildFilterParams();
+        const response = await fetch(`/api/locations?${params.toString()}`);
+        const data = await response.json();
+
+        if (data.error) {
+            showError(data.error);
+            return;
+        }
+
+        nodeData = data.locations || [];
+        linkData = data.traceroute_links || [];
+        allNodes = nodeData; // Set the unified node list
+
+        // Update statistics
+        updateStats();
+
+        // Clear existing markers
+        markerClusterGroup.clearLayers();
+        nodeMarkers = [];
+
+        // Add markers for each node
+        nodeData.forEach(node => {
+            addNodeMarker(node);
+        });
+
+        // Update unified node list
+        showAllNodes();
+
+        // Load traceroute links if enabled
+        if (showLinks && linkData.length > 0) {
+            drawTracerouteLinks();
+        }
+
+        // Fit map to show all nodes
+        if (nodeMarkers.length > 0) {
+            setTimeout(() => {
+                fitMapToNodes();
+            }, 500);
+        }
+
+        hideLoading();
+
+    } catch (error) {
+        console.error('Error loading node locations:', error);
+        showError('Failed to load node locations');
+    }
+}
+
+// Add a marker for a node
+function addNodeMarker(node) {
+    // Create custom marker with role-based styling
+    const roleColor = getRoleColor(node.role);
+
+    // Determine display text for the marker
+    let displayText = node.short_name || node.display_name;
+
+    // Handle the case where display_name is "Node {hex_id}" format
+    if (!displayText || displayText.trim() === '' || displayText.startsWith('Node ')) {
+        const nodeIdHex = node.node_id.toString(16).padStart(8, '0');
+        displayText = nodeIdHex.slice(-4).toUpperCase();
+    } else if (displayText.length > 4) {
+        displayText = displayText.substring(0, 4);
+    }
+
+    const markerIcon = L.divIcon({
+        className: 'custom-node-marker',
+        html: `
+            <div class="node-marker-container" style="background-color: ${roleColor};">
+                <div class="node-marker-label">${displayText}</div>
+            </div>
+        `,
+        iconSize: [40, 40],
+        iconAnchor: [20, 20]
+    });
+
+    const marker = L.marker([node.latitude, node.longitude], { icon: markerIcon });
+
+    // Create popup content
+    const popupContent = createNodePopupContent(node);
+    marker.bindPopup(popupContent);
+
+    // Add click handler
+    marker.on('click', function() {
+        selectNode(node);
+    });
+
+    markerClusterGroup.addLayer(marker);
+    nodeMarkers.push(marker);
+}
+
+// Create popup content for a node
+function createNodePopupContent(node) {
+    const nodeIdHex = node.node_id.toString(16).padStart(8, '0');
+    const ageHours = (Date.now() / 1000 - node.timestamp) / 3600;
+    const ageClass = getAgeClass(ageHours);
+    const roleColor = getRoleColor(node.role);
+
+    return `
+        <div class="node-marker-info">
+            <div class="node-marker-title">${node.display_name}</div>
+            <div><strong>ID:</strong> !${nodeIdHex}</div>
+            ${node.short_name ? `<div><strong>Short Name:</strong> ${node.short_name}</div>` : ''}
+            ${node.role ? `<div><strong>Role:</strong> <span class="badge" style="background-color: ${roleColor};">${node.role}</span></div>` : ''}
+            <div><strong>Location:</strong> ${node.latitude.toFixed(6)}, ${node.longitude.toFixed(6)}</div>
+            ${node.altitude ? `<div><strong>Altitude:</strong> ${node.altitude}m</div>` : ''}
+            ${node.hw_model ? `<div><strong>Hardware:</strong> ${node.hw_model}</div>` : ''}
+            <div><strong>Age:</strong> <span class="age-indicator ${ageClass}">${formatAge(ageHours)}</span></div>
+            ${node.gateway_count ? `<div><strong>Gateways:</strong> ${node.gateway_count}</div>` : ''}
+            <div class="mt-2">
+                <button class="btn btn-sm btn-primary" onclick="viewNodeDetails(${node.node_id})">
+                    View Details
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+// Unified node search and display
+function searchNodes(query) {
+    if (!allNodes || allNodes.length === 0) {
+        return;
+    }
+
+    const results = allNodes.filter(node => {
+        const nodeIdHex = node.node_id.toString(16).padStart(8, '0');
+        return node.display_name.toLowerCase().includes(query) ||
+               nodeIdHex.includes(query) ||
+               node.node_id.toString().includes(query) ||
+               (node.hw_model && node.hw_model.toLowerCase().includes(query));
+    }).slice(0, 20); // Limit to 20 results
+
+    searchResults = results;
+    displayNodeList(results, true);
+
+    // Update search count
+    document.getElementById('searchResultsCount').style.display = 'block';
+    document.getElementById('searchCount').textContent = results.length;
+}
+
+// Show all nodes (when not searching)
+function showAllNodes() {
+    searchResults = [];
+    displayNodeList(allNodes, false);
+
+    // Hide search count
+    document.getElementById('searchResultsCount').style.display = 'none';
+}
+
+// Display node list (unified for search results and full list)
+function displayNodeList(nodes, isSearchResults = false) {
+    const container = document.getElementById('nodeList');
+    const nodeCount = document.getElementById('nodeCount');
+
+    if (!isSearchResults) {
+        nodeCount.textContent = nodes.length;
+    }
+
+    if (nodes.length === 0) {
+        const message = isSearchResults ? 'No nodes found' : 'No nodes available';
+        container.innerHTML = `<div class="text-center text-muted py-4"><small>${message}</small></div>`;
+        return;
+    }
+
+    // Sort nodes by name
+    const sortedNodes = [...nodes].sort((a, b) => a.display_name.localeCompare(b.display_name));
+
+    container.innerHTML = sortedNodes.map(node => {
+        const nodeIdHex = node.node_id.toString(16).padStart(8, '0');
+        const ageHours = (Date.now() / 1000 - node.timestamp) / 3600;
+        const ageClass = getAgeClass(ageHours);
+        const roleColor = getRoleColor(node.role);
+
+        return `
+            <div class="node-list-item" onclick="selectNodeFromList(${node.node_id})">
+                <div><strong>${node.display_name}</strong> ${node.role ? `<span class="badge badge-sm" style="background-color: ${roleColor}; font-size: 0.6em;">${formatRole(node.role)}</span>` : ''}</div>
+                <small class="text-muted">!${nodeIdHex}</small><br>
+                <span class="age-indicator ${ageClass}">${formatAge(ageHours)}</span>
+                ${node.hw_model ? `<small class="text-secondary ms-2">${node.hw_model}</small>` : ''}
+            </div>
+        `;
+    }).join('');
+
+    // Update selection highlighting
+    updateNodeListSelection();
+}
+
+// Select node from list
+function selectNodeFromList(nodeId) {
+    const node = allNodes.find(n => n.node_id === nodeId);
+    if (node) {
+        focusOnNode(node);
+        selectNode(node);
+    }
+}
+
+// Focus on a node on the map
+function focusOnNode(node) {
+    if (map) {
+        map.setView([node.latitude, node.longitude], 15);
+    }
+}
+
+// Select a node
+function selectNode(node) {
+    selectedNodeId = node.node_id;
+
+    // Update node list selection
+    updateNodeListSelection();
+
+    // Show node details
+    showSelectedNodeDetails(node);
+
+    // Show filtered links if enabled
+    if (showLinks && linkData.length > 0) {
+        drawFilteredLinks(node.node_id);
+    }
+
+    // Show precision circle
+    showPrecisionCircle(node);
+}
+
+// Show selected node details
+function showSelectedNodeDetails(node) {
+    const nodeIdHex = node.node_id.toString(16).padStart(8, '0');
+    const ageHours = (Date.now() / 1000 - node.timestamp) / 3600;
+    const ageClass = getAgeClass(ageHours);
+    const roleColor = getRoleColor(node.role);
+
+    const content = `
+        <div class="row">
+            <div class="col-12">
+                <h6>${node.display_name}</h6>
+                <p class="text-muted">Node ID: !${nodeIdHex}</p>
+                ${node.short_name ? `<p class="text-muted">Short: ${node.short_name}</p>` : ''}
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-6">
+                <strong>Location:</strong><br>
+                <small>${node.latitude.toFixed(6)}, ${node.longitude.toFixed(6)}</small>
+            </div>
+            <div class="col-6">
+                <strong>Age:</strong><br>
+                <span class="age-indicator ${ageClass}">${formatAge(ageHours)}</span>
+            </div>
+        </div>
+        ${node.role ? `
+        <div class="row mt-2">
+            <div class="col-6">
+                <strong>Role:</strong><br>
+                <span class="badge" style="background-color: ${roleColor};">${node.role}</span>
+            </div>
+            ${node.altitude ? `
+            <div class="col-6">
+                <strong>Altitude:</strong><br>
+                <span class="text-info">${node.altitude}m</span>
+            </div>
+            ` : ''}
+        </div>
+        ` : node.altitude ? `
+        <div class="row mt-2">
+            <div class="col-6">
+                <strong>Altitude:</strong><br>
+                <span class="text-info">${node.altitude}m</span>
+            </div>
+        </div>
+        ` : ''}
+        ${node.hw_model ? `
+        <div class="row mt-2">
+            <div class="col-12">
+                <strong>Hardware:</strong><br>
+                <span class="text-secondary">${node.hw_model}</span>
+            </div>
+        </div>
+        ` : ''}
+        <div class="row mt-2">
+            <div class="col-12">
+                <a href="/node/${node.node_id}" class="btn btn-primary btn-sm">
+                    <i class="bi bi-router"></i> View Node Details
+                </a>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('selectedDetailsContent').innerHTML = content;
+    document.getElementById('selectedDetails').style.display = 'block';
+}
+
+// Clear node selection
+function clearNodeSelection() {
+    selectedNodeId = null;
+
+    // Clear search result highlights
+    document.querySelectorAll('.search-result-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+
+    // Clear node list selection
+    updateNodeListSelection();
+
+    // Hide selected details
+    document.getElementById('selectedDetails').style.display = 'none';
+
+    // Hide precision circle
+    if (precisionCircle) {
+        map.removeLayer(precisionCircle);
+        precisionCircle = null;
+    }
+
+    // Show all links if enabled
+    if (showLinks && linkData.length > 0) {
+        drawTracerouteLinks();
+    }
+}
+
+// Clear search results
+function clearSearchResults() {
+    document.getElementById('searchResults').innerHTML = '';
+    searchResults = [];
+}
+
+// Update node list
+function updateNodeList() {
+    const container = document.getElementById('nodeList');
+    const nodeCount = document.getElementById('nodeCount');
+
+    nodeCount.textContent = nodeData.length;
+
+    if (nodeData.length === 0) {
+        container.innerHTML = '<div class="text-center text-muted py-4"><small>No nodes found</small></div>';
+        return;
+    }
+
+    // Sort nodes by name
+    const sortedNodes = [...nodeData].sort((a, b) => a.display_name.localeCompare(b.display_name));
+
+    container.innerHTML = sortedNodes.map(node => {
+        const nodeIdHex = node.node_id.toString(16).padStart(8, '0');
+        const ageHours = (Date.now() / 1000 - node.timestamp) / 3600;
+        const ageClass = getAgeClass(ageHours);
+        const roleColor = getRoleColor(node.role);
+
+        return `
+            <div class="node-list-item" onclick="selectNodeFromList(${node.node_id})">
+                <div><strong>${node.display_name}</strong> ${node.role ? `<span class="badge badge-sm" style="background-color: ${roleColor}; font-size: 0.6em;">${formatRole(node.role)}</span>` : ''}</div>
+                <small class="text-muted">!${nodeIdHex}</small><br>
+                <span class="age-indicator ${ageClass}">${formatAge(ageHours)}</span>
+                ${node.hw_model ? `<small class="text-secondary ms-2">${node.hw_model}</small>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+// Select node from list
+function selectNodeFromList(nodeId) {
+    const node = nodeData.find(n => n.node_id === nodeId);
+    if (node) {
+        focusOnNode(node);
+        selectNode(node);
+    }
+}
+
+// Update node list selection
+function updateNodeListSelection() {
+    document.querySelectorAll('.node-list-item').forEach(item => {
+        const nodeId = parseInt(item.getAttribute('onclick').match(/\d+/)[0]);
+        item.classList.toggle('selected', nodeId === selectedNodeId);
+    });
+}
+
+// Update statistics
+function updateStats() {
+    document.getElementById('statsNodes').textContent = nodeData.length;
+    document.getElementById('statsWithLocation').textContent = nodeData.length;
+    document.getElementById('statsLinks').textContent = linkData.length;
+    document.getElementById('statsLastUpdate').textContent = new Date().toLocaleTimeString();
+}
+
+// Show precision circle
+function showPrecisionCircle(node) {
+    // Remove existing circle
+    if (precisionCircle) {
+        map.removeLayer(precisionCircle);
+    }
+
+    // Use real GPS precision if available, otherwise fall back to age-based estimation
+    let radiusMeters = 10; // Default precision
+    let precisionSource = 'estimated';
+
+    if (node.precision_meters && node.precision_meters > 0) {
+        // Use actual GPS precision from the position packet
+        radiusMeters = node.precision_meters;
+        precisionSource = 'GPS reported';
+    } else {
+        // Fall back to age-based estimation
+        const ageHours = (Date.now() / 1000 - node.timestamp) / 3600;
+        if (ageHours > 168) { // > 1 week
+            radiusMeters = 500; // Very imprecise for very old data
+        } else if (ageHours > 24) { // > 1 day
+            radiusMeters = 100; // Less precise for old data
+        } else if (ageHours > 6) { // > 6 hours
+            radiusMeters = 30; // Medium precision
+        } else if (ageHours > 1) { // > 1 hour
+            radiusMeters = 15; // Good precision
+        }
+        precisionSource = 'age estimated';
+    }
+
+    // Create circle
+    precisionCircle = L.circle([node.latitude, node.longitude], {
+        color: '#007bff',
+        fillColor: '#007bff',
+        fillOpacity: 0.1,
+        radius: radiusMeters
+    }).addTo(map);
+
+    // No tooltip for precision circles per user request
+}
+
+// Helper functions
+function getAgeClass(ageHours) {
+    if (ageHours < 1) return 'age-fresh';
+    if (ageHours < 24) return 'age-recent';
+    return 'age-old';
+}
+
+function formatAge(ageHours) {
+    if (isNaN(ageHours) || ageHours < 0) {
+        return 'Unknown';
+    }
+    if (ageHours < 1) {
+        return `${Math.round(ageHours * 60)}m ago`;
+    } else if (ageHours < 24) {
+        return `${Math.round(ageHours)}h ago`;
+    } else {
+        return `${Math.round(ageHours / 24)}d ago`;
+    }
+}
+
+function getRoleColor(role) {
+    switch (role) {
+        case 'CLIENT': return '#007bff'; // Blue
+        case 'CLIENT_MUTE': return '#6c757d'; // Gray
+        case 'ROUTER': return '#28a745'; // Green
+        case 'REPEATER': return '#ffc107'; // Yellow
+        case 'ROUTER_CLIENT': return '#17a2b8'; // Teal
+        case 'SENSOR': return '#e83e8c'; // Pink
+        default: return '#dc3545'; // Red for unknown/null roles
+    }
+}
+
+function formatRole(role) {
+    if (!role || role === 'Unknown') return '?';
+    switch (role) {
+        case 'CLIENT': return 'C';
+        case 'CLIENT_MUTE': return 'CM';
+        case 'ROUTER': return 'R';
+        case 'REPEATER': return 'RP';
+        case 'ROUTER_CLIENT': return 'RC';
+        case 'SENSOR': return 'S';
+        default: return '?';
+    }
+}
+
+// Map control functions
+function fitMapToNodes() {
+    if (nodeMarkers.length > 0) {
+        const bounds = nodeMarkers.map(marker => marker.getLatLng());
+        map.fitBounds(bounds, { padding: [20, 20] });
+    }
+}
+
+function toggleLinks() {
+    showLinks = !showLinks;
+    const btn = document.getElementById('linkToggleBtn');
+
+    if (showLinks) {
+        // Show links - use current filtering state
+        if (linkData.length > 0) {
+            if (selectedNodeId !== null) {
+                drawFilteredLinks(selectedNodeId);
+            } else {
+                drawTracerouteLinks();
+            }
+        }
+        btn.innerHTML = '<i class="bi bi-link-45deg"></i> Hide RF Links';
+        btn.className = 'btn btn-sm btn-outline-info';
+    } else {
+        // Hide links
+        tracerouteLinks.forEach(link => map.removeLayer(link));
+        tracerouteLinks = [];
+        btn.innerHTML = '<i class="bi bi-link-45deg-off"></i> Show RF Links';
+        btn.className = 'btn btn-sm btn-outline-secondary';
+    }
+}
+
+// Draw traceroute links on the map
+function drawTracerouteLinks() {
+    drawTracerouteLinksFiltered(null);
+}
+
+// Draw traceroute links with optional filtering by node
+function drawTracerouteLinksFiltered(filterNodeId = null) {
+    // Clear existing links
+    tracerouteLinks.forEach(link => map.removeLayer(link));
+    tracerouteLinks = [];
+
+    const nodePositions = {};
+
+    // Build node position lookup
+    nodeData.forEach(node => {
+        nodePositions[node.node_id] = [node.latitude, node.longitude];
+    });
+
+    // Filter links if a node is selected
+    let linksToShow = linkData;
+    if (filterNodeId !== null) {
+        linksToShow = linkData.filter(link =>
+            link.from_node_id === filterNodeId ||
+            link.to_node_id === filterNodeId
+        );
+    }
+
+    linksToShow.forEach(link => {
+        const fromPos = nodePositions[link.from_node_id];
+        const toPos = nodePositions[link.to_node_id];
+
+        if (!fromPos || !toPos) {
+            return; // Skip if either node doesn't have position
+        }
+
+        // Determine link color and style based on success rate and SNR
+        let linkColor = '#999999';
+        let linkWeight = 2;
+        let linkOpacity = 0.6;
+
+        // If filtering by node, highlight the selected node's links
+        if (filterNodeId !== null) {
+            linkWeight = 3; // Make filtered links thicker
+            linkOpacity = 0.9; // Make them more opaque
+        }
+
+        if (link.success_rate >= 80) {
+            linkColor = '#28a745'; // Green for high success
+        } else if (link.success_rate >= 50) {
+            linkColor = '#ffc107'; // Yellow for medium success
+        } else {
+            linkColor = '#dc3545'; // Red for low success
+        }
+
+        // Create the line
+        const line = L.polyline([fromPos, toPos], {
+            color: linkColor,
+            weight: linkWeight,
+            opacity: linkOpacity,
+            dashArray: link.success_rate < 50 ? '5, 5' : null // Dashed for unreliable links
+        });
+
+        // Add popup with link information
+        const popupContent = createLinkPopupContent(link);
+        line.bindPopup(popupContent);
+
+        line.addTo(map);
+        tracerouteLinks.push(line);
+    });
+}
+
+// Draw only links connected to a specific node
+function drawFilteredLinks(nodeId) {
+    drawTracerouteLinksFiltered(nodeId);
+}
+
+// Create popup content for traceroute links
+function createLinkPopupContent(link) {
+    const fromNode = nodeData.find(n => n.node_id === link.from_node_id);
+    const toNode = nodeData.find(n => n.node_id === link.to_node_id);
+
+    const fromName = fromNode ? fromNode.display_name : `!${link.from_node_id.toString(16).padStart(8, '0')}`;
+    const toName = toNode ? toNode.display_name : `!${link.to_node_id.toString(16).padStart(8, '0')}`;
+
+    let qualityClass = 'text-success';
+    if (link.success_rate < 50) qualityClass = 'text-danger';
+    else if (link.success_rate < 80) qualityClass = 'text-warning';
+
+    return `
+        <div class="traceroute-link-info">
+            <div class="fw-bold mb-2">RF Hop Link</div>
+            <div><strong>From:</strong> ${fromName}</div>
+            <div><strong>To:</strong> ${toName}</div>
+            <div><strong>Success Rate:</strong> <span class="${qualityClass}">${link.success_rate.toFixed(1)}%</span></div>
+            <div><strong>Attempts:</strong> ${link.total_hops_seen}</div>
+            <div><strong>Last Seen:</strong> ${link.last_seen_str}</div>
+            ${link.avg_snr ? `<div><strong>Avg SNR:</strong> ${link.avg_snr.toFixed(1)} dB</div>` : ''}
+            ${link.avg_rssi ? `<div><strong>Avg RSSI:</strong> ${link.avg_rssi.toFixed(0)} dBm</div>` : ''}
+            <div class="mt-2">
+                <button class="btn btn-sm btn-primary" onclick="showTracerouteHistory(${link.from_node_id}, ${link.to_node_id})">
+                    View History
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+// Show detailed traceroute history between two nodes
+function showTracerouteHistory(fromNodeId, toNodeId) {
+    let url;
+    if (window.URLFilterManager) {
+        const urlManager = new URLFilterManager();
+        url = urlManager.createFilteredURL('/traceroute-hops', {
+            from_node: fromNodeId,
+            to_node: toNodeId
+        });
+    } else {
+        // Fallback if URL filter manager is not available
+        url = `/traceroute-hops?from_node=${fromNodeId}&to_node=${toNodeId}`;
+    }
+    window.open(url, '_blank');
+}
+
+// View node details
+function viewNodeDetails(nodeId) {
+    window.open(`/node/${nodeId}`, '_blank');
+}
+
+// Refresh map
+function refreshMap() {
+    loadNodeLocations();
+}
+
+// Loading/error functions
+function showLoading() {
+    document.getElementById('mapLoading').style.display = 'flex';
+    document.getElementById('map').style.opacity = '0.5';
+    document.getElementById('mapError').style.display = 'none';
+}
+
+function hideLoading() {
+    document.getElementById('mapLoading').style.display = 'none';
+    document.getElementById('map').style.opacity = '1';
+}
+
+function showError(message) {
+    document.getElementById('mapLoading').style.display = 'none';
+    document.getElementById('map').style.opacity = '0.5';
+    const errorDiv = document.getElementById('mapError');
+    errorDiv.style.display = 'flex';
+    errorDiv.querySelector('p').textContent = message;
+}
+
+// Handle window resize
+window.addEventListener('resize', function() {
+    if (map) {
+        setTimeout(() => {
+            map.invalidateSize();
+        }, 100);
+    }
+});
+</script>
+{% endblock %}
+
+</div> <!-- Close the full-width container -->
+<!-- Reopen the base template's container for the footer -->
+<div class="container mt-4">

@@ -1,0 +1,605 @@
+{% extends "base.html" %}
+
+{% block title %}Gateway Comparison - Malla{% endblock %}
+
+{% block extra_css %}
+<style>
+    .gateway-selector {
+        background: #f8f9fa;
+        border-radius: 0.375rem;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+    }
+    
+    .chart-container {
+        height: 400px;
+        margin-bottom: 2rem;
+    }
+    
+    .stats-card {
+        background: #fff;
+        border: 1px solid #dee2e6;
+        border-radius: 0.375rem;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+    }
+    
+    .stat-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid #f1f3f4;
+    }
+    
+    .stat-row:last-child {
+        border-bottom: none;
+    }
+    
+    .stat-label {
+        font-weight: 500;
+        color: #495057;
+    }
+    
+    .stat-value {
+        font-weight: bold;
+        color: #212529;
+    }
+    
+    .positive-diff {
+        color: #198754;
+    }
+    
+    .negative-diff {
+        color: #dc3545;
+    }
+    
+    .neutral-diff {
+        color: #6c757d;
+    }
+    
+    .gateway-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+    
+    .gateway1-badge {
+        background-color: #e3f2fd;
+        color: #1976d2;
+    }
+    
+    .gateway2-badge {
+        background-color: #f3e5f5;
+        color: #7b1fa2;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1><i class="bi bi-router"></i> Gateway Comparison</h1>
+        <p class="text-muted">Compare signal quality between two gateways by analyzing their common received packets. Only packets with the same hop limit are compared to exclude retransmissions.</p>
+    </div>
+</div>
+
+<!-- Gateway Selection -->
+<div class="gateway-selector">
+    <form method="GET" id="gatewayForm">
+        <div class="row">
+            <div class="col-md-5">
+                <label for="gateway1" class="form-label">Gateway 1</label>
+                <select class="form-select" id="gateway1" name="gateway1" required>
+                    <option value="">Select first gateway...</option>
+                    {% for gateway in available_gateways %}
+                    <option value="{{ gateway.id }}" {% if gateway.id == gateway1_id %}selected{% endif %}>
+                        {{ gateway.display_name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="col-md-2 text-center d-flex align-items-end">
+                <div class="w-100">
+                    <strong>VS</strong>
+                </div>
+            </div>
+            
+            <div class="col-md-5">
+                <label for="gateway2" class="form-label">Gateway 2</label>
+                <select class="form-select" id="gateway2" name="gateway2" required>
+                    <option value="">Select second gateway...</option>
+                    {% for gateway in available_gateways %}
+                    <option value="{{ gateway.id }}" {% if gateway.id == gateway2_id %}selected{% endif %}>
+                        {{ gateway.display_name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        
+        <!-- Optional Filters -->
+        <div class="row mt-3">
+            <div class="col-md-3">
+                <label for="start_time" class="form-label">Start Time</label>
+                <input type="datetime-local" class="form-control" id="start_time" name="start_time" 
+                       value="{{ filters.start_time if filters.start_time }}">
+            </div>
+            <div class="col-md-3">
+                <label for="end_time" class="form-label">End Time</label>
+                <input type="datetime-local" class="form-control" id="end_time" name="end_time" 
+                       value="{{ filters.end_time if filters.end_time }}">
+            </div>
+            <div class="col-md-3">
+                <label for="from_node" class="form-label">From Node</label>
+                <select class="form-select" id="from_node" name="from_node">
+                    <option value="">All Nodes</option>
+                    {% for node in available_nodes %}
+                    <option value="{{ node.id }}" {{ 'selected' if filters.from_node == node.id|string }}>
+                        {{ node.name }} ({{ node.packet_count }} packets)
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-search"></i> Compare Gateways
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+
+{% if error %}
+<div class="alert alert-danger">
+    <i class="bi bi-exclamation-triangle"></i> {{ error }}
+</div>
+{% endif %}
+
+{% if comparison_data and not comparison_data.get('error') %}
+<!-- Comparison Results -->
+<div class="row">
+    <div class="col-12">
+        <h2>Comparison Results</h2>
+        <p>
+            Comparing <span class="gateway-badge gateway1-badge">{{ comparison_data.gateway1_name }}</span> 
+            vs <span class="gateway-badge gateway2-badge">{{ comparison_data.gateway2_name }}</span>
+        </p>
+    </div>
+</div>
+
+<!-- Statistics Summary -->
+<div class="row">
+    <div class="col-md-6">
+        <div class="stats-card">
+            <h5><i class="bi bi-bar-chart"></i> Signal Statistics</h5>
+            
+            <div class="stat-row">
+                <span class="stat-label">Common Packets</span>
+                <span class="stat-value">{{ comparison_data.statistics.total_common_packets }}</span>
+            </div>
+            
+            {% if comparison_data.statistics.get('rssi_diff_avg') is not none %}
+            <div class="stat-row">
+                <span class="stat-label">Avg RSSI Difference</span>
+                <span class="stat-value {% if comparison_data.statistics.rssi_diff_avg > 0 %}positive-diff{% elif comparison_data.statistics.rssi_diff_avg < 0 %}negative-diff{% else %}neutral-diff{% endif %}">
+                    {{ "%.1f"|format(comparison_data.statistics.rssi_diff_avg) }} dBm
+                </span>
+            </div>
+            {% endif %}
+            
+            {% if comparison_data.statistics.get('snr_diff_avg') is not none %}
+            <div class="stat-row">
+                <span class="stat-label">Avg SNR Difference</span>
+                <span class="stat-value {% if comparison_data.statistics.snr_diff_avg > 0 %}positive-diff{% elif comparison_data.statistics.snr_diff_avg < 0 %}negative-diff{% else %}neutral-diff{% endif %}">
+                    {{ "%.1f"|format(comparison_data.statistics.snr_diff_avg) }} dB
+                </span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="stats-card">
+            <h5><i class="bi bi-router"></i> Gateway Performance</h5>
+            
+            {% if comparison_data.statistics.get('gateway1_rssi_avg') is not none %}
+            <div class="stat-row">
+                <span class="stat-label">{{ comparison_data.gateway1_name }} Avg RSSI</span>
+                <span class="stat-value">{{ "%.1f"|format(comparison_data.statistics.gateway1_rssi_avg) }} dBm</span>
+            </div>
+            {% endif %}
+            
+            {% if comparison_data.statistics.get('gateway2_rssi_avg') is not none %}
+            <div class="stat-row">
+                <span class="stat-label">{{ comparison_data.gateway2_name }} Avg RSSI</span>
+                <span class="stat-value">{{ "%.1f"|format(comparison_data.statistics.gateway2_rssi_avg) }} dBm</span>
+            </div>
+            {% endif %}
+            
+            {% if comparison_data.statistics.get('gateway1_snr_avg') is not none %}
+            <div class="stat-row">
+                <span class="stat-label">{{ comparison_data.gateway1_name }} Avg SNR</span>
+                <span class="stat-value">{{ "%.1f"|format(comparison_data.statistics.gateway1_snr_avg) }} dB</span>
+            </div>
+            {% endif %}
+            
+            {% if comparison_data.statistics.get('gateway2_snr_avg') is not none %}
+            <div class="stat-row">
+                <span class="stat-label">{{ comparison_data.gateway2_name }} Avg SNR</span>
+                <span class="stat-value">{{ "%.1f"|format(comparison_data.statistics.gateway2_snr_avg) }} dB</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Charts -->
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-graph-up"></i> RSSI Comparison</h5>
+            </div>
+            <div class="card-body">
+                <div id="rssiScatterChart" class="chart-container"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-graph-up"></i> SNR Comparison</h5>
+            </div>
+            <div class="card-body">
+                <div id="snrScatterChart" class="chart-container"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-bar-chart"></i> RSSI Difference Distribution</h5>
+            </div>
+            <div class="card-body">
+                <div id="rssiDiffHistogram" class="chart-container"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-bar-chart"></i> SNR Difference Distribution</h5>
+            </div>
+            <div class="card-body">
+                <div id="snrDiffHistogram" class="chart-container"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Timeline Charts -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-clock"></i> RSSI Over Time</h5>
+            </div>
+            <div class="card-body">
+                <div id="rssiTimelineChart" class="chart-container"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-clock"></i> SNR Over Time</h5>
+            </div>
+            <div class="card-body">
+                <div id="snrTimelineChart" class="chart-container"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Common Packets Table -->
+{% if comparison_data.common_packets %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-table"></i> Common Packets ({{ comparison_data.statistics.total_common_packets }} total)</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover" id="commonPacketsTable">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>From Node</th>
+                                <th>Port</th>
+                                <th>Hop Limit</th>
+                                <th>{{ comparison_data.gateway1_name }} RSSI</th>
+                                <th>{{ comparison_data.gateway2_name }} RSSI</th>
+                                <th>RSSI Diff</th>
+                                <th>{{ comparison_data.gateway1_name }} SNR</th>
+                                <th>{{ comparison_data.gateway2_name }} SNR</th>
+                                <th>SNR Diff</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for packet in comparison_data.common_packets[:100] %}
+                            <tr>
+                                <td>{{ packet.timestamp_str }}</td>
+                                <td>{{ packet.from_node_name or packet.from_node_id }}</td>
+                                <td>{{ packet.portnum_name or 'Unknown' }}</td>
+                                <td>{{ packet.hop_limit }}</td>
+                                <td>{{ packet.gateway1_rssi }} dBm</td>
+                                <td>{{ packet.gateway2_rssi }} dBm</td>
+                                <td class="{% if packet.rssi_diff > 0 %}positive-diff{% elif packet.rssi_diff < 0 %}negative-diff{% else %}neutral-diff{% endif %}">
+                                    {{ "%.1f"|format(packet.rssi_diff) }} dBm
+                                </td>
+                                <td>{{ "%.1f"|format(packet.gateway1_snr) }} dB</td>
+                                <td>{{ "%.1f"|format(packet.gateway2_snr) }} dB</td>
+                                <td class="{% if packet.snr_diff > 0 %}positive-diff{% elif packet.snr_diff < 0 %}negative-diff{% else %}neutral-diff{% endif %}">
+                                    {{ "%.1f"|format(packet.snr_diff) }} dB
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% if comparison_data.common_packets|length > 100 %}
+                <p class="text-muted mt-2">Showing first 100 packets. Total: {{ comparison_data.statistics.total_common_packets }}</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% elif comparison_data and comparison_data.get('error') %}
+<div class="alert alert-danger">
+    <i class="bi bi-exclamation-triangle"></i> {{ comparison_data.error }}
+</div>
+
+{% elif gateway1_id and gateway2_id %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Please select two different gateways to compare.
+</div>
+
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Select two gateways above to start the comparison.
+</div>
+{% endif %}
+
+<script>
+// Auto-submit form when gateways are selected
+document.getElementById('gateway1').addEventListener('change', function() {
+    if (this.value && document.getElementById('gateway2').value && this.value !== document.getElementById('gateway2').value) {
+        document.getElementById('gatewayForm').submit();
+    }
+});
+
+document.getElementById('gateway2').addEventListener('change', function() {
+    if (this.value && document.getElementById('gateway1').value && this.value !== document.getElementById('gateway1').value) {
+        document.getElementById('gatewayForm').submit();
+    }
+});
+</script>
+
+{% if comparison_data and not comparison_data.get('error') and comparison_data.chart_data %}
+<script>
+// Chart data from server
+const chartData = {{ comparison_data.chart_data | tojson | safe }};
+
+// RSSI Scatter Plot
+const rssiScatterTrace = {
+    x: chartData.rssi_scatter.x,
+    y: chartData.rssi_scatter.y,
+    mode: 'markers',
+    type: 'scatter',
+    text: chartData.rssi_scatter.text,
+    hovertemplate: '%{text}<br>{{ comparison_data.gateway1_name }}: %{x} dBm<br>{{ comparison_data.gateway2_name }}: %{y} dBm<extra></extra>',
+    marker: {
+        size: 8,
+        color: 'rgba(31, 119, 180, 0.7)',
+        line: {
+            color: 'rgba(31, 119, 180, 1)',
+            width: 1
+        }
+    }
+};
+
+// Add diagonal line for reference
+const rssiMin = Math.min(...chartData.rssi_scatter.x, ...chartData.rssi_scatter.y) - 5;
+const rssiMax = Math.max(...chartData.rssi_scatter.x, ...chartData.rssi_scatter.y) + 5;
+
+const rssiDiagonalTrace = {
+    x: [rssiMin, rssiMax],
+    y: [rssiMin, rssiMax],
+    mode: 'lines',
+    type: 'scatter',
+    line: {
+        color: 'rgba(255, 0, 0, 0.5)',
+        dash: 'dash'
+    },
+    name: 'Equal Performance',
+    hovertemplate: 'Equal Performance Line<extra></extra>'
+};
+
+Plotly.newPlot('rssiScatterChart', [rssiScatterTrace, rssiDiagonalTrace], {
+    title: 'RSSI: {{ comparison_data.gateway1_name }} vs {{ comparison_data.gateway2_name }}',
+    xaxis: { title: '{{ comparison_data.gateway1_name }} RSSI (dBm)' },
+    yaxis: { title: '{{ comparison_data.gateway2_name }} RSSI (dBm)' },
+    showlegend: false
+});
+
+// SNR Scatter Plot
+const snrScatterTrace = {
+    x: chartData.snr_scatter.x,
+    y: chartData.snr_scatter.y,
+    mode: 'markers',
+    type: 'scatter',
+    text: chartData.snr_scatter.text,
+    hovertemplate: '%{text}<br>{{ comparison_data.gateway1_name }}: %{x} dB<br>{{ comparison_data.gateway2_name }}: %{y} dB<extra></extra>',
+    marker: {
+        size: 8,
+        color: 'rgba(255, 127, 14, 0.7)',
+        line: {
+            color: 'rgba(255, 127, 14, 1)',
+            width: 1
+        }
+    }
+};
+
+// Add diagonal line for reference
+const snrMin = Math.min(...chartData.snr_scatter.x, ...chartData.snr_scatter.y) - 2;
+const snrMax = Math.max(...chartData.snr_scatter.x, ...chartData.snr_scatter.y) + 2;
+
+const snrDiagonalTrace = {
+    x: [snrMin, snrMax],
+    y: [snrMin, snrMax],
+    mode: 'lines',
+    type: 'scatter',
+    line: {
+        color: 'rgba(255, 0, 0, 0.5)',
+        dash: 'dash'
+    },
+    name: 'Equal Performance',
+    hovertemplate: 'Equal Performance Line<extra></extra>'
+};
+
+Plotly.newPlot('snrScatterChart', [snrScatterTrace, snrDiagonalTrace], {
+    title: 'SNR: {{ comparison_data.gateway1_name }} vs {{ comparison_data.gateway2_name }}',
+    xaxis: { title: '{{ comparison_data.gateway1_name }} SNR (dB)' },
+    yaxis: { title: '{{ comparison_data.gateway2_name }} SNR (dB)' },
+    showlegend: false
+});
+
+// RSSI Difference Histogram
+if (chartData.rssi_diff_histogram.values.length > 0) {
+    const rssiDiffTrace = {
+        x: chartData.rssi_diff_histogram.values,
+        type: 'histogram',
+        marker: {
+            color: 'rgba(31, 119, 180, 0.7)',
+            line: {
+                color: 'rgba(31, 119, 180, 1)',
+                width: 1
+            }
+        }
+    };
+
+    Plotly.newPlot('rssiDiffHistogram', [rssiDiffTrace], {
+        title: 'RSSI Difference Distribution ({{ comparison_data.gateway2_name }} - {{ comparison_data.gateway1_name }})',
+        xaxis: { title: 'RSSI Difference (dBm)' },
+        yaxis: { title: 'Count' }
+    });
+}
+
+// SNR Difference Histogram
+if (chartData.snr_diff_histogram.values.length > 0) {
+    const snrDiffTrace = {
+        x: chartData.snr_diff_histogram.values,
+        type: 'histogram',
+        marker: {
+            color: 'rgba(255, 127, 14, 0.7)',
+            line: {
+                color: 'rgba(255, 127, 14, 1)',
+                width: 1
+            }
+        }
+    };
+
+    Plotly.newPlot('snrDiffHistogram', [snrDiffTrace], {
+        title: 'SNR Difference Distribution ({{ comparison_data.gateway2_name }} - {{ comparison_data.gateway1_name }})',
+        xaxis: { title: 'SNR Difference (dB)' },
+        yaxis: { title: 'Count' }
+    });
+}
+
+// RSSI Timeline
+if (chartData.timeline_rssi.timestamps.length > 0) {
+    const rssiTimeline1 = {
+        x: chartData.timeline_rssi.timestamps,
+        y: chartData.timeline_rssi.gateway1,
+        mode: 'lines+markers',
+        type: 'scatter',
+        name: '{{ comparison_data.gateway1_name }}',
+        line: { color: 'rgba(31, 119, 180, 1)' },
+        marker: { size: 4 }
+    };
+
+    const rssiTimeline2 = {
+        x: chartData.timeline_rssi.timestamps,
+        y: chartData.timeline_rssi.gateway2,
+        mode: 'lines+markers',
+        type: 'scatter',
+        name: '{{ comparison_data.gateway2_name }}',
+        line: { color: 'rgba(255, 127, 14, 1)' },
+        marker: { size: 4 }
+    };
+
+    Plotly.newPlot('rssiTimelineChart', [rssiTimeline1, rssiTimeline2], {
+        title: 'RSSI Over Time',
+        xaxis: { title: 'Time' },
+        yaxis: { title: 'RSSI (dBm)' }
+    });
+}
+
+// SNR Timeline
+if (chartData.timeline_snr.timestamps.length > 0) {
+    const snrTimeline1 = {
+        x: chartData.timeline_snr.timestamps,
+        y: chartData.timeline_snr.gateway1,
+        mode: 'lines+markers',
+        type: 'scatter',
+        name: '{{ comparison_data.gateway1_name }}',
+        line: { color: 'rgba(31, 119, 180, 1)' },
+        marker: { size: 4 }
+    };
+
+    const snrTimeline2 = {
+        x: chartData.timeline_snr.timestamps,
+        y: chartData.timeline_snr.gateway2,
+        mode: 'lines+markers',
+        type: 'scatter',
+        name: '{{ comparison_data.gateway2_name }}',
+        line: { color: 'rgba(255, 127, 14, 1)' },
+        marker: { size: 4 }
+    };
+
+    Plotly.newPlot('snrTimelineChart', [snrTimeline1, snrTimeline2], {
+        title: 'SNR Over Time',
+        xaxis: { title: 'Time' },
+        yaxis: { title: 'SNR (dB)' }
+    });
+}
+
+// Initialize DataTable for common packets
+$(document).ready(function() {
+    $('#commonPacketsTable').DataTable({
+        responsive: true,
+        pageLength: 25,
+        order: [[0, 'desc']], // Sort by time descending
+        columnDefs: [
+            { targets: [4, 5, 6, 7, 8, 9], className: 'text-end' } // Right-align numeric columns
+        ]
+    });
+});
+</script>
+{% endif %}
+{% endblock %} 

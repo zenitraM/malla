@@ -1,0 +1,6 @@
+#  Deployment notes
+- To test with, assume there's an application runs at :5008 and that gets autoreloaded on your changes. No need to restart it.
+- You can tail the application's log messages in the app.log file.
+- You don't have access to the sqlite command, but you can run inline python scripts by executing python that you can use to inspect the database or parse things as needed to understand.
+- Implement tests when you do changes that test that your fixes are correct - see tests/ and tests/README.md.
+- Run the test runner with all tests often and make sure you fix any tests you break in the process.

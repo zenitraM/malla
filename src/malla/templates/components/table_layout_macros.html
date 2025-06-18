@@ -1,0 +1,249 @@
+{# Table layout macros for full-screen views with collapsible sidebar #}
+
+{# Full-screen table container #}
+{% macro fullscreen_table_container(table_id, title, icon_class, toggle_button_id) %}
+<div class="table-container">
+    <!-- Main Table Area -->
+    <div class="table-main">
+        <div class="table-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <h2><i class="{{ icon_class }}"></i> {{ title }}</h2>
+                <button type="button" class="btn btn-outline-secondary" id="{{ toggle_button_id }}">
+                    <i class="bi bi-layout-sidebar-inset-reverse"></i> Filters
+                </button>
+            </div>
+        </div>
+        <div class="table-content">
+            {{ caller() }}
+        </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div id="tableSidebar" class="table-sidebar">
+        <div class="sidebar-header">
+            <h5><i class="bi bi-funnel"></i> Filters & Controls</h5>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="closeSidebar">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>
+        <div class="sidebar-content">
+            {% if caller_sidebar %}
+                {{ caller_sidebar() }}
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+{# Filter section for sidebar #}
+{% macro filter_section(form_id, title="Filters") %}
+<div class="sidebar-section">
+    <h6><i class="bi bi-funnel"></i> {{ title }}</h6>
+    <form id="{{ form_id }}">
+        {{ caller() }}
+    </form>
+</div>
+{% endmacro %}
+
+{# Controls section for sidebar #}
+{% macro table_controls_section(controls, title="Controls") %}
+<div class="sidebar-section">
+    <h6><i class="bi bi-gear"></i> {{ title }}</h6>
+    <div class="d-grid gap-2">
+        {% for control in controls %}
+        <button type="button" class="btn {{ control.class }} btn-sm"
+                {% if control.onclick %}onclick="{{ control.onclick }}"{% endif %}
+                {% if control.id %}id="{{ control.id }}"{% endif %}
+                {% if control.type %}type="{{ control.type }}"{% endif %}>
+            <i class="{{ control.icon }}"></i> {{ control.text }}
+        </button>
+        {% endfor %}
+    </div>
+</div>
+{% endmacro %}
+
+{# Grouping toggle section #}
+{% macro grouping_section(checkbox_id, label="Group by Packet ID", description="Group related packets together") %}
+<div class="sidebar-section">
+    <h6><i class="bi bi-collection"></i> Grouping</h6>
+    <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="{{ checkbox_id }}" checked>
+        <label class="form-check-label" for="{{ checkbox_id }}">
+            {{ label }}
+        </label>
+        {% if description %}
+        <div class="form-text">
+            <small class="text-muted">{{ description }}</small>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endmacro %}
+
+{# Table stats section #}
+{% macro table_stats_section(stats_id, stats_items, title="Statistics") %}
+<div class="sidebar-section">
+    <h6><i class="bi bi-bar-chart"></i> {{ title }}</h6>
+    <div id="{{ stats_id }}" class="stats-content">
+        {% for item in stats_items %}
+        <div><strong>{{ item.label }}:</strong> <span id="{{ item.id }}">{{ item.default }}</span></div>
+        {% endfor %}
+    </div>
+</div>
+{% endmacro %}
+
+{# Table layout styles #}
+{% macro table_layout_styles() %}
+<style>
+/* Override base container for full-screen layout */
+.table-container {
+    position: fixed;
+    top: 56px; /* Height of navbar */
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    background: #f8f9fa;
+    z-index: 1;
+}
+
+.table-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    order: 1;
+}
+
+.table-header {
+    background: white;
+    border-bottom: 1px solid #dee2e6;
+    padding: 1rem 1.5rem;
+    flex-shrink: 0;
+}
+
+.table-content {
+    flex: 1;
+    overflow: hidden;
+    padding: 0;
+    background: white;
+}
+
+.table-sidebar {
+    width: 400px;
+    background: white;
+    border-left: 1px solid #dee2e6;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    transition: margin-right 0.3s ease;
+    z-index: 1000;
+    order: 2;
+}
+
+.table-sidebar.collapsed {
+    margin-right: -370px;
+}
+
+.table-sidebar.collapsed ~ .table-main #toggleSidebar {
+    position: fixed;
+    right: 10px;
+    top: 70px;
+    z-index: 1001;
+    background: white;
+    border: 1px solid #dee2e6;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.sidebar-header {
+    padding: 1rem;
+    border-bottom: 1px solid #dee2e6;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f8f9fa;
+    flex-shrink: 0;
+}
+
+.sidebar-header h5 {
+    margin: 0;
+    flex-grow: 1;
+}
+
+.sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.sidebar-section {
+    padding: 1rem;
+    border-bottom: 1px solid #f1f3f4;
+}
+
+.sidebar-section h6 {
+    margin-bottom: 0.75rem;
+    color: #495057;
+}
+
+.stats-content {
+    font-size: 0.9rem;
+}
+
+.stats-content div {
+    margin-bottom: 0.25rem;
+}
+
+/* Modern table within full-screen layout */
+.table-content .modern-table-container {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.table-content .modern-table {
+    flex: 1;
+    overflow: auto;
+}
+
+.table-content .modern-table-pagination {
+    flex-shrink: 0;
+    background: #f8f9fa;
+    border-top: 1px solid #dee2e6;
+    padding: 0.75rem 1rem;
+}
+
+/* Hide footer for full-screen views */
+.footer {
+    display: none !important;
+}
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+    .table-sidebar {
+        width: 100%;
+        height: 50vh;
+        border-left: none;
+        border-top: 1px solid #dee2e6;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        transform: translateY(100%);
+        transition: transform 0.3s ease;
+        order: 2;
+    }
+
+    .table-sidebar:not(.collapsed) {
+        transform: translateY(0);
+    }
+
+    .table-main {
+        order: 1;
+    }
+
+    .table-container {
+        flex-direction: column;
+    }
+}
+</style>
+{% endmacro %}

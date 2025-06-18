@@ -1,0 +1,1301 @@
+{% extends "base.html" %}
+{% from "macros.html" import node_link, node_badge, gateway_link, protocol_badge, signal_indicator, gateway_reception_link %}
+
+{% block title %}Packet #{{ packet.id }} - Malla{% endblock %}
+
+{% block extra_css %}
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    .card-metric {
+        text-align: center;
+    }
+    .metric-value {
+        font-size: 2rem;
+        font-weight: bold;
+    }
+    .metric-label {
+        color: #6c757d;
+        font-size: 0.875rem;
+    }
+    .signal-indicator {
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: bold;
+    }
+    .signal-excellent { background-color: #d4edda; color: #155724; }
+    .signal-good { background-color: #fff3cd; color: #856404; }
+    .signal-fair { background-color: #f8d7da; color: #721c24; }
+    .signal-poor { background-color: #f5c6cb; color: #721c24; }
+    .hop-badge {
+        background-color: #e9ecef;
+        color: #495057;
+        padding: 2px 6px;
+        border-radius: 8px;
+        font-size: 0.75rem;
+    }
+    .payload-hex {
+        font-family: 'Courier New', monospace;
+        background-color: #f8f9fa;
+        padding: 10px;
+        border-radius: 4px;
+        word-break: break-all;
+        font-size: 0.8rem;
+    }
+    .yaml-content {
+        font-family: 'Courier New', monospace;
+        background-color: #f8f9fa;
+        padding: 15px;
+        border-radius: 4px;
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    .time-diff-positive { color: #28a745; }
+    .time-diff-negative { color: #dc3545; }
+    .reception-card {
+        border-left: 4px solid #007bff;
+        margin-bottom: 0.5rem;
+    }
+    .main-reception {
+        border-left-color: #28a745;
+        background-color: #f8fff9;
+    }
+    #traceroute-map {
+        position: relative;
+    }
+    #receptions-map {
+        position: relative;
+    }
+    .reception-primary {
+        background-color: #f8fff9;
+        border-left: 4px solid #28a745;
+    }
+    .signal-value {
+        font-weight: bold;
+    }
+    .channel-badge {
+        background-color: #e9ecef;
+        color: #495057;
+        padding: 2px 6px;
+        border-radius: 8px;
+        font-size: 0.75rem;
+    }
+
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="row mb-4">
+        <div class="col">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="/">Home</a></li>
+                    <li class="breadcrumb-item"><a href="/packets">Packets</a></li>
+                    <li class="breadcrumb-item active">Packet #{{ packet.id }}</li>
+                </ol>
+            </nav>
+            <h1>
+                <i class="bi bi-envelope"></i> Packet #{{ packet.id }}
+                {% if packet.success %}
+                    <span class="badge bg-success">Success</span>
+                {% else %}
+                    <span class="badge bg-danger">Failed</span>
+                {% endif %}
+            </h1>
+            <p class="text-muted">{{ packet.portnum_name or "Unknown Protocol" }} packet from {{ packet.from_node_name }} to {{ packet.to_node_name }}</p>
+        </div>
+    </div>
+
+    <!-- Overview Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card card-metric">
+                <div class="card-body">
+                    <div class="metric-value">{{ reception_count }}</div>
+                    <div class="metric-label">Total Receptions</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card card-metric">
+                <div class="card-body">
+                    <div class="metric-value">{{ gateway_count }}</div>
+                    <div class="metric-label">Unique Gateways</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card card-metric">
+                <div class="card-body">
+                    <div class="metric-value">
+                        {% if packet.hop_count is not none %}
+                            {{ packet.hop_count }}
+                        {% else %}
+                            ?
+                        {% endif %}
+                    </div>
+                    <div class="metric-label">Hop Count</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card card-metric">
+                <div class="card-body">
+                    <div class="metric-value">{{ packet.payload_length or 0 }}</div>
+                    <div class="metric-label">Payload Bytes</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Main Packet Information -->
+        <div class="col-12">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5><i class="bi bi-info-circle"></i> Packet Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Database ID:</th>
+                                    <td>{{ packet.id }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Mesh Packet ID:</th>
+                                    <td>
+                                        {% if packet.mesh_packet_id %}
+                                            <code>0x{{ "%08x"|format(packet.mesh_packet_id) }}</code>
+                                            <br><small class="text-muted">Used for correlation across gateways</small>
+                                        {% else %}
+                                            <span class="text-muted">Not available</span>
+                                            <br><small class="text-warning">Legacy packet - correlation by time</small>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Timestamp:</th>
+                                    <td>{{ packet.timestamp_str }} UTC</td>
+                                </tr>
+                                <tr>
+                                    <th>From Node:</th>
+                                    <td>
+                                        {{ node_link(packet.from_node_id, packet.from_node_name) }}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>To Node:</th>
+                                    <td>
+                                        {% if packet.to_node_id %}
+                                            {{ node_link(packet.to_node_id, packet.to_node_name) }}
+                                        {% else %}
+                                            <strong>{{ packet.to_node_name or "Broadcast" }}</strong>
+                                            <br><small class="text-muted">Broadcast message</small>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Success:</th>
+                                    <td>
+                                        {% if packet.success %}
+                                            <span class="badge bg-success">Processed</span>
+                                        {% else %}
+                                            <span class="badge bg-danger">Failed</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Protocol:</th>
+                                    <td>
+                                        {{ protocol_badge(packet.portnum_name or "Unknown") }}
+                                        <br><small class="text-muted">Port: {{ packet.portnum }}</small>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Gateway:</th>
+                                    <td>
+                                        {% if packet.gateway_id and packet.gateway_id != "Unknown" %}
+                                            {{ gateway_link(packet.gateway_id, packet.gateway_name) }}
+                                        {% else %}
+                                            Unknown
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Channel:</th>
+                                    <td>{{ packet.channel_id or "Unknown" }}</td>
+                                </tr>
+                                <tr>
+                                    <th>RSSI:</th>
+                                    <td>
+                                        {% if packet.rssi %}
+                                            {{ signal_indicator(packet.rssi) }}
+                                        {% else %}
+                                            <span class="text-muted">Unknown</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>SNR:</th>
+                                    <td>
+                                        {% if packet.snr %}
+                                            {{ signal_indicator(packet.snr) }}
+                                        {% else %}
+                                            <span class="text-muted">Unknown</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Hop Info:</th>
+                                    <td>
+                                        {% if packet.hop_start is not none and packet.hop_limit is not none %}
+                                            <span class="hop-badge">{{ packet.hop_start - packet.hop_limit }}/{{ packet.hop_start }} hops</span>
+                                            <br><small class="text-muted">Start: {{ packet.hop_start }}, Limit: {{ packet.hop_limit }}</small>
+                                        {% else %}
+                                            <span class="text-muted">Unknown</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Payload Information -->
+            {% if payload_info %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5><i class="bi bi-file-binary"></i> Payload Data</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <strong>Protocol:</strong> {{ payload_info.portnum }}
+                        </div>
+                        <div class="col-md-4">
+                            <strong>Size:</strong> {{ payload_info.size }} bytes
+                        </div>
+                        <div class="col-md-4">
+                            <strong>Decoded:</strong>
+                            {% if payload_info.decoded %}
+                                <span class="badge bg-success">Yes</span>
+                            {% else %}
+                                <span class="badge bg-warning">No</span>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if payload_info.error %}
+                        <div class="alert alert-warning">
+                            <i class="bi bi-exclamation-triangle"></i> {{ payload_info.error }}
+                        </div>
+                    {% endif %}
+
+                    {% if payload_info.text %}
+                        <div class="mb-3">
+                            <h6>Text Content:</h6>
+                            <div class="payload-hex">{{ payload_info.text }}</div>
+                        </div>
+                    {% endif %}
+
+                    {% if payload_info.data %}
+                        <div class="mb-3">
+                            <h6>Decoded Data:</h6>
+                            {% if payload_info.portnum == 'POSITION_APP' %}
+                                <table class="table table-sm">
+                                    {% if payload_info.data.latitude %}
+                                        <tr><th>Latitude:</th><td>{{ "%.6f"|format(payload_info.data.latitude) }}°</td></tr>
+                                    {% endif %}
+                                    {% if payload_info.data.longitude %}
+                                        <tr><th>Longitude:</th><td>{{ "%.6f"|format(payload_info.data.longitude) }}°</td></tr>
+                                    {% endif %}
+                                    {% if payload_info.data.altitude %}
+                                        <tr><th>Altitude:</th><td>{{ payload_info.data.altitude }} m</td></tr>
+                                    {% endif %}
+                                    {% if payload_info.data.sats_in_view %}
+                                        <tr><th>Satellites:</th><td>{{ payload_info.data.sats_in_view }}</td></tr>
+                                    {% endif %}
+                                    {% if payload_info.data.precision_bits %}
+                                        <tr><th>Precision:</th><td>{{ payload_info.data.precision_bits }} bits</td></tr>
+                                    {% endif %}
+                                </table>
+                            {% elif payload_info.portnum == 'NODEINFO_APP' %}
+                                <table class="table table-sm">
+                                    {% if payload_info.data.long_name %}
+                                        <tr><th>Long Name:</th><td>{{ payload_info.data.long_name }}</td></tr>
+                                    {% endif %}
+                                    {% if payload_info.data.short_name %}
+                                        <tr><th>Short Name:</th><td>{{ payload_info.data.short_name }}</td></tr>
+                                    {% endif %}
+                                    {% if payload_info.data.id %}
+                                        <tr><th>Node ID:</th><td>{{ payload_info.data.id }}</td></tr>
+                                    {% endif %}
+                                    {% if payload_info.data.macaddr %}
+                                        <tr><th>MAC Address:</th><td>{{ payload_info.data.macaddr }}</td></tr>
+                                    {% endif %}
+                                    {% if payload_info.data.hw_model %}
+                                        <tr><th>Hardware:</th><td>{{ payload_info.data.hw_model }}</td></tr>
+                                    {% endif %}
+                                </table>
+                            {% elif payload_info.portnum == 'TELEMETRY_APP' %}
+                                {% if payload_info.data.device_metrics %}
+                                    <h6>Device Metrics:</h6>
+                                    <table class="table table-sm">
+                                        {% if payload_info.data.device_metrics.battery_level %}
+                                            <tr><th>Battery:</th><td>{{ payload_info.data.device_metrics.battery_level }}%</td></tr>
+                                        {% endif %}
+                                        {% if payload_info.data.device_metrics.voltage %}
+                                            <tr><th>Voltage:</th><td>{{ "%.2f"|format(payload_info.data.device_metrics.voltage) }} V</td></tr>
+                                        {% endif %}
+                                        {% if payload_info.data.device_metrics.channel_utilization %}
+                                            <tr><th>Channel Usage:</th><td>{{ "%.1f"|format(payload_info.data.device_metrics.channel_utilization) }}%</td></tr>
+                                        {% endif %}
+                                        {% if payload_info.data.device_metrics.air_util_tx %}
+                                            <tr><th>Air Util TX:</th><td>{{ "%.1f"|format(payload_info.data.device_metrics.air_util_tx) }}%</td></tr>
+                                        {% endif %}
+                                    </table>
+                                {% endif %}
+                                {% if payload_info.data.environment_metrics %}
+                                    <h6>Environment Metrics:</h6>
+                                    <table class="table table-sm">
+                                        {% if payload_info.data.environment_metrics.temperature %}
+                                            <tr><th>Temperature:</th><td>{{ "%.1f"|format(payload_info.data.environment_metrics.temperature) }}°C</td></tr>
+                                        {% endif %}
+                                        {% if payload_info.data.environment_metrics.relative_humidity %}
+                                            <tr><th>Humidity:</th><td>{{ "%.1f"|format(payload_info.data.environment_metrics.relative_humidity) }}%</td></tr>
+                                        {% endif %}
+                                        {% if payload_info.data.environment_metrics.barometric_pressure %}
+                                            <tr><th>Pressure:</th><td>{{ "%.1f"|format(payload_info.data.environment_metrics.barometric_pressure) }} hPa</td></tr>
+                                        {% endif %}
+                                    </table>
+                                {% endif %}
+                            {% elif payload_info.portnum == 'NEIGHBORINFO_APP' %}
+                                <h6><i class="bi bi-diagram-3"></i> Neighbor Information Report</h6>
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <table class="table table-sm">
+                                            {% if payload_info.data.node_id %}
+                                                <tr><th>Reporting Node:</th><td>{{ node_link(payload_info.data.node_id, payload_info.data.node_name) }}</td></tr>
+                                            {% endif %}
+                                            {% if payload_info.data.last_sent_by_id %}
+                                                <tr><th>Last Sent By:</th><td>{{ node_link(payload_info.data.last_sent_by_id, payload_info.data.last_sent_by_name) }}</td></tr>
+                                            {% endif %}
+                                            {% if payload_info.data.node_broadcast_interval_secs %}
+                                                <tr><th>Broadcast Interval:</th><td>{{ payload_info.data.node_broadcast_interval_secs }} seconds</td></tr>
+                                            {% endif %}
+                                            <tr><th>Neighbors Found:</th><td>{{ payload_info.data.neighbor_count }}</td></tr>
+                                        </table>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="card bg-light">
+                                            <div class="card-body text-center">
+                                                <h5 class="card-title mb-1">{{ payload_info.data.neighbor_count }}</h5>
+                                                <p class="card-text text-muted mb-0">Active Neighbors</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {% if payload_info.data.neighbors %}
+                                    <h6><i class="bi bi-people"></i> Neighbor Details</h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>Neighbor Node</th>
+                                                    <th>SNR</th>
+                                                    <th>Last Heard</th>
+                                                    <th>Broadcast Interval</th>
+                                                    <th>Signal Quality</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for neighbor in payload_info.data.neighbors %}
+                                                <tr>
+                                                    <td>{{ node_link(neighbor.node_id, neighbor.node_name) }}</td>
+                                                    <td>
+                                                        {% if neighbor.snr is not none %}
+                                                            <span class="badge {% if neighbor.snr >= 5 %}bg-success{% elif neighbor.snr >= 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                                                {{ "%.1f"|format(neighbor.snr) }} dB
+                                                            </span>
+                                                        {% else %}
+                                                            <span class="text-muted">Unknown</span>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>
+                                                        <small>{{ neighbor.last_rx_time_str }}</small>
+                                                    </td>
+                                                    <td>
+                                                        {% if neighbor.node_broadcast_interval_secs %}
+                                                            {{ neighbor.node_broadcast_interval_secs }}s
+                                                        {% else %}
+                                                            <span class="text-muted">Unknown</span>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>
+                                                        {% if neighbor.snr is not none %}
+                                                            {% if neighbor.snr >= 5 %}
+                                                                <span class="badge bg-success">Excellent</span>
+                                                            {% elif neighbor.snr >= 0 %}
+                                                                <span class="badge bg-warning text-dark">Good</span>
+                                                            {% elif neighbor.snr >= -5 %}
+                                                                <span class="badge bg-warning text-dark">Fair</span>
+                                                            {% else %}
+                                                                <span class="badge bg-danger">Poor</span>
+                                                            {% endif %}
+                                                        {% else %}
+                                                            <span class="text-muted">Unknown</span>
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    <div class="mt-3">
+                                        <small class="text-muted">
+                                            <i class="bi bi-info-circle"></i>
+                                            This neighbor information was reported by {{ payload_info.data.node_name }}
+                                            and shows which nodes it can directly communicate with and their signal quality.
+                                        </small>
+                                    </div>
+                                {% else %}
+                                    <div class="alert alert-info">
+                                        <i class="bi bi-info-circle"></i> No neighbors reported by this node.
+                                    </div>
+                                {% endif %}
+                            {% elif payload_info.portnum == 'TRACEROUTE_APP' %}
+                                <!-- Enhanced Traceroute Information -->
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <h6><i class="bi bi-route"></i> Route Information</h6>
+                                        <table class="table table-sm">
+                                            {% if payload_info.data.route_nodes %}
+                                                <tr>
+                                                    <th>Route Path:</th>
+                                                    <td>
+                                                        {% for node_id in payload_info.data.route_nodes %}
+                                                            {{ node_link(node_id, display_text=payload_info.data.route_node_names.get(node_id)) }}
+                                                            {% if not loop.last %}→{% endif %}
+                                                        {% endfor %}
+                                                    </td>
+                                                </tr>
+                                                <tr>
+                                                    <th>Hop Count:</th>
+                                                    <td>{{ payload_info.data.route_nodes|length - 1 }} hops</td>
+                                                </tr>
+                                                <tr>
+                                                    <th>Status:</th>
+                                                    <td>
+                                                        {% if payload_info.data.traceroute_packet %}
+                                                            {% set status = payload_info.data.traceroute_packet.get_completion_status() %}
+                                                            {% if "Complete" in status and "incomplete" not in status and "in progress" not in status %}
+                                                                <span class="badge bg-success">
+                                                                    <i class="bi bi-check-circle"></i> {{ status }}
+                                                                </span>
+                                                            {% elif "in progress" in status %}
+                                                                <span class="badge bg-info">
+                                                                    <i class="bi bi-arrow-clockwise"></i> {{ status }}
+                                                                </span>
+                                                            {% else %}
+                                                                <span class="badge bg-warning text-dark">
+                                                                    <i class="bi bi-clock"></i> {{ status }}
+                                                                </span>
+                                                            {% endif %}
+                                                        {% else %}
+                                                            {# Fallback to legacy logic #}
+                                                            {% if payload_info.data.route_nodes and payload_info.data.route_nodes[-1] == packet.to_node_id %}
+                                                                <span class="badge bg-success">
+                                                                    <i class="bi bi-check-circle"></i> Reached destination
+                                                                </span>
+                                                            {% else %}
+                                                                <span class="badge bg-warning text-dark">
+                                                                    <i class="bi bi-clock"></i> In progress - last hop: {{ node_link(payload_info.data.route_nodes[-1], display_text=payload_info.data.route_node_names.get(payload_info.data.route_nodes[-1])) if payload_info.data.route_nodes else "Unknown" }}
+                                                                </span>
+                                                            {% endif %}
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                            {% endif %}
+                                            {% if payload_info.data.snr_towards %}
+                                                <tr>
+                                                    <th>SNR Towards:</th>
+                                                    <td>
+                                                        {% for snr in payload_info.data.snr_towards %}
+                                                            <span class="badge {% if snr >= 5 %}bg-success{% elif snr >= 0 %}bg-warning{% else %}bg-danger{% endif %} me-1">{{ snr }} dB</span>
+                                                        {% endfor %}
+                                                    </td>
+                                                </tr>
+                                            {% endif %}
+                                            {% if payload_info.data.route_back %}
+                                                <tr>
+                                                    <th>Return Path:</th>
+                                                    <td>
+                                                        {% for node_id in payload_info.data.route_back %}
+                                                            {{ node_link(node_id, display_text=payload_info.data.route_node_names.get(node_id)) }}
+                                                            {% if not loop.last %}→{% endif %}
+                                                        {% endfor %}
+                                                    </td>
+                                                </tr>
+                                            {% endif %}
+                                            {% if payload_info.data.snr_back %}
+                                                <tr>
+                                                    <th>SNR Back:</th>
+                                                    <td>
+                                                        {% for snr in payload_info.data.snr_back %}
+                                                            <span class="badge {% if snr >= 5 %}bg-success{% elif snr >= 0 %}bg-warning{% else %}bg-danger{% endif %} me-1">{{ snr }} dB</span>
+                                                        {% endfor %}
+                                                    </td>
+                                                </tr>
+                                            {% endif %}
+                                        </table>
+                                    </div>
+
+                                    {% if payload_info.data.route_nodes and payload_info.data.route_nodes|length > 1 %}
+                                    <div class="col-md-6">
+                                        <h6><i class="bi bi-map"></i> Route Visualization</h6>
+                                        <div id="traceroute-map" style="height: 300px; border: 1px solid #dee2e6; border-radius: 0.375rem;" data-route-nodes="{% if payload_info and payload_info.data and payload_info.data.route_nodes %}{{ payload_info.data.route_nodes | safe_json | safe }}{% else %}null{% endif %}">
+                                            <div class="d-flex align-items-center justify-content-center h-100">
+                                                <div class="text-center">
+                                                    <div class="spinner-border text-primary" role="status">
+                                                        <span class="visually-hidden">Loading...</span>
+                                                    </div>
+                                                    <p class="mt-2 text-muted">Loading route map...</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="mt-2">
+                                            <small class="text-muted">
+                                                <i class="bi bi-info-circle"></i>
+                                                Map shows the geographic path if nodes have shared location data.
+                                            </small>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                </div>
+
+                                <!-- Traceroute Steps Table -->
+                                {% if payload_info.data.route_nodes or payload_info.data.forward_hops %}
+                                <div class="mt-4">
+                                    <h6><i class="bi bi-list-ol"></i> Traceroute Steps</h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>Hop</th>
+                                                    <th>From Node</th>
+                                                    <th>To Node</th>
+                                                    <th>Distance</th>
+                                                    <th>SNR (dB)</th>
+                                                    <th>Direction</th>
+                                                    <th>Analysis</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% if payload_info.data.forward_hops %}
+                                                    {# Use enhanced hop data with distances from TraceroutePacket model #}
+                                                    {% for hop in payload_info.data.forward_hops %}
+                                                    <tr>
+                                                        <td>{{ hop.hop_number }}</td>
+                                                        <td>{{ node_link(hop.from_node_id, display_text=hop.from_node_name) }}</td>
+                                                        <td>{{ node_link(hop.to_node_id, display_text=hop.to_node_name) }}</td>
+                                                        <td>
+                                                            {% if hop.distance_meters is not none %}
+                                                                {% if hop.distance_meters < 1000 %}
+                                                                    {% set distance_text = "%.0f m"|format(hop.distance_meters) %}
+                                                                {% else %}
+                                                                    {% set distance_text = "%.2f km"|format(hop.distance_meters / 1000) %}
+                                                                {% endif %}
+                                                                {% set location_warning = [] %}
+                                                                {% if hop.from_location_age_warning and hop.from_location_age_warning != "Used current location" %}
+                                                                    {% set _ = location_warning.append("From: " + hop.from_location_age_warning) %}
+                                                                {% endif %}
+                                                                {% if hop.to_location_age_warning and hop.to_location_age_warning != "Used current location" %}
+                                                                    {% set _ = location_warning.append("To: " + hop.to_location_age_warning) %}
+                                                                {% endif %}
+                                                                {% if location_warning %}
+                                                                    <span class="text-warning"
+                                                                          data-bs-toggle="tooltip"
+                                                                          data-bs-placement="top"
+                                                                          title="Location timestamp warnings: {{ location_warning | join(', ') }}">
+                                                                        <i class="bi bi-exclamation-triangle-fill"></i> {{ distance_text }}
+                                                                    </span>
+                                                                {% else %}
+                                                                    <span class="text-success">{{ distance_text }}</span>
+                                                                {% endif %}
+                                                            {% else %}
+                                                                <span class="text-muted"
+                                                                      data-bs-toggle="tooltip"
+                                                                      data-bs-placement="top"
+                                                                      title="No location data available for one or both nodes">
+                                                                    Unknown
+                                                                </span>
+                                                            {% endif %}
+                                                        </td>
+                                                        <td>
+                                                            {% if hop.snr is not none %}
+                                                                <span class="badge {% if hop.snr >= 5 %}bg-success{% elif hop.snr >= 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                                                    {{ hop.snr }} dB
+                                                                </span>
+                                                            {% else %}
+                                                                <span class="text-muted">Unknown</span>
+                                                            {% endif %}
+                                                        </td>
+                                                        <td>
+                                                            <i class="bi bi-arrow-right text-primary"></i>
+                                                            {% if hop.hop_number == 1 %}
+                                                                <small class="text-muted">Origin</small>
+                                                            {% elif hop.hop_number == payload_info.data.forward_hops|length and payload_info.data.is_complete %}
+                                                                <small class="text-muted">Destination</small>
+                                                            {% else %}
+                                                                <small class="text-muted">Relay</small>
+                                                            {% endif %}
+                                                        </td>
+                                                        <td>
+                                                            <a href="#" onclick="openTracerouteHops({{ hop.from_node_id }}, {{ hop.to_node_id }}); return false;"
+                                                               class="btn btn-sm btn-outline-primary" title="View traceroute hops between these nodes">
+                                                                <i class="bi bi-diagram-3"></i> Hops
+                                                            </a>
+                                                        </td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                    {% if not payload_info.data.is_complete %}
+                                                    <tr class="table-warning">
+                                                        <td colspan="7" class="text-center">
+                                                            <i class="bi bi-exclamation-triangle"></i>
+                                                            <strong>Traceroute incomplete</strong> - Final destination not reached
+                                                        </td>
+                                                    </tr>
+                                                    {% endif %}
+                                                {% else %}
+                                                    {# Fallback for packets without enhanced TraceroutePacket data #}
+                                                    <tr class="table-info">
+                                                        <td colspan="7" class="text-center">
+                                                            <i class="bi bi-info-circle"></i>
+                                                            <strong>Legacy traceroute data</strong> - Enhanced analysis not available
+                                                            <br><small class="text-muted">
+                                                                Route nodes: {{ payload_info.data.route_nodes|length if payload_info.data.route_nodes else 0 }},
+                                                                SNR values: {{ payload_info.data.snr_towards|length if payload_info.data.snr_towards else 0 }}
+                                                                {% if payload_info.data.route_back %}, Return path available{% endif %}
+                                                            </small>
+                                                        </td>
+                                                    </tr>
+                                                {% endif %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    <!-- Return Path Steps if available -->
+                                    {% if payload_info.data.route_back or payload_info.data.return_hops %}
+                                    <div class="mt-3">
+                                        <h6><i class="bi bi-arrow-left-right"></i> Return Path Steps</h6>
+                                        <div class="table-responsive">
+                                            <table class="table table-sm table-striped">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Hop</th>
+                                                        <th>From Node</th>
+                                                        <th>To Node</th>
+                                                        <th>Distance</th>
+                                                        <th>SNR (dB)</th>
+                                                        <th>Direction</th>
+                                                        <th>Analysis</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% if payload_info.data.return_hops %}
+                                                        {# Use enhanced hop data with distances from TraceroutePacket model #}
+                                                        {% for hop in payload_info.data.return_hops %}
+                                                        <tr>
+                                                            <td>{{ hop.hop_number }}</td>
+                                                            <td>{{ node_link(hop.from_node_id, display_text=hop.from_node_name) }}</td>
+                                                            <td>{{ node_link(hop.to_node_id, display_text=hop.to_node_name) }}</td>
+                                                            <td>
+                                                                {% if hop.distance_meters is not none %}
+                                                                    {% if hop.distance_meters < 1000 %}
+                                                                        {% set distance_text = "%.0f m"|format(hop.distance_meters) %}
+                                                                    {% else %}
+                                                                        {% set distance_text = "%.2f km"|format(hop.distance_meters / 1000) %}
+                                                                    {% endif %}
+                                                                    {% set location_warning = [] %}
+                                                                    {% if hop.from_location_age_warning and hop.from_location_age_warning != "Used current location" %}
+                                                                        {% set _ = location_warning.append("From: " + hop.from_location_age_warning) %}
+                                                                    {% endif %}
+                                                                    {% if hop.to_location_age_warning and hop.to_location_age_warning != "Used current location" %}
+                                                                        {% set _ = location_warning.append("To: " + hop.to_location_age_warning) %}
+                                                                    {% endif %}
+                                                                    {% if location_warning %}
+                                                                        <span class="text-warning"
+                                                                              data-bs-toggle="tooltip"
+                                                                              data-bs-placement="top"
+                                                                              title="Location timestamp warnings: {{ location_warning | join(', ') }}">
+                                                                            <i class="bi bi-exclamation-triangle-fill"></i> {{ distance_text }}
+                                                                        </span>
+                                                                    {% else %}
+                                                                        <span class="text-success">{{ distance_text }}</span>
+                                                                    {% endif %}
+                                                                {% else %}
+                                                                    <span class="text-muted"
+                                                                          data-bs-toggle="tooltip"
+                                                                          data-bs-placement="top"
+                                                                          title="No location data available for one or both nodes">
+                                                                        Unknown
+                                                                    </span>
+                                                                {% endif %}
+                                                            </td>
+                                                            <td>
+                                                                {% if hop.snr is not none %}
+                                                                    <span class="badge {% if hop.snr >= 5 %}bg-success{% elif hop.snr >= 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                                                        {{ hop.snr }} dB
+                                                                    </span>
+                                                                {% else %}
+                                                                    <span class="text-muted">Unknown</span>
+                                                                {% endif %}
+                                                            </td>
+                                                            <td>
+                                                                <i class="bi bi-arrow-left text-secondary"></i>
+                                                                {% if hop.hop_number == 1 %}
+                                                                    <small class="text-muted">Return Start</small>
+                                                                {% elif hop.hop_number == payload_info.data.return_hops|length %}
+                                                                    <small class="text-muted">Return End</small>
+                                                                {% else %}
+                                                                    <small class="text-muted">Return Relay</small>
+                                                                {% endif %}
+                                                            </td>
+                                                            <td>
+                                                                <a href="#" onclick="openTracerouteHops({{ hop.from_node_id }}, {{ hop.to_node_id }}); return false;"
+                                                                   class="btn btn-sm btn-outline-primary" title="View traceroute hops between these nodes">
+                                                                    <i class="bi bi-diagram-3"></i> Hops
+                                                                </a>
+                                                            </td>
+                                                        </tr>
+                                                        {% endfor %}
+                                                    {% else %}
+                                                        {# Fallback for packets without enhanced TraceroutePacket data #}
+                                                        <tr class="table-info">
+                                                            <td colspan="7" class="text-center">
+                                                                <i class="bi bi-info-circle"></i>
+                                                                <strong>Legacy return path data</strong> - Enhanced analysis not available
+                                                                <br><small class="text-muted">
+                                                                    Return nodes: {{ payload_info.data.route_back|length if payload_info.data.route_back else 0 }},
+                                                                    SNR values: {{ payload_info.data.snr_back|length if payload_info.data.snr_back else 0 }}
+                                                                </small>
+                                                            </td>
+                                                        </tr>
+                                                    {% endif %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+
+                                    {% if payload_info.data.total_forward_distance or payload_info.data.total_return_distance %}
+                                    <div class="mt-3">
+                                        <div class="row">
+                                            {% if payload_info.data.total_forward_distance %}
+                                            <div class="col-md-6">
+                                                <div class="card card-body bg-light">
+                                                    <h6 class="card-title mb-1">Total Forward Distance</h6>
+                                                    <span class="h5 text-primary">
+                                                        {% if payload_info.data.total_forward_distance < 1000 %}
+                                                            {{ "%.0f m"|format(payload_info.data.total_forward_distance) }}
+                                                        {% else %}
+                                                            {{ "%.2f km"|format(payload_info.data.total_forward_distance / 1000) }}
+                                                        {% endif %}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            {% endif %}
+                                            {% if payload_info.data.total_return_distance %}
+                                            <div class="col-md-6">
+                                                <div class="card card-body bg-light">
+                                                    <h6 class="card-title mb-1">Total Return Distance</h6>
+                                                    <span class="h5 text-secondary">
+                                                        {% if payload_info.data.total_return_distance < 1000 %}
+                                                            {{ "%.0f m"|format(payload_info.data.total_return_distance) }}
+                                                        {% else %}
+                                                            {{ "%.2f km"|format(payload_info.data.total_return_distance / 1000) }}
+                                                        {% endif %}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+
+                            {% else %}
+                                <pre class="payload-hex">{{ payload_info.data | safe_json(indent=2) }}</pre>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {# Complete Packet Data section moved to Raw Packet Analysis > Protobuf JSON tab #}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Combined Traceroute Graph for TRACEROUTE_APP packets -->
+            {% if packet.portnum_name == 'TRACEROUTE_APP' %}
+            <div class="card mb-4">
+                <div class="card-body">
+                    {% include 'components/traceroute_graph.html' %}
+                </div>
+            </div>
+            {% endif %}
+
+        </div>
+
+    <!-- Raw Packet Analysis Component -->
+    <div class="col-12">
+        {% include 'components/raw_packet_analysis.html' %}
+    </div>
+
+    <!-- All Receptions Component -->
+    <div class="col-12">
+        {% include 'components/receptions.html' %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- D3.js for graph visualisation -->
+<script src="https://d3js.org/d3.v7.min.js"></script>
+
+<script>
+// Embed data directly in JavaScript variables to avoid HTML attribute parsing issues
+window.packetData = {{ {
+    'primaryGateway': packet.gateway_id,
+    'otherReceptions': other_receptions,
+    'gatewayLocations': gateway_locations,
+    'routeNodes': payload_info.data.route_nodes if payload_info and payload_info.data and payload_info.data.route_nodes else None
+} | tojson }};
+
+// Initialize maps if data exists
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize traceroute map if traceroute data exists
+    const tracerouteMapContainer = document.getElementById('traceroute-map');
+    if (tracerouteMapContainer && window.packetData.routeNodes) {
+        const routeNodes = window.packetData.routeNodes;
+        if (routeNodes && routeNodes.length > 1) {
+            loadTracerouteMap(routeNodes);
+        } else {
+            showMapError('traceroute-map', 'Not enough route data for visualization');
+        }
+    }
+
+    // Initialize reception map if reception data exists
+    const receptionMapContainer = document.getElementById('receptions-map');
+    if (receptionMapContainer) {
+        const primaryGateway = window.packetData.primaryGateway;
+        const otherReceptions = window.packetData.otherReceptions || [];
+        const gatewayLocations = window.packetData.gatewayLocations || {};
+
+        console.log('Reception map data:', { primaryGateway, otherReceptions, gatewayLocations });
+
+        if (primaryGateway || otherReceptions.length > 0) {
+            loadReceptionMap(primaryGateway, otherReceptions, gatewayLocations);
+        } else {
+            showMapError('receptions-map', 'No reception data available');
+        }
+    }
+});
+
+async function loadTracerouteMap(routeNodes) {
+    try {
+        // Convert node IDs to integers for API call, handling both integers and hex strings
+        const nodeIds = routeNodes.map(nodeId => {
+            if (typeof nodeId === 'number') {
+                return nodeId;
+            } else if (typeof nodeId === 'string') {
+                if (nodeId.startsWith('!')) {
+                    return parseInt(nodeId.slice(1), 16);
+                } else {
+                    return parseInt(nodeId, 16);
+                }
+            } else {
+                console.warn('Unexpected node ID format:', nodeId);
+                return parseInt(nodeId, 10);
+            }
+        });
+
+        // Fetch node locations
+        const response = await fetch('/api/locations');
+        const data = await response.json();
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        // Filter locations for our route nodes and interpolate missing ones
+        const routeLocations = [];
+        const knownLocations = [];
+
+        // First pass: collect known locations
+        nodeIds.forEach((nodeId, index) => {
+            const location = data.locations.find(loc => loc.node_id === nodeId);
+            if (location) {
+                knownLocations.push({
+                    index: index,
+                    location: {
+                        ...location,
+                        original_id: routeNodes[index]
+                    }
+                });
+            }
+        });
+
+        if (knownLocations.length === 0) {
+            // No known locations - create a default center location and place all nodes around it
+            const defaultLat = 40.4168; // Madrid center
+            const defaultLng = -3.7038;
+
+            nodeIds.forEach((nodeId, index) => {
+                const offsetLat = (Math.random() - 0.5) * 0.02; // ~2km offset
+                const offsetLng = (Math.random() - 0.5) * 0.02;
+                routeLocations.push({
+                    node_id: nodeId,
+                    latitude: defaultLat + offsetLat,
+                    longitude: defaultLng + offsetLng,
+                    display_name: routeNodes[index],
+                    timestamp_str: 'Interpolated location',
+                    original_id: routeNodes[index],
+                    interpolated: true
+                });
+            });
+        } else {
+            // If we have at least one known location, we can interpolate
+            if (knownLocations.length === 1) {
+            // Only one known location - place all nodes at that location with small offsets
+            const baseLocation = knownLocations[0].location;
+            nodeIds.forEach((nodeId, index) => {
+                const existing = data.locations.find(loc => loc.node_id === nodeId);
+                if (existing) {
+                    routeLocations.push({
+                        ...existing,
+                        original_id: routeNodes[index]
+                    });
+                } else {
+                    // Create interpolated location with small random offset
+                    const offsetLat = (Math.random() - 0.5) * 0.01; // ~1km offset
+                    const offsetLng = (Math.random() - 0.5) * 0.01;
+                    routeLocations.push({
+                        node_id: nodeId,
+                        latitude: baseLocation.latitude + offsetLat,
+                        longitude: baseLocation.longitude + offsetLng,
+                        display_name: routeNodes[index],
+                        timestamp_str: 'Interpolated location',
+                        original_id: routeNodes[index],
+                        interpolated: true
+                    });
+                }
+            });
+        } else {
+            // Multiple known locations - interpolate between them
+            nodeIds.forEach((nodeId, index) => {
+                const existing = data.locations.find(loc => loc.node_id === nodeId);
+                if (existing) {
+                    routeLocations.push({
+                        ...existing,
+                        original_id: routeNodes[index]
+                    });
+                } else {
+                    // Find the closest known locations before and after this index
+                    let beforeLocation = null;
+                    let afterLocation = null;
+
+                    for (let i = knownLocations.length - 1; i >= 0; i--) {
+                        if (knownLocations[i].index < index) {
+                            beforeLocation = knownLocations[i];
+                            break;
+                        }
+                    }
+
+                    for (let i = 0; i < knownLocations.length; i++) {
+                        if (knownLocations[i].index > index) {
+                            afterLocation = knownLocations[i];
+                            break;
+                        }
+                    }
+
+                    let interpolatedLat, interpolatedLng;
+
+                    if (beforeLocation && afterLocation) {
+                        // Interpolate between two known locations
+                        const ratio = (index - beforeLocation.index) / (afterLocation.index - beforeLocation.index);
+                        interpolatedLat = beforeLocation.location.latitude +
+                            (afterLocation.location.latitude - beforeLocation.location.latitude) * ratio;
+                        interpolatedLng = beforeLocation.location.longitude +
+                            (afterLocation.location.longitude - beforeLocation.location.longitude) * ratio;
+                    } else if (beforeLocation) {
+                        // Extrapolate from the last known location
+                        interpolatedLat = beforeLocation.location.latitude + (Math.random() - 0.5) * 0.01;
+                        interpolatedLng = beforeLocation.location.longitude + (Math.random() - 0.5) * 0.01;
+                    } else if (afterLocation) {
+                        // Extrapolate from the first known location
+                        interpolatedLat = afterLocation.location.latitude + (Math.random() - 0.5) * 0.01;
+                        interpolatedLng = afterLocation.location.longitude + (Math.random() - 0.5) * 0.01;
+                    }
+
+                    routeLocations.push({
+                        node_id: nodeId,
+                        latitude: interpolatedLat,
+                        longitude: interpolatedLng,
+                        display_name: routeNodes[index],
+                        timestamp_str: 'Interpolated location',
+                        original_id: routeNodes[index],
+                        interpolated: true
+                    });
+                }
+            });
+        }
+        }
+
+        // Initialize map
+        const map = L.map('traceroute-map').setView([
+            routeLocations[0].latitude,
+            routeLocations[0].longitude
+        ], 10);
+
+        // Add tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Add markers and route line
+        const routeCoords = [];
+        routeLocations.forEach((location, index) => {
+            // Create marker
+            const isStart = index === 0;
+            const isEnd = index === routeLocations.length - 1;
+
+            let markerColor = '#007bff'; // Default blue
+            if (isStart) markerColor = '#28a745'; // Green for start
+            if (isEnd) markerColor = '#dc3545'; // Red for end
+
+            const marker = L.circleMarker([location.latitude, location.longitude], {
+                radius: 8,
+                fillColor: markerColor,
+                color: '#fff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8
+            }).addTo(map);
+
+            // Add popup
+            const popupContent = `
+                <div>
+                    <strong>${location.display_name || location.original_id}</strong><br>
+                    ${isStart ? '<span class="badge bg-success">Start</span>' : ''}
+                    ${isEnd ? '<span class="badge bg-danger">End</span>' : ''}
+                    ${!isStart && !isEnd ? '<span class="badge bg-primary">Hop ' + index + '</span>' : ''}
+                    ${location.interpolated ? '<span class="badge bg-warning">Interpolated</span>' : ''}
+                    <br><small>${location.interpolated ? 'Estimated location' : 'Last seen: ' + location.timestamp_str}</small>
+                </div>
+            `;
+            marker.bindPopup(popupContent);
+
+            routeCoords.push([location.latitude, location.longitude]);
+        });
+
+        // Draw route line
+        if (routeCoords.length > 1) {
+            L.polyline(routeCoords, {
+                color: '#007bff',
+                weight: 3,
+                opacity: 0.7
+            }).addTo(map);
+        }
+
+        // Fit map to show all markers
+        const bounds = L.latLngBounds(routeCoords);
+        map.fitBounds(bounds, { padding: [20, 20] });
+
+    } catch (error) {
+        console.error('Error loading traceroute map:', error);
+        showMapError('traceroute-map', 'Error loading map: ' + error.message);
+    }
+}
+
+function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocations) {
+    try {
+        // Collect all gateway locations that have position data
+        const gatewayMapData = [];
+
+        // Add primary gateway location if available
+        if (primaryGateway && gatewayLocations[primaryGateway]) {
+            const location = gatewayLocations[primaryGateway];
+            gatewayMapData.push({
+                gateway_id: primaryGateway,
+                latitude: location.latitude,
+                longitude: location.longitude,
+                display_name: location.display_name,
+                timestamp_str: location.timestamp_str,
+                is_primary: true,
+                hop_count: null, // Will be set from packet data if available
+                time_diff: 0,
+                rssi: null,
+                snr: null
+            });
+        }
+
+        // Add other reception locations
+        otherReceptions.forEach(reception => {
+            if (reception.gateway_id && gatewayLocations[reception.gateway_id]) {
+                const location = gatewayLocations[reception.gateway_id];
+                gatewayMapData.push({
+                    gateway_id: reception.gateway_id,
+                    latitude: location.latitude,
+                    longitude: location.longitude,
+                    display_name: location.display_name,
+                    timestamp_str: location.timestamp_str,
+                    is_primary: false,
+                    hop_count: reception.hop_count,
+                    time_diff: reception.time_diff,
+                    rssi: reception.rssi,
+                    snr: reception.snr
+                });
+            }
+        });
+
+        if (gatewayMapData.length === 0) {
+            showMapError('receptions-map', 'No gateway location data available for mapping');
+            return;
+        }
+
+        console.log('Gateway map data:', gatewayMapData);
+
+        // Initialize map
+        const map = L.map('receptions-map').setView([
+            gatewayMapData[0].latitude,
+            gatewayMapData[0].longitude
+        ], 10);
+
+        // Add tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Add markers for each gateway
+        gatewayMapData.forEach((gateway, index) => {
+            // Choose marker style based on whether it's primary
+            let markerColor = gateway.is_primary ? '#28a745' : '#007bff'; // Green for primary, blue for others
+            let markerSize = gateway.is_primary ? 10 : 8;
+
+            const marker = L.circleMarker([gateway.latitude, gateway.longitude], {
+                radius: markerSize,
+                fillColor: markerColor,
+                color: '#fff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8
+            }).addTo(map);
+
+            // Create popup content
+            let popupContent = `
+                <div>
+                    <strong>${gateway.display_name || gateway.gateway_id}</strong><br>
+                    ${gateway.is_primary ? '<span class="badge bg-success">Primary Gateway</span>' : '<span class="badge bg-info">Reception</span>'}
+                    <br><small>Location: ${gateway.timestamp_str}</small>
+            `;
+
+            if (!gateway.is_primary) {
+                popupContent += `<br><small>Time offset: ${gateway.time_diff > 0 ? '+' : ''}${gateway.time_diff.toFixed(3)}s</small>`;
+            }
+
+            if (gateway.hop_count !== null && gateway.hop_count !== undefined) {
+                popupContent += `<br><small>Hops: ${gateway.hop_count}</small>`;
+            }
+
+            if (gateway.rssi) {
+                popupContent += `<br><small>RSSI: ${gateway.rssi} dBm</small>`;
+            }
+
+            if (gateway.snr) {
+                popupContent += `<br><small>SNR: ${gateway.snr} dB</small>`;
+            }
+
+            popupContent += '</div>';
+
+            marker.bindPopup(popupContent);
+
+            // Add hop count label if available
+            if (gateway.hop_count !== null && gateway.hop_count !== undefined) {
+                const hopLabel = L.divIcon({
+                    className: 'hop-label',
+                    html: `<div style="background: rgba(255,255,255,0.8); border: 1px solid #ccc; border-radius: 3px; padding: 2px 4px; font-size: 10px; font-weight: bold;">${gateway.hop_count}</div>`,
+                    iconSize: [20, 15],
+                    iconAnchor: [10, -5]
+                });
+
+                L.marker([gateway.latitude, gateway.longitude], { icon: hopLabel }).addTo(map);
+            }
+        });
+
+        // Fit map to show all markers
+        const coords = gatewayMapData.map(gw => [gw.latitude, gw.longitude]);
+        const bounds = L.latLngBounds(coords);
+        map.fitBounds(bounds, { padding: [20, 20] });
+
+    } catch (error) {
+        console.error('Error loading reception map:', error);
+        showMapError('receptions-map', 'Error loading map: ' + error.message);
+    }
+}
+
+function showMapError(mapId, message) {
+    const mapContainer = document.getElementById(mapId);
+    if (mapContainer) {
+        mapContainer.innerHTML = `
+            <div class="d-flex align-items-center justify-content-center h-100">
+                <div class="text-center text-muted">
+                    <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
+                    <p class="mt-2">${message}</p>
+                </div>
+            </div>
+        `;
+    }
+}
+
+// Function to open traceroute hops with URL filter manager
+function openTracerouteHops(fromNodeId, toNodeId) {
+    if (window.URLFilterManager) {
+        const urlManager = new URLFilterManager();
+        const url = urlManager.createFilteredURL('/traceroute-hops', {
+            from_node: fromNodeId,
+            to_node: toNodeId
+        });
+        window.open(url, '_blank');
+    } else {
+        // Fallback if URL filter manager is not available
+        window.open(`/traceroute-hops?from_node=${fromNodeId}&to_node=${toNodeId}`, '_blank');
+    }
+}
+
+// Initialize tooltips after page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize Bootstrap tooltips
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+</script>
+{% endblock %}
