@@ -630,3 +630,30 @@ class TestTraceroutePacketEdgeCases:
             assert (
                 rf_hops[1].to_node_id == 0x22222222
             )  # Last hop reached 0x22222222, not destination
+
+    @pytest.mark.unit
+    def test_snr_conversion_from_scaled_integers(self):
+        """Test that SNR values are correctly converted from scaled integers to dB."""
+        # Create a test with the actual parse_traceroute_payload function to verify conversion
+        with patch("meshtastic.mesh_pb2.RouteDiscovery") as mock_route_discovery_class:
+            # Create a mock RouteDiscovery instance
+            mock_route_discovery = mock_route_discovery_class.return_value
+
+            # Simulate raw protobuf values that would be scaled integers
+            # In Meshtastic, SNR values are often stored as integers that need /4 conversion
+            mock_route_discovery.route = [0x11111111]
+            mock_route_discovery.snr_towards = [-20.0, -32.0]  # These should become -5.0, -8.0
+            mock_route_discovery.route_back = [0x22222222]
+            mock_route_discovery.snr_back = [-28.0]  # This should become -7.0
+
+            # Import and call the actual function to test the conversion
+            from src.malla.utils.traceroute_utils import parse_traceroute_payload
+
+            # Call with dummy payload (protobuf parsing will be mocked)
+            result = parse_traceroute_payload(b"dummy_payload")
+
+            # Verify the SNR values were divided by 4
+            assert result["snr_towards"] == [-5.0, -8.0]  # -20/4, -32/4
+            assert result["snr_back"] == [-7.0]  # -28/4
+            assert result["route_nodes"] == [0x11111111]
+            assert result["route_back"] == [0x22222222]

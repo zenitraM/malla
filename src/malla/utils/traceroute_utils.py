@@ -48,9 +48,11 @@ def parse_traceroute_payload(raw_payload: bytes) -> RouteData:
 
         result = RouteData(
             route_nodes=[int(node_id) for node_id in route_discovery.route],
-            snr_towards=[float(snr) for snr in route_discovery.snr_towards],
+            # Convert SNR from scaled integer to actual dB (divide by 4)
+            snr_towards=[float(snr) / 4.0 for snr in route_discovery.snr_towards],
             route_back=[int(node_id) for node_id in route_discovery.route_back],
-            snr_back=[float(snr) for snr in route_discovery.snr_back],
+            # Convert SNR from scaled integer to actual dB (divide by 4)
+            snr_back=[float(snr) / 4.0 for snr in route_discovery.snr_back],
         )
 
         logger.debug(
@@ -101,11 +103,13 @@ def parse_traceroute_payload_manual(raw_payload: bytes) -> RouteData:
                 route_nodes=[
                     int(node_id) for node_id in route_nodes_raw if node_id is not None
                 ],
-                snr_towards=[float(snr) for snr in snr_towards_raw if snr is not None],
+                # Convert SNR from scaled integer to actual dB (divide by 4)
+                snr_towards=[float(snr) / 4.0 for snr in snr_towards_raw if snr is not None],
                 route_back=[
                     int(node_id) for node_id in route_back_raw if node_id is not None
                 ],
-                snr_back=[float(snr) for snr in snr_back_raw if snr is not None],
+                # Convert SNR from scaled integer to actual dB (divide by 4)
+                snr_back=[float(snr) / 4.0 for snr in snr_back_raw if snr is not None],
             )
 
             logger.debug(
@@ -129,7 +133,8 @@ def parse_traceroute_payload_manual(raw_payload: bytes) -> RouteData:
         # Parse snr_towards (repeated float, field 2)
         if offset < len(raw_payload):
             snr_towards, offset = _parse_repeated_float(raw_payload, offset, 2)
-            result["snr_towards"] = snr_towards
+            # Convert SNR from scaled integer to actual dB (divide by 4)
+            result["snr_towards"] = [snr / 4.0 for snr in snr_towards]
 
         # Parse route_back (repeated uint32, field 3)
         if offset < len(raw_payload):
@@ -139,7 +144,8 @@ def parse_traceroute_payload_manual(raw_payload: bytes) -> RouteData:
         # Parse snr_back (repeated float, field 4)
         if offset < len(raw_payload):
             snr_back, offset = _parse_repeated_float(raw_payload, offset, 4)
-            result["snr_back"] = snr_back
+            # Convert SNR from scaled integer to actual dB (divide by 4)
+            result["snr_back"] = [snr / 4.0 for snr in snr_back]
 
         logger.debug(
             f"Manual parsing successful: {len(result['route_nodes'])} nodes, "
