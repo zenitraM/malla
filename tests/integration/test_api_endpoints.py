@@ -246,12 +246,12 @@ class TestTracerouteEndpoints:
     def test_traceroute_related_nodes_not_found(self, client):
         """Test traceroute related nodes endpoint with non-existent node."""
         # Test with a node ID that doesn't exist
-        # Note: "99999999" is treated as hex by convert_node_id, so 0x99999999 = 2576980377
+        # Note: "99999999" is now treated as decimal by convert_node_id
         response = client.get("/api/traceroute/related-nodes/99999999")
         assert response.status_code == 200
 
         data = response.get_json()
-        assert data["node_id"] == 2576980377  # 0x99999999 in decimal
+        assert data["node_id"] == 99999999  # Decimal value
         assert data["related_nodes"] == []
         assert data["total_count"] == 0
 

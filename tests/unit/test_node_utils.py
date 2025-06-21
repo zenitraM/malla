@@ -169,7 +169,8 @@ class TestNodeUtilsOtherFunctions:
     def test_convert_node_id_hex(self):
         """Test convert_node_id with hex input."""
         assert convert_node_id("!12345678") == 305419896
-        assert convert_node_id("12345678") == 305419896
+        # Without ! prefix, it's treated as decimal
+        assert convert_node_id("12345678") == 12345678
 
     @pytest.mark.unit
     def test_convert_node_id_invalid(self):
@@ -178,6 +179,26 @@ class TestNodeUtilsOtherFunctions:
             convert_node_id("invalid")
         with pytest.raises(ValueError):
             convert_node_id("!invalid")
+
+    @pytest.mark.unit
+    def test_convert_node_id_ambiguous_decimal_hex(self):
+        """Test convert_node_id with node IDs that could be interpreted as hex or decimal."""
+        # This is the bug case: "24632481" should be treated as decimal
+        assert convert_node_id("24632481") == 24632481  # Decimal
+
+        # Strings with ! prefix should be treated as hex
+        assert convert_node_id("!ABCDEF12") == int("ABCDEF12", 16)  # Hex
+        assert convert_node_id("!12ABCDEF") == int("12ABCDEF", 16)  # Hex
+        assert convert_node_id("!0177dca1") == 24632481  # Hex representation of decimal 24632481
+
+        # Strings without ! prefix should be treated as decimal
+        assert convert_node_id("99999999") == 99999999  # Decimal
+        assert convert_node_id("12345689") == 12345689  # Decimal
+        assert convert_node_id("87654321") == 87654321  # Decimal
+
+        # Invalid decimal strings should raise ValueError
+        with pytest.raises(ValueError):
+            convert_node_id("ABCDEF12")  # Invalid decimal
 
 
 class TestCacheCleanupFunctionality:

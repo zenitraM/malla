@@ -391,20 +391,9 @@ def convert_node_id(node_id: int | str) -> int:
         elif node_id.startswith("0x"):
             # Hex format with 0x prefix
             return int(node_id, 16)
-        elif len(node_id) == 8 and all(c in "0123456789abcdefABCDEF" for c in node_id):
-            # 8-character hex string (typical Meshtastic node ID format)
-            # This is the format used by API routes like /api/node/{node_id:08x}/info
-            # Always treat as hex since that's what the API route expects
-            return int(node_id, 16)
-
-        # Try decimal first, then hex as fallback
-        try:
+        else:
+            # All other strings are treated as decimal
             return int(node_id, 10)
-        except ValueError:
-            try:
-                return int(node_id, 16)
-            except ValueError as err:
-                raise ValueError(f"Cannot convert '{node_id}' to integer") from err
 
     raise ValueError(f"Cannot convert {type(node_id)} to integer")
 
