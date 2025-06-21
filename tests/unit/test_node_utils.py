@@ -189,7 +189,9 @@ class TestNodeUtilsOtherFunctions:
         # Strings with ! prefix should be treated as hex
         assert convert_node_id("!ABCDEF12") == int("ABCDEF12", 16)  # Hex
         assert convert_node_id("!12ABCDEF") == int("12ABCDEF", 16)  # Hex
-        assert convert_node_id("!0177dca1") == 24632481  # Hex representation of decimal 24632481
+        assert (
+            convert_node_id("!0177dca1") == 24632481
+        )  # Hex representation of decimal 24632481
 
         # Strings without ! prefix should be treated as decimal
         assert convert_node_id("99999999") == 99999999  # Decimal

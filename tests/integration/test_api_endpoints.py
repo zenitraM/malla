@@ -627,7 +627,7 @@ class TestDataConsistency:
             node_id = nodes_data["nodes"][0]["node_id"]
 
             # Get detailed info for the same node
-            info_response = client.get(f"/api/node/{node_id:08x}/info")
+            info_response = client.get(f"/api/node/{node_id}/info")
             info_data = info_response.get_json()
 
             # Verify the response structure
