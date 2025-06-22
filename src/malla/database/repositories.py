@@ -2110,8 +2110,9 @@ class TracerouteRepository:
             if filters.get("processed_successfully_only"):
                 where_conditions.append("processed_successfully = 1")
 
-            # Note: route_node filtering is handled after query execution
-            # because route_nodes data is stored in raw_payload
+            # Check if route_node filtering is needed
+            route_node_filter = filters.get("route_node")
+            needs_route_filtering = route_node_filter is not None
 
             # Add search functionality
             if search:
@@ -2127,9 +2128,6 @@ class TracerouteRepository:
             where_clause = "WHERE " + " AND ".join(where_conditions)
 
             if group_packets:
-                # OPTIMIZED APPROACH: Use time-windowed query + in-memory grouping
-                # This avoids expensive SQL GROUP BY operations on large datasets
-
                 # Determine time window (default: 7 days for traceroutes)
                 time_window_days = 7
 
@@ -2413,12 +2411,25 @@ class TracerouteRepository:
 
             else:
                 # Original ungrouped behavior
-                # Get total count
+
+                # If route_node filtering is needed, we need to fetch more data
+                # to account for filtering before pagination
+                if needs_route_filtering:
+                    # Fetch a larger dataset to ensure we have enough results after filtering
+                    # Use a multiplier based on how selective route_node filtering typically is
+                    fetch_multiplier = 20  # Empirically determined - adjust as needed
+                    fetch_limit = max((offset + limit) * fetch_multiplier, 1000)
+                    fetch_offset = 0  # Start from beginning when route filtering
+                else:
+                    fetch_limit = limit
+                    fetch_offset = offset
+
+                # Get total count (before route filtering)
                 cursor.execute(
                     f"SELECT COUNT(*) as total FROM packet_history {where_clause}",
                     params,
                 )
-                total_count = cursor.fetchone()["total"]
+                total_count_before_filter = cursor.fetchone()["total"]
 
                 # Main query
                 valid_order_columns = [
@@ -2433,7 +2444,7 @@ class TracerouteRepository:
                 if order_by not in valid_order_columns:
                     order_by = "timestamp"
 
-                order_dir = "DESC" if order_dir.lower() == "desc" else "ASC"
+                order_dir_sql = "DESC" if order_dir.lower() == "desc" else "ASC"
 
                 query = f"""
                     SELECT
@@ -2443,12 +2454,12 @@ class TracerouteRepository:
                         datetime(timestamp, 'unixepoch') as timestamp_str
                     FROM packet_history
                     {where_clause}
-                    ORDER BY {order_by} {order_dir}
+                    ORDER BY {order_by} {order_dir_sql}
                     LIMIT ? OFFSET ?
                 """
 
-                cursor.execute(query, params + [limit, offset])
-                packets = []
+                cursor.execute(query, params + [fetch_limit, fetch_offset])
+                all_packets = []
                 for row in cursor.fetchall():
                     packet = dict(row)
 
@@ -2487,41 +2498,46 @@ class TracerouteRepository:
                     else:
                         packet["hop_count"] = None
 
-                    packets.append(packet)
+                    all_packets.append(packet)
+
+                # Apply route_node filtering if specified
+                if needs_route_filtering:
+                    filtered_packets = []
+                    for packet in all_packets:
+                        # Check if the route_node appears in from_node_id, to_node_id, or route_nodes
+                        if (
+                            packet.get("from_node_id") == route_node_filter
+                            or packet.get("to_node_id") == route_node_filter
+                        ):
+                            filtered_packets.append(packet)
+                            continue
+
+                        # Check if the node appears in the route_nodes array
+                        if packet.get("raw_payload"):
+                            try:
+                                from ..models.traceroute import TraceroutePacket
+
+                                tr_packet = TraceroutePacket(
+                                    packet, resolve_names=False
+                                )
+                                if route_node_filter in tr_packet.route_data.get(
+                                    "route_nodes", []
+                                ):
+                                    filtered_packets.append(packet)
+                            except Exception as e:
+                                logger.debug(
+                                    f"Failed to parse route for route_node filtering: {e}"
+                                )
+
+                    # Now apply pagination to filtered results
+                    total_count = len(filtered_packets)
+                    packets = filtered_packets[offset : offset + limit]
+                else:
+                    # No route filtering needed, use all packets
+                    packets = all_packets
+                    total_count = total_count_before_filter
 
             conn.close()
-
-            # Apply route_node filtering if specified
-            route_node_filter = filters.get("route_node")
-            if route_node_filter is not None:
-                filtered_packets = []
-                for packet in packets:
-                    # Check if the route_node appears in from_node_id, to_node_id, or route_nodes
-                    if (
-                        packet.get("from_node_id") == route_node_filter
-                        or packet.get("to_node_id") == route_node_filter
-                    ):
-                        filtered_packets.append(packet)
-                        continue
-
-                    # Check if the node appears in the route_nodes array
-                    if packet.get("raw_payload"):
-                        try:
-                            from ..models.traceroute import TraceroutePacket
-
-                            tr_packet = TraceroutePacket(packet, resolve_names=False)
-                            if route_node_filter in tr_packet.route_data.get(
-                                "route_nodes", []
-                            ):
-                                filtered_packets.append(packet)
-                        except Exception as e:
-                            logger.debug(
-                                f"Failed to parse route for route_node filtering: {e}"
-                            )
-
-                # Update packets and total_count for filtered results
-                packets = filtered_packets
-                total_count = len(filtered_packets)
 
             return {
                 "packets": packets,
