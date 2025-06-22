@@ -242,47 +242,28 @@ class PacketRepository:
                     where_clause += " AND timestamp >= ?"
                     params.append(recent_cutoff)
 
-                # For pagination, get the exact count of distinct groups
-                # This is more accurate than estimation and still reasonably fast
-                total_count_query = f"""
-                    SELECT COUNT(DISTINCT
-                        mesh_packet_id || '|' ||
-                        COALESCE(from_node_id, 0) || '|' ||
-                        COALESCE(to_node_id, 0) || '|' ||
-                        COALESCE(portnum, 0) || '|' ||
-                        COALESCE(portnum_name, '')
-                    )
-                    FROM packet_history
-                    {where_clause}
-                """
-                cursor.execute(total_count_query, params)
-                total_count = cursor.fetchone()[0]
+                # PERFORMANCE FIX: Skip expensive total count for grouped queries
+                # The COUNT(DISTINCT ...) query was taking 9+ seconds on large datasets
+                # Instead, estimate total count based on results (much faster)
+                total_count = None  # Will be estimated after getting results
 
-                # Get individual packets ordered by timestamp (uses timestamp index efficiently)
-                # For pagination to work correctly, we need to fetch enough data to account for grouping
-                # We'll use a larger multiplier to ensure we get enough groups for proper pagination
+                # ULTRA-OPTIMIZED: Use much smaller fetch limits for better performance
+                # The original approach was fetching 50k-1M records which is too expensive
+                # Instead, use a more reasonable approach with smaller multipliers
                 if offset == 0:
-                    # For first page, fetch more data to ensure we get diverse gateway counts
-                    # Use a minimum of 50,000 to ensure we capture multi-gateway packets
-                    fetch_limit = min(max(limit * 100, 50000), 100000)
+                    # For first page, use a much smaller multiplier - most packets are unique anyway
+                    fetch_limit = min(
+                        limit * 10, 5000
+                    )  # Much smaller: 250-5000 instead of 50k-100k
                 else:
-                    # For subsequent pages, we need to fetch significantly more data
-                    # Estimate based on the grouping ratio: if we need (offset + limit) groups,
-                    # and average grouping is ~3:1, we need ~3x more individual packets
-                    grouping_ratio = 3.5  # Conservative estimate
+                    # For subsequent pages, use a reasonable multiplier
+                    grouping_ratio = 2.0  # More realistic estimate
                     estimated_individual_needed = (offset + limit) * grouping_ratio
 
-                    # For very large offsets, we may need to fetch most/all of the data
-                    if offset > 5000:
-                        # For large offsets, be more aggressive - fetch up to 1M records
-                        fetch_limit = min(
-                            max(estimated_individual_needed, 50000), 1000000
-                        )
-                    else:
-                        # For moderate offsets, use reasonable limits
-                        fetch_limit = min(
-                            max(estimated_individual_needed, 50000), 500000
-                        )
+                    # Cap at much smaller limits for performance
+                    fetch_limit = min(
+                        max(estimated_individual_needed, limit * 5), 10000
+                    )  # Max 10k instead of 1M
 
                 query = f"""
                     SELECT
@@ -535,6 +516,14 @@ class PacketRepository:
                     packets.append(packet)
 
             conn.close()
+
+            # Handle None total_count for grouped queries
+            if total_count is None:
+                # Estimate total_count based on results for grouped queries
+                if len(packets) == limit:
+                    total_count = offset + limit + 1  # Estimate at least one more page
+                else:
+                    total_count = offset + len(packets)  # Exact count for partial page
 
             return {
                 "packets": packets,
@@ -2159,42 +2148,28 @@ class TracerouteRepository:
 
                 where_clause = "WHERE " + " AND ".join(where_conditions)
 
-                # Get the exact count of distinct groups for pagination
-                total_count_query = f"""
-                    SELECT COUNT(DISTINCT
-                        mesh_packet_id || '|' ||
-                        COALESCE(from_node_id, 0) || '|' ||
-                        COALESCE(to_node_id, 0)
-                    )
-                    FROM packet_history
-                    {where_clause}
-                """
-                cursor.execute(total_count_query, params)
-                total_count = cursor.fetchone()[0]
+                # PERFORMANCE FIX: Skip expensive total count for grouped traceroute queries
+                # The COUNT(DISTINCT ...) query was taking too long on large datasets
+                # Instead, estimate total count based on results (much faster)
+                total_count = None  # Will be estimated after getting results
 
-                # Calculate fetch limit (higher for traceroutes due to lower volume)
-                # For pagination to work correctly, we need to fetch enough data
+                # ULTRA-OPTIMIZED: Use much smaller fetch limits for better performance
+                # The original approach was fetching 1k-100k records which is too expensive
+                # Instead, use a more reasonable approach with smaller multipliers
                 if offset == 0:
-                    # For first page, reasonable limit
-                    fetch_limit = max(limit * 40, 1000)
+                    # For first page, use a smaller multiplier for traceroutes
+                    fetch_limit = min(
+                        limit * 15, 3000
+                    )  # Smaller: 375-3000 instead of 1k-40k
                 else:
-                    # For subsequent pages, we need to be more aggressive with fetch limits
-                    # Traceroutes have lower grouping ratio (~3:1), and we need to ensure
-                    # we fetch enough data to reach the requested offset
-
-                    # Use a higher multiplier for traceroutes and increase limit for large offsets
-                    grouping_ratio = 3.5  # Conservative estimate
+                    # For subsequent pages, use a reasonable multiplier
+                    grouping_ratio = 2.0  # More realistic estimate
                     estimated_individual_needed = (offset + limit) * grouping_ratio
 
-                    # For very large offsets, we may need to fetch most/all of the data
-                    if offset > 2000:
-                        # For large offsets, be more aggressive - fetch up to 100k records
-                        fetch_limit = min(
-                            max(estimated_individual_needed, 10000), 100000
-                        )
-                    else:
-                        # For moderate offsets, use reasonable limits
-                        fetch_limit = min(max(estimated_individual_needed, 1000), 50000)
+                    # Cap at much smaller limits for performance
+                    fetch_limit = min(
+                        max(estimated_individual_needed, limit * 8), 8000
+                    )  # Max 8k instead of 100k
 
                 # Fetch individual packets using efficient ORDER BY timestamp DESC LIMIT
                 query = f"""
@@ -2423,6 +2398,18 @@ class TracerouteRepository:
 
                 # Apply pagination
                 packets = aggregated_packets[offset : offset + limit]
+
+                # Handle None total_count for grouped queries
+                if total_count is None:
+                    # Estimate total_count based on results for grouped queries
+                    if len(packets) == limit:
+                        total_count = (
+                            offset + limit + 1
+                        )  # Estimate at least one more page
+                    else:
+                        total_count = offset + len(
+                            packets
+                        )  # Exact count for partial page
 
             else:
                 # Original ungrouped behavior

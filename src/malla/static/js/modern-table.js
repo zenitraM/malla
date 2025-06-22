@@ -250,6 +250,9 @@ class ModernTable {
             this.state.totalCount = data.total_count || 0;
             this.state.totalPages = Math.ceil(this.state.totalCount / this.state.pageSize);
 
+            // Track if this is a grouped query for pagination display
+            this.state.isGrouped = params.get('group_packets') === 'true';
+
             this.renderTableBody();
             this.updatePagination();
 
@@ -381,7 +384,17 @@ class ModernTable {
 
         document.getElementById(`${this.container.id}-start`).textContent = this.state.totalCount > 0 ? start : 0;
         document.getElementById(`${this.container.id}-end`).textContent = end;
-        document.getElementById(`${this.container.id}-total`).textContent = this.state.totalCount;
+
+        // Handle estimated counts for grouped queries
+        const totalElement = document.getElementById(`${this.container.id}-total`);
+        if (this.state.isGrouped && this.state.data.length === this.state.pageSize) {
+            // For grouped queries where we got a full page, show estimated count
+            totalElement.textContent = `${this.state.totalCount}+`;
+            totalElement.title = 'Estimated count (optimized for performance)';
+        } else {
+            totalElement.textContent = this.state.totalCount;
+            totalElement.title = '';
+        }
 
         // Update pagination controls
         const paginationContainer = document.getElementById(`${this.container.id}-pagination`);
@@ -413,38 +426,61 @@ class ModernTable {
             </button>
         `);
 
-        // Page numbers
-        const startPage = Math.max(1, page - 2);
-        const endPage = Math.min(totalPages, page + 2);
+        // For grouped queries with estimated counts, limit pagination display
+        if (this.state.isGrouped && this.state.data.length === this.state.pageSize) {
+            // Show current page and next few pages only
+            const maxDisplayPages = Math.min(totalPages, page + 5);
 
-        if (startPage > 1) {
-            buttons.push(`<button class="pagination-btn" data-page="1">1</button>`);
-            if (startPage > 2) {
+            for (let i = Math.max(1, page - 2); i <= Math.min(maxDisplayPages, page + 2); i++) {
+                buttons.push(`
+                    <button class="pagination-btn ${i === page ? 'active' : ''}"
+                            data-page="${i}">
+                        ${i}
+                    </button>
+                `);
+            }
+
+            if (page < maxDisplayPages) {
                 buttons.push(`<span class="pagination-ellipsis">...</span>`);
+            }
+        } else {
+            // Standard pagination for exact counts
+            const startPage = Math.max(1, page - 2);
+            const endPage = Math.min(totalPages, page + 2);
+
+            if (startPage > 1) {
+                buttons.push(`<button class="pagination-btn" data-page="1">1</button>`);
+                if (startPage > 2) {
+                    buttons.push(`<span class="pagination-ellipsis">...</span>`);
+                }
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                buttons.push(`
+                    <button class="pagination-btn ${i === page ? 'active' : ''}"
+                            data-page="${i}">
+                        ${i}
+                    </button>
+                `);
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    buttons.push(`<span class="pagination-ellipsis">...</span>`);
+                }
+                buttons.push(`<button class="pagination-btn" data-page="${totalPages}">${totalPages}</button>`);
             }
         }
 
-        for (let i = startPage; i <= endPage; i++) {
-            buttons.push(`
-                <button class="pagination-btn ${i === page ? 'active' : ''}"
-                        data-page="${i}">
-                    ${i}
-                </button>
-            `);
-        }
+        // Next button - for grouped queries, only disable if we got less than a full page
+        const hasNextPage = this.state.isGrouped ?
+            this.state.data.length === this.state.pageSize :
+            page < totalPages;
 
-        if (endPage < totalPages) {
-            if (endPage < totalPages - 1) {
-                buttons.push(`<span class="pagination-ellipsis">...</span>`);
-            }
-            buttons.push(`<button class="pagination-btn" data-page="${totalPages}">${totalPages}</button>`);
-        }
-
-        // Next button
         buttons.push(`
             <button class="pagination-btn"
                     data-page="${page + 1}"
-                    ${page >= totalPages ? 'disabled' : ''}>
+                    ${!hasNextPage ? 'disabled' : ''}>
                 Next <i class="bi bi-chevron-right"></i>
             </button>
         `);

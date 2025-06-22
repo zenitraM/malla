@@ -11,11 +11,10 @@ from flask import Blueprint, render_template, request
 from ..database.connection import get_db_connection
 
 # Import from the new modular architecture
-from ..database.repositories import LocationRepository, NodeRepository, PacketRepository
+from ..database.repositories import LocationRepository
 from ..models.traceroute import TraceroutePacket
 from ..utils.node_utils import (
     get_bulk_node_names,
-    transform_nodes_for_template,
 )
 from ..utils.traceroute_graph import build_combined_traceroute_graph
 
@@ -1286,13 +1285,6 @@ def packets() -> str | tuple[str, int]:
     """Packet browser page using modern table interface."""
     logger.info(f"Packets route accessed with args: {request.args}")
     try:
-        # Get available options for dropdowns (simplified for modern interface)
-        available_gateways = PacketRepository.get_unique_gateway_ids()
-        raw_available_nodes = NodeRepository.get_available_from_nodes()
-
-        # Transform node data to match template expectations
-        available_nodes = transform_nodes_for_template(raw_available_nodes)
-
         # Create clean filters dict for template (exclude any pagination parameters)
         template_filters = {}
         for key, value in request.args.items():
@@ -1303,8 +1295,6 @@ def packets() -> str | tuple[str, int]:
 
         return render_template(
             "packets.html",
-            available_gateways=available_gateways,
-            available_nodes=available_nodes,
             filters=template_filters,
         )
     except Exception as e:

@@ -18,29 +18,8 @@ def nodes():
     """Node browser page using modern table interface."""
     logger.info("Nodes route accessed")
     try:
-        # Get summary statistics for the cards
-        # We'll get basic counts for the summary cards
-        all_nodes = NodeRepository.get_nodes(limit=10000)  # Get all nodes for stats
-        nodes_data = all_nodes.get("nodes", [])
-
-        # Calculate summary statistics
-        total_count = len(nodes_data)
-        active_count = len([n for n in nodes_data if n.get("packet_count_24h", 0) > 0])
-        named_count = len([n for n in nodes_data if n.get("long_name")])
-        recent_count = len([n for n in nodes_data if n.get("last_packet_time")])
-
-        summary = {
-            "total_count": total_count,
-            "active_count": active_count,
-            "named_count": named_count,
-            "recent_count": recent_count,
-        }
-
         logger.info("Nodes page rendered")
-        return render_template(
-            "nodes.html",
-            summary=summary,
-        )
+        return render_template("nodes.html")
     except Exception as e:
         logger.error(f"Error in nodes route: {e}")
         return f"Nodes error: {e}", 500
