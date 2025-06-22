@@ -249,6 +249,56 @@ class TestTables:
 
         assert has_grouped_patterns, "Grouped data patterns not found in table content"
 
+    def test_packets_grouping_reactive_behavior(self, page: Page, test_server_url: str):
+        """Test that grouping checkbox triggers reactive updates without clicking Apply filters."""
+        page.goto(f"{test_server_url}/packets")
+
+        # Wait for table to load
+        page.wait_for_selector(".modern-table tbody tr", timeout=10000)
+
+        # Track network requests to verify reactive behavior
+        api_requests = []
+
+        def track_requests(request):
+            if "/api/packets/data" in request.url:
+                api_requests.append({"url": request.url, "method": request.method})
+
+        page.on("request", track_requests)
+
+        # Clear any existing requests from page load
+        api_requests.clear()
+
+        # Find grouping checkbox and get initial state
+        grouping_checkbox = page.locator("#group_packets")
+        expect(grouping_checkbox).to_be_visible()
+        initial_state = grouping_checkbox.is_checked()
+
+        # Toggle grouping checkbox
+        if initial_state:
+            grouping_checkbox.uncheck()
+        else:
+            grouping_checkbox.check()
+
+        # Wait for reactive update (should happen automatically)
+        page.wait_for_timeout(2000)
+
+        # Verify that an API request was made automatically (reactive behavior)
+        assert len(api_requests) > 0, (
+            "Expected reactive API request after grouping toggle, but none were made"
+        )
+
+        # Verify the request includes the correct grouping parameter
+        latest_request = api_requests[-1]
+        expected_grouping = "false" if initial_state else "true"
+        assert f"group_packets={expected_grouping}" in latest_request["url"], (
+            f"Expected group_packets={expected_grouping} in request URL, "
+            f"but got: {latest_request['url']}"
+        )
+
+        # Verify table still has data after reactive update
+        rows = page.locator(".modern-table tbody tr")
+        assert rows.count() > 0, "No rows found after reactive grouping toggle"
+
     def test_traceroute_page_loads(self, page: Page, test_server_url: str):
         """Test that the traceroute page loads correctly."""
         page.goto(f"{test_server_url}/traceroute")

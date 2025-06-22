@@ -103,7 +103,12 @@
                 if (this.table.options.deferInitialLoad) {
                     this.table.loadData();
                 }
-                this.lastAppliedJson = JSON.stringify({});
+                // Set initial state to include grouping checkbox to prevent duplicate requests
+                const initialFilters = {};
+                if (this.groupingCheckbox) {
+                    initialFilters.group_packets = this.groupingCheckbox.checked;
+                }
+                this.lastAppliedJson = JSON.stringify(initialFilters);
                 this.subscriberActive = true;
             }
         }
@@ -131,6 +136,17 @@
                 };
                 input.addEventListener(evt, input.type === 'text' ? debounce(handler, this.debounceDelay) : handler);
             });
+
+            // Also bind the grouping checkbox if it exists outside the form
+            if (this.groupingCheckbox && !this.form.contains(this.groupingCheckbox)) {
+                const key = this.groupingCheckbox.name || this.groupingCheckbox.id;
+                this.filterStore.state[key] = this.groupingCheckbox.checked;
+
+                const handler = () => {
+                    this.filterStore.state[key] = this.groupingCheckbox.checked;
+                };
+                this.groupingCheckbox.addEventListener('change', handler);
+            }
         }
 
         _cleanFilters(obj) {
