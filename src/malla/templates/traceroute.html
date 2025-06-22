@@ -105,6 +105,8 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/url-filter-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='js/filter-store.js') }}"></script>
+<script src="{{ url_for('static', filename='js/table-filter-controller.js') }}"></script>
 <script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modern-table.js') }}"></script>
 <script>
@@ -146,82 +148,16 @@ document.addEventListener('DOMContentLoaded', function() {
         window.initializeAllPickers();
     }
 
-    // Apply current filters (used both for manual application and URL parameter application)
-    function applyCurrentFilters() {
-        const filters = urlManager.getCurrentFilters();
-        table.setFilters(filters);
-        updateStats();
-
-        // Update URL with current filters
-        urlManager.updateURL(filters);
-    }
-
-    // Expose applyCurrentFilters to global scope for event handlers
-    window.applyCurrentFilters = applyCurrentFilters;
-
-    // Add event listeners to all form fields for automatic filtering
-    function addFormFieldListeners() {
-        console.log('Adding form field listeners');
-        const filtersForm = document.getElementById('filtersForm');
-        if (filtersForm) {
-            console.log('Found filtersForm, adding listeners to form inputs');
-            // Add listeners to all form inputs
-            const formInputs = filtersForm.querySelectorAll('input, select');
-            formInputs.forEach(input => {
-                if (input.type === 'checkbox') {
-                    input.addEventListener('change', function() {
-                        // Small delay to ensure checkbox state is updated
-                        setTimeout(applyCurrentFilters, 10);
-                    });
-                } else {
-                    // For text inputs, select fields, etc.
-                    input.addEventListener('change', function() {
-                        applyCurrentFilters();
-                    });
-
-                    // Also trigger on input for text fields and hidden fields (real-time filtering)
-                    if (input.type === 'text' || input.type === 'search' || input.type === 'hidden' || input.type === 'datetime-local') {
-                        let debounceTimer;
-                        input.addEventListener('input', function() {
-                            clearTimeout(debounceTimer);
-                            // For hidden inputs (node pickers), apply immediately without debounce
-                            if (input.type === 'hidden') {
-                                applyCurrentFilters();
-                            } else {
-                                debounceTimer = setTimeout(applyCurrentFilters, 300);
-                            }
-                        });
-                    }
-                }
-            });
-        } else {
-            console.log('filtersForm not found');
-        }
-    }
-
-    // Initialize URL parameters and table
+    // Initialize page with filters and load data
     async function initializePageWithFilters() {
         // Small delay to ensure DOM is updated and sidebar content is moved
         await new Promise(resolve => setTimeout(resolve, 100));
 
-        // Apply URL parameters after pickers are initialized
+        // Apply URL parameters
         const hasParams = await urlManager.applyURLParameters();
 
-        // Add form field listeners for automatic filtering
-        addFormFieldListeners();
-
-        if (hasParams) {
-            // If we have URL parameters, apply filters first then load data
-            // This prevents the initial unfiltered request
-            setTimeout(() => {
-                applyCurrentFilters();
-            }, 100);
-        } else {
-            // Only load data explicitly if ModernTable deferred the initial load
-            if (table.options.deferInitialLoad) {
-                table.loadData();
-            }
-        }
+        // Initialize the filter controller
+        controller.initialLoad(hasParams);
     }
 
     // Initialize the modern table
@@ -230,7 +166,7 @@ document.addEventListener('DOMContentLoaded', function() {
         pageSize: 25,
         searchPlaceholder: 'Search traceroutes...',
         emptyMessage: 'No traceroutes found',
-        deferInitialLoad: {{ 'true' if defer_initial_load else 'false' }},
+        deferInitialLoad: true,
         columns: [
             {
                 key: 'timestamp',
@@ -454,45 +390,44 @@ document.addEventListener('DOMContentLoaded', function() {
     table.state.sortBy = 'timestamp';
     table.state.sortOrder = 'desc';
 
-    // Filter handling
-    const applyFiltersBtn = document.getElementById('applyFilters');
-    const clearFiltersBtn = document.getElementById('clearFilters');
-    const refreshBtn = document.getElementById('refreshTable');
-    const groupPacketsCheckbox = document.getElementById('group_packets');
-
-    // Apply filters
-    applyFiltersBtn.addEventListener('click', applyCurrentFilters);
-
-    // Clear filters
-    clearFiltersBtn.addEventListener('click', function() {
-        urlManager.clearFilters();
-        table.clearFilters();
-        updateStats();
-    });
-
-    // Refresh table
-    refreshBtn.addEventListener('click', function() {
-        table.refresh();
-        updateStats();
-    });
-
-    // Handle grouping toggle
-    groupPacketsCheckbox.addEventListener('change', function() {
-        table.loadData();
-        updateStats();
-
-        // Update URL when grouping changes
-        const currentFilters = urlManager.getCurrentFilters();
-        urlManager.updateURL(currentFilters);
-    });
-
-    // Update stats
+    // Update stats function
     function updateStats() {
+        const groupPacketsCheckbox = document.getElementById('group_packets');
         document.getElementById('statsTotal').textContent = table.state.totalCount || '0';
         document.getElementById('statsFiltered').textContent = table.state.data.length || '0';
         document.getElementById('statsGrouped').textContent = groupPacketsCheckbox.checked ? 'Yes' : 'No';
         document.getElementById('statsLastUpdate').textContent = new Date().toLocaleTimeString();
     }
+
+    // Initialize the filter controller
+    const controller = new TableFilterController({
+        table,
+        urlManager,
+        formSelector: '#filtersForm',
+        groupingCheckboxSelector: '#group_packets',
+        updateStats
+    });
+
+    // Debug logging for tests
+    console.log('Traceroute filter controller initialized');
+    console.log('Adding form field listeners');
+
+    // Expose controller methods to global scope for testing/debugging
+    window.applyCurrentFilters = () => controller.applyCurrentFilters();
+    window.controller = controller;
+
+    // Button handlers
+    const applyFiltersBtn = document.getElementById('applyFilters');
+    const clearFiltersBtn = document.getElementById('clearFilters');
+    const refreshBtn = document.getElementById('refreshTable');
+    const groupPacketsCheckbox = document.getElementById('group_packets');
+
+    applyFiltersBtn.addEventListener('click', () => controller.applyCurrentFilters());
+    clearFiltersBtn.addEventListener('click', () => controller.clearFilters());
+    refreshBtn.addEventListener('click', () => {
+        table.refresh();
+        updateStats();
+    });
 
     // Helper functions for signal quality color coding
     function getRssiColorClass(rssi) {
@@ -519,7 +454,7 @@ document.addEventListener('DOMContentLoaded', function() {
         updateStats();
     });
 
-    // Initialize page with filters and load data
+    // Initialize page
     initializePageWithFilters();
 });
 </script>

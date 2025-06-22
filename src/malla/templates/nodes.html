@@ -98,6 +98,8 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/url-filter-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='js/filter-store.js') }}"></script>
+<script src="{{ url_for('static', filename='js/table-filter-controller.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modern-table.js') }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -186,19 +188,18 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Apply URL parameters after options are loaded
-    Promise.all([loadHardwareModels(), loadNodeRoles()]).then(async () => {
+    // Initialize page with filters and load data
+    async function initializePageWithFilters() {
+        // Apply URL parameters
         const hasParams = await urlManager.applyURLParameters();
 
-        // Add form field listeners for automatic filtering
-        addFormFieldListeners();
+        // Initialize the filter controller
+        controller.initialLoad(hasParams);
+    }
 
-        if (hasParams) {
-            // Wait a bit for all fields to be set, then apply filters
-            setTimeout(() => {
-                applyCurrentFilters();
-            }, 500);
-        }
+    // Load data after options are loaded
+    Promise.all([loadHardwareModels(), loadNodeRoles()]).then(async () => {
+        initializePageWithFilters();
     });
 
     // Initialize the modern table
@@ -207,6 +208,7 @@ document.addEventListener('DOMContentLoaded', function() {
         enableSearch: false,
         enablePagination: true,
         pageSize: 25,
+        deferInitialLoad: true,
         columns: [
             {
                 key: 'hex_id',
@@ -348,69 +350,7 @@ document.addEventListener('DOMContentLoaded', function() {
         ]
     });
 
-    // Filter handling
-    const filtersForm = document.getElementById('filtersForm');
-    const applyFiltersBtn = document.getElementById('applyFilters');
-    const clearFiltersBtn = document.getElementById('clearFilters');
-    const refreshBtn = document.getElementById('refreshTable');
-
-    // Apply current filters (used both for manual application and URL parameter application)
-    function applyCurrentFilters() {
-        const filters = urlManager.getCurrentFilters();
-        table.setFilters(filters);
-        updateStats();
-
-        // Update URL with current filters
-        urlManager.updateURL(filters);
-    }
-
-    // Add event listeners to all form fields for automatic filtering
-    function addFormFieldListeners() {
-        if (filtersForm) {
-            // Add listeners to all form inputs
-            const formInputs = filtersForm.querySelectorAll('input, select');
-            formInputs.forEach(input => {
-                if (input.type === 'checkbox') {
-                    input.addEventListener('change', function() {
-                        // Small delay to ensure checkbox state is updated
-                        setTimeout(applyCurrentFilters, 10);
-                    });
-                } else {
-                    // For text inputs, select fields, etc.
-                    input.addEventListener('change', function() {
-                        applyCurrentFilters();
-                    });
-
-                    // Also trigger on input for text fields (real-time filtering)
-                    if (input.type === 'text' || input.type === 'search') {
-                        let debounceTimer;
-                        input.addEventListener('input', function() {
-                            clearTimeout(debounceTimer);
-                            debounceTimer = setTimeout(applyCurrentFilters, 300);
-                        });
-                    }
-                }
-            });
-        }
-    }
-
-    // Apply filters
-    applyFiltersBtn.addEventListener('click', applyCurrentFilters);
-
-    // Clear filters
-    clearFiltersBtn.addEventListener('click', function() {
-        urlManager.clearFilters();
-        table.clearFilters();
-        updateStats();
-    });
-
-    // Refresh table
-    refreshBtn.addEventListener('click', function() {
-        table.refresh();
-        updateStats();
-    });
-
-    // Update stats
+    // Update stats function
     function updateStats() {
         document.getElementById('statsTotal').textContent = table.state.totalCount || '0';
         const activeCount = table.state.data.filter(node => parseInt(node.packet_count_24h) > 0).length;
@@ -419,6 +359,30 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('statsNamed').textContent = namedCount;
         document.getElementById('statsLastUpdate').textContent = new Date().toLocaleTimeString();
     }
+
+    // Initialize the filter controller
+    const controller = new TableFilterController({
+        table,
+        urlManager,
+        formSelector: '#filtersForm',
+        updateStats
+    });
+
+    // Expose controller methods to global scope for testing/debugging
+    window.applyCurrentFilters = () => controller.applyCurrentFilters();
+    window.controller = controller;
+
+    // Button handlers
+    const applyFiltersBtn = document.getElementById('applyFilters');
+    const clearFiltersBtn = document.getElementById('clearFilters');
+    const refreshBtn = document.getElementById('refreshTable');
+
+    applyFiltersBtn.addEventListener('click', () => controller.applyCurrentFilters());
+    clearFiltersBtn.addEventListener('click', () => controller.clearFilters());
+    refreshBtn.addEventListener('click', () => {
+        table.refresh();
+        updateStats();
+    });
 
     // Helper functions for signal quality color coding
     function getRssiColorClass(rssi) {
@@ -444,9 +408,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         updateStats();
     });
-
-    // Initial load
-    table.loadData();
 });
 </script>
 {% endblock %}

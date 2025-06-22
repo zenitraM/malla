@@ -104,6 +104,8 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/url-filter-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='js/filter-store.js') }}"></script>
+<script src="{{ url_for('static', filename='js/table-filter-controller.js') }}"></script>
 <script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modern-table.js') }}"></script>
 <script>
@@ -171,7 +173,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-        // Initialize URL parameters and table
+    // Initialize page with filters and load data
     async function initializePageWithFilters() {
         // Load packet types first
         await loadPacketTypes();
@@ -179,25 +181,11 @@ document.addEventListener('DOMContentLoaded', function() {
         // Small delay to ensure DOM is updated
         await new Promise(resolve => setTimeout(resolve, 100));
 
-        // Apply URL parameters BEFORE adding listeners to prevent duplicate calls
+        // Apply URL parameters
         const hasParams = await urlManager.applyURLParameters();
 
-        // Add form field listeners AFTER applying URL parameters
-        // This prevents the change events from being triggered during URL parameter application
-        addFormFieldListeners();
-
-        // Apply filters if we have URL parameters, otherwise load unfiltered data
-        if (hasParams) {
-            // If we have URL parameters, update columns and apply filters immediately
-            // Use the column-updating version to ensure proper column configuration
-            const newColumns = getDynamicColumns();
-            table.updateColumns(newColumns);
-            applyCurrentFilters();
-        } else {
-            // Only load data without filters if no URL parameters
-            // Update columns first, then load data
-            updateTableColumns();
-        }
+        // Initialize the filter controller
+        controller.initialLoad(hasParams);
     }
 
     // Generic column configuration system
@@ -487,119 +475,41 @@ document.addEventListener('DOMContentLoaded', function() {
     // Expose table to global scope for debugging and testing
     window.table = table;
 
-    // Function to update table columns and reload data
-    function updateTableColumns() {
-        const newColumns = getDynamicColumns();
-        table.updateColumns(newColumns);
-        table.loadData();
-    }
-
-    // Filter handling
-    const filtersForm = document.getElementById('filtersForm');
-    const applyFiltersBtn = document.getElementById('applyFilters');
-    const clearFiltersBtn = document.getElementById('clearFilters');
-    const refreshBtn = document.getElementById('refreshTable');
-    const groupPacketsCheckbox = document.getElementById('group_packets');
-
-    // Apply current filters (used both for manual application and URL parameter application)
-    function applyCurrentFilters() {
-        const filters = urlManager.getCurrentFilters();
-        table.setFilters(filters);
-        updateStats();
-
-        // Update URL with current filters
-        urlManager.updateURL(filters);
-    }
-
-    // Apply current filters and update columns if needed
-    function applyCurrentFiltersWithColumns() {
-        // Get current filters first
-        const filters = urlManager.getCurrentFilters();
-
-        // Update the table's column configuration BEFORE applying filters
-        const newColumns = getDynamicColumns();
-        table.options.columns = newColumns;
-        table.updateTableHeader();
-
-        // Apply filters (this will load data with filters using the new columns)
-        table.setFilters(filters);
-
-        updateStats();
-
-        // Update URL with current filters
-        urlManager.updateURL(filters);
-    }
-
-    // Add event listeners to all form fields for automatic filtering
-    function addFormFieldListeners() {
-        if (filtersForm) {
-            // Add listeners to all form inputs
-            const formInputs = filtersForm.querySelectorAll('input, select');
-            formInputs.forEach(input => {
-                if (input.type === 'checkbox') {
-                    input.addEventListener('change', function() {
-                        // Small delay to ensure checkbox state is updated
-                        setTimeout(applyCurrentFilters, 10);
-                    });
-                } else {
-                    // For the packet type dropdown, use the column-updating version
-                    if (input.id === 'portnum') {
-                        input.addEventListener('change', function() {
-                            applyCurrentFiltersWithColumns();
-                        });
-                    } else {
-                        // For other inputs, use regular filtering
-                        input.addEventListener('change', function() {
-                            applyCurrentFilters();
-                        });
-                    }
-
-                    // Also trigger on input for text fields (real-time filtering)
-                    if (input.type === 'text' || input.type === 'search') {
-                        let debounceTimer;
-                        input.addEventListener('input', function() {
-                            clearTimeout(debounceTimer);
-                            debounceTimer = setTimeout(applyCurrentFilters, 300);
-                        });
-                    }
-                }
-            });
-        }
-    }
-
-    // Apply filters
-    applyFiltersBtn.addEventListener('click', applyCurrentFilters);
-
-    // Clear filters
-    clearFiltersBtn.addEventListener('click', function() {
-        urlManager.clearFilters();
-        table.clearFilters();
-        updateStats();
-    });
-
-    // Refresh table
-    refreshBtn.addEventListener('click', function() {
-        table.refresh();
-        updateStats();
-    });
-
-    // Handle grouping toggle
-    groupPacketsCheckbox.addEventListener('change', function() {
-        table.loadData();
-        updateStats();
-
-        // Update URL when grouping changes
-        const currentFilters = urlManager.getCurrentFilters();
-        urlManager.updateURL(currentFilters);
-    });
-
-    // Update stats
+    // Update stats function
     function updateStats() {
+        const groupPacketsCheckbox = document.getElementById('group_packets');
         document.getElementById('statsTotal').textContent = table.state.totalCount || '0';
         document.getElementById('statsFiltered').textContent = table.state.data.length || '0';
         document.getElementById('statsGrouped').textContent = groupPacketsCheckbox.checked ? 'Yes' : 'No';
         document.getElementById('statsLastUpdate').textContent = new Date().toLocaleTimeString();
     }
+
+    // Initialize the filter controller
+    const controller = new TableFilterController({
+        table,
+        urlManager,
+        formSelector: '#filtersForm',
+        groupingCheckboxSelector: '#group_packets',
+        getDynamicColumns,
+        updateStats
+    });
+
+    // Expose controller methods to global scope for testing/debugging
+    window.applyCurrentFilters = () => controller.applyCurrentFilters();
+    window.controller = controller;
+
+    // Button handlers
+    const applyFiltersBtn = document.getElementById('applyFilters');
+    const clearFiltersBtn = document.getElementById('clearFilters');
+    const refreshBtn = document.getElementById('refreshTable');
+    const groupPacketsCheckbox = document.getElementById('group_packets');
+
+    applyFiltersBtn.addEventListener('click', () => controller.applyCurrentFilters());
+    clearFiltersBtn.addEventListener('click', () => controller.clearFilters());
+    refreshBtn.addEventListener('click', () => {
+        table.refresh();
+        updateStats();
+    });
 
     // Helper functions for signal quality color coding
     function getRssiColorClass(rssi) {
@@ -626,7 +536,7 @@ document.addEventListener('DOMContentLoaded', function() {
         updateStats();
     });
 
-    // Initial load
+    // Initialize page
     initializePageWithFilters();
 });
 </script>
