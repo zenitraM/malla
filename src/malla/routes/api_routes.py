@@ -1549,9 +1549,31 @@ def api_traceroute_data():
                     route_nodes.append(to_node_id)
                     route_names.append(to_node_name)
 
-            # Gateway display
+            # Handle gateway display for both grouped and individual packets
             gateway_display = tr.get("gateway_id", "N/A")
             gateway_sort_value = 0
+
+            if group_packets:
+                # For grouped packets, show gateway count as number
+                gateway_count = tr.get("gateway_count", 0)
+                gateway_display = gateway_count
+                gateway_sort_value = gateway_count
+            else:
+                # For individual packets, show gateway name with link if it's a node
+                gateway_id = tr.get("gateway_id")
+                if gateway_id and gateway_id.startswith("!"):
+                    try:
+                        gateway_node_id = int(gateway_id[1:], 16)
+                        gateway_name = node_names.get(gateway_node_id)
+                        if gateway_name:
+                            gateway_display = f"{gateway_name} ({gateway_id})"
+                        gateway_sort_value = 1
+                    except ValueError:
+                        gateway_sort_value = 1 if gateway_id != "Unknown" else 0
+                else:
+                    gateway_sort_value = (
+                        1 if gateway_id and gateway_id != "Unknown" else 0
+                    )
 
             # Signal displays
             rssi_display = tr.get("rssi")
@@ -1559,11 +1581,6 @@ def api_traceroute_data():
             hops_display = tr.get("hop_count")
 
             if group_packets:
-                # For grouped packets, show gateway count as number
-                gateway_count = tr.get("gateway_count", 0)
-                gateway_display = gateway_count
-                gateway_sort_value = gateway_count
-
                 if tr.get("rssi_range"):
                     rssi_display = tr["rssi_range"]
                 if tr.get("snr_range"):
