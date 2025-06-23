@@ -66,14 +66,6 @@
     ] %}
     {{ table_controls_section(table_controls) }}
 
-    {% set stats_items = [
-        {"label": "Total Nodes", "id": "statsTotal", "default": "0"},
-        {"label": "Active (24h)", "id": "statsActive", "default": "0"},
-        {"label": "Named", "id": "statsNamed", "default": "0"},
-        {"label": "Last Update", "id": "statsLastUpdate", "default": "--"}
-    ] %}
-    {{ table_stats_section("tableStats", stats_items) }}
-
     <!-- Legend Section -->
     <div class="sidebar-section">
         <h6><i class="bi bi-palette"></i> Legend</h6>
@@ -84,12 +76,8 @@
                 <span class="badge bg-warning me-2">Repeater</span>
             </div>
             <div class="legend-item mt-2">
-                <span class="text-success me-2">≥ -60 dBm (Excellent)</span>
-                <span class="text-info me-2">-70 to -60 dBm (Good)</span>
-            </div>
-            <div class="legend-item">
-                <span class="text-warning me-2">-80 to -70 dBm (Fair)</span>
-                <span class="text-danger me-2">< -80 dBm (Poor)</span>
+                <span class="text-success me-2">Active (24h activity)</span>
+                <span class="text-muted me-2">Inactive (no recent activity)</span>
             </div>
         </div>
     </div>
@@ -209,6 +197,7 @@ document.addEventListener('DOMContentLoaded', function() {
         enablePagination: true,
         pageSize: 25,
         deferInitialLoad: true,
+        defaultSort: { column: 'last_packet_str', direction: 'desc' },
         columns: [
             {
                 key: 'hex_id',
@@ -289,34 +278,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     return `<span class="badge bg-light text-dark">0</span>`;
                 }
             },
-            {
-                key: 'avg_rssi',
-                title: 'Avg RSSI',
-                sortable: true,
-                render: (value, row) => {
-                    if (value !== null && value !== '' && value !== 'N/A') {
-                        const rssiValue = parseFloat(value);
-                        const colorClass = getRssiColorClass(rssiValue);
-                        const formattedValue = rssiValue.toFixed(1);
-                        return `<span class="${colorClass}">${formattedValue} dBm</span>`;
-                    }
-                    return '<span class="text-muted">N/A</span>';
-                }
-            },
-            {
-                key: 'avg_snr',
-                title: 'Avg SNR',
-                sortable: true,
-                render: (value, row) => {
-                    if (value !== null && value !== '' && value !== 'N/A') {
-                        const snrValue = parseFloat(value);
-                        const colorClass = getSnrColorClass(snrValue);
-                        const formattedValue = snrValue.toFixed(2);
-                        return `<span class="${colorClass}">${formattedValue} dB</span>`;
-                    }
-                    return '<span class="text-muted">N/A</span>';
-                }
-            },
+
             {
                 key: 'node_id',
                 title: 'Actions',
@@ -350,14 +312,9 @@ document.addEventListener('DOMContentLoaded', function() {
         ]
     });
 
-    // Update stats function
+    // Update stats function (removed - stats section was removed from UI)
     function updateStats() {
-        document.getElementById('statsTotal').textContent = table.state.totalCount || '0';
-        const activeCount = table.state.data.filter(node => parseInt(node.packet_count_24h) > 0).length;
-        const namedCount = table.state.data.filter(node => node.node_name && node.node_name !== 'Unnamed').length;
-        document.getElementById('statsActive').textContent = activeCount;
-        document.getElementById('statsNamed').textContent = namedCount;
-        document.getElementById('statsLastUpdate').textContent = new Date().toLocaleTimeString();
+        // No-op - stats section removed
     }
 
     // Initialize the filter controller
@@ -381,23 +338,9 @@ document.addEventListener('DOMContentLoaded', function() {
     clearFiltersBtn.addEventListener('click', () => controller.clearFilters());
     refreshBtn.addEventListener('click', () => {
         table.refresh();
-        updateStats();
     });
 
-    // Helper functions for signal quality color coding
-    function getRssiColorClass(rssi) {
-        if (rssi >= -60) return 'text-success'; // Excellent
-        if (rssi >= -70) return 'text-info';    // Good
-        if (rssi >= -80) return 'text-warning'; // Fair
-        return 'text-danger';                   // Poor
-    }
 
-    function getSnrColorClass(snr) {
-        if (snr > 5) return 'text-success';     // Excellent
-        if (snr > 0) return 'text-info';       // Good
-        if (snr > -5) return 'text-warning';   // Fair
-        return 'text-danger';                  // Poor
-    }
 
     // Initialize tooltips after table loads
     table.on('dataLoaded', function() {
@@ -406,7 +349,6 @@ document.addEventListener('DOMContentLoaded', function() {
         tooltipTriggerList.map(function (tooltipTriggerEl) {
             return new bootstrap.Tooltip(tooltipTriggerEl);
         });
-        updateStats();
     });
 });
 </script>

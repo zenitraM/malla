@@ -2,6 +2,7 @@
 API routes for the Meshtastic Mesh Health Web UI
 """
 
+import json
 import logging
 import time
 from typing import Any
@@ -1347,8 +1348,6 @@ def api_nodes_data():
                     "last_packet_str": node.get("last_packet_str", "Never"),
                     "last_packet_time": node.get("last_packet_time"),
                     "packet_count_24h": node.get("packet_count_24h", 0),
-                    "avg_rssi": node.get("avg_rssi"),
-                    "avg_snr": node.get("avg_snr"),
                     "status": status,
                 }
             )
@@ -1509,11 +1508,28 @@ def api_traceroute_data():
                     to_node_id, f"{to_node_id:08x}"[-4:]
                 )
 
-            # Enhanced route data - pass structured data for client-side rendering
+            # Enhanced route data - use already-parsed route field from repository
             route_nodes = []  # Node IDs in the route
             route_names = []  # Node names/displays in the route
 
-            if tr.get("raw_payload"):
+            # Check if repository already parsed route data
+            if tr.get("route"):
+                try:
+                    # Route field contains JSON string of route node IDs
+                    route_nodes = json.loads(tr["route"])
+                    # Get names for each node in the route
+                    for node_id in route_nodes:
+                        node_name = node_short_names.get(
+                            node_id, f"!{node_id:08x}"[-4:]
+                        )
+                        route_names.append(node_name)
+                except Exception:
+                    # If parsing fails, fall back to raw_payload parsing
+                    route_nodes = []
+                    route_names = []
+
+            # If no route data from repository, try parsing raw_payload
+            if not route_nodes and tr.get("raw_payload"):
                 try:
                     route_data = parse_traceroute_payload(tr["raw_payload"])
                     if route_data.get("route_nodes"):
@@ -1524,24 +1540,11 @@ def api_traceroute_data():
                                 node_id, f"!{node_id:08x}"[-4:]
                             )
                             route_names.append(node_name)
-                    else:
-                        # Fallback: use from -> to
-                        if from_node_id:
-                            route_nodes.append(from_node_id)
-                            route_names.append(from_node_name)
-                        if to_node_id and to_node_id != from_node_id:
-                            route_nodes.append(to_node_id)
-                            route_names.append(to_node_name)
                 except Exception:
-                    # Fallback: use from -> to
-                    if from_node_id:
-                        route_nodes.append(from_node_id)
-                        route_names.append(from_node_name)
-                    if to_node_id and to_node_id != from_node_id:
-                        route_nodes.append(to_node_id)
-                        route_names.append(to_node_name)
-            else:
-                # No payload data, use from -> to
+                    pass
+
+            # Final fallback: use from -> to
+            if not route_nodes:
                 if from_node_id:
                     route_nodes.append(from_node_id)
                     route_names.append(from_node_name)

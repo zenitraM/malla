@@ -846,7 +846,7 @@ class NodeRepository:
         search: str | None = None,
         filters: dict | None = None,
     ) -> dict[str, Any]:
-        """Get node information with activity statistics."""
+        """Get node information with activity statistics (optimized version)."""
         if filters is None:
             filters = {}
 
@@ -854,7 +854,7 @@ class NodeRepository:
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            # Build search and filter conditions
+            # Build search and filter conditions for node_info
             where_conditions = []
             params = []
 
@@ -878,11 +878,17 @@ class NodeRepository:
                 where_conditions.append("ni.role = ?")
                 params.append(filters["role"])
 
+            # Add named_only filter
+            if filters.get("named_only"):
+                where_conditions.append(
+                    "ni.long_name IS NOT NULL AND ni.long_name != ''"
+                )
+
             where_clause = ""
             if where_conditions:
                 where_clause = "WHERE " + " AND ".join(where_conditions)
 
-            # Get total count
+            # Fast count query using only node_info
             count_query = f"""
                 SELECT COUNT(*) as total
                 FROM node_info ni
@@ -891,66 +897,105 @@ class NodeRepository:
             cursor.execute(count_query, params)
             total_count = cursor.fetchone()["total"]
 
-            # Build main query
-            twenty_four_hours_ago = time.time() - (24 * 3600)
-
+            # Determine sort column mapping
             valid_order_columns = [
                 "node_id",
                 "long_name",
                 "hw_model",
-                "last_packet_time",
+                "last_updated",
                 "packet_count_24h",
             ]
             if order_by not in valid_order_columns:
-                order_by = "last_packet_time"
+                order_by = "last_packet_time"  # Default to last seen time
 
             order_dir = "DESC" if order_dir.lower() == "desc" else "ASC"
 
-            # Map order columns to correct table references
-            order_mappings = {
-                "node_id": "ni.node_id",
-                "long_name": "ni.long_name",
-                "hw_model": "ni.hw_model",
-                "last_packet_time": "stats.last_packet_time",
-                "packet_count_24h": "stats.packet_count_24h",
-            }
-            order_column = order_mappings.get(order_by, "stats.last_packet_time")
+            # Check if we need 24h stats for sorting or filtering
+            needs_24h_stats = (
+                order_by == "packet_count_24h"
+                or filters.get("active_only")
+                or order_by == "last_packet_time"
+            )
 
-            query = f"""
-                SELECT
-                    ni.node_id,
-                    ni.long_name,
-                    ni.short_name,
-                    ni.hw_model,
-                    ni.role,
-                    ni.last_updated,
-                    printf('!%08x', ni.node_id) as hex_id,
-                    COALESCE(stats.packet_count_24h, 0) as packet_count_24h,
-                    stats.last_packet_time,
-                    stats.avg_rssi,
-                    stats.avg_snr,
-                    datetime(stats.last_packet_time, 'unixepoch') as last_packet_str
-                FROM node_info ni
-                LEFT JOIN (
+            if needs_24h_stats:
+                # Use the more complex query with 24h stats
+                order_mappings = {
+                    "node_id": "ni.node_id",
+                    "long_name": "ni.long_name",
+                    "hw_model": "ni.hw_model",
+                    "last_updated": "ni.last_updated",
+                    "packet_count_24h": "stats.packet_count_24h",
+                    "last_packet_time": "COALESCE(stats.last_packet_time, ni.last_updated)",
+                }
+                order_column = order_mappings.get(
+                    order_by, "COALESCE(stats.last_packet_time, ni.last_updated)"
+                )
+
+                # Add active_only filter if needed
+                if filters.get("active_only"):
+                    where_conditions.append("stats.packet_count_24h > 0")
+                    where_clause = (
+                        "WHERE " + " AND ".join(where_conditions)
+                        if where_conditions
+                        else ""
+                    )
+
+                query = f"""
                     SELECT
-                        from_node_id,
-                        COUNT(*) as packet_count_24h,
-                        MAX(timestamp) as last_packet_time,
-                        AVG(CASE WHEN (hop_start IS NULL OR hop_limit IS NULL OR (hop_start - hop_limit) = 0)
-                             THEN CAST(rssi AS FLOAT) END) as avg_rssi,
-                        AVG(CASE WHEN (hop_start IS NULL OR hop_limit IS NULL OR (hop_start - hop_limit) = 0)
-                             THEN CAST(snr AS FLOAT) END) as avg_snr
-                    FROM packet_history
-                    WHERE timestamp > ?
-                    GROUP BY from_node_id
-                ) stats ON ni.node_id = stats.from_node_id
-                {where_clause}
-                ORDER BY COALESCE({order_column}, 0) {order_dir}
-                LIMIT ? OFFSET ?
-            """
+                        ni.node_id,
+                        ni.long_name,
+                        ni.short_name,
+                        ni.hw_model,
+                        ni.role,
+                        ni.last_updated,
+                        printf('!%08x', ni.node_id) as hex_id,
+                        COALESCE(stats.packet_count_24h, 0) as packet_count_24h,
+                        COALESCE(stats.last_packet_time, ni.last_updated) as last_packet_time,
+                        datetime(COALESCE(stats.last_packet_time, ni.last_updated), 'unixepoch') as last_packet_str
+                    FROM node_info ni
+                    LEFT JOIN (
+                        SELECT
+                            from_node_id,
+                            COUNT(*) as packet_count_24h,
+                            MAX(timestamp) as last_packet_time
+                        FROM packet_history
+                        WHERE timestamp > (strftime('%s', 'now') - 86400)
+                        GROUP BY from_node_id
+                    ) stats ON ni.node_id = stats.from_node_id
+                    {where_clause}
+                    ORDER BY {order_column} {order_dir}
+                    LIMIT ? OFFSET ?
+                """
+            else:
+                # Use fast query with only node_info
+                order_mappings = {
+                    "node_id": "ni.node_id",
+                    "long_name": "ni.long_name",
+                    "hw_model": "ni.hw_model",
+                    "last_updated": "ni.last_updated",
+                }
+                order_column = order_mappings.get(order_by, "ni.last_updated")
 
-            # Fix parameter order: twenty_four_hours_ago first, then filter params, then limit/offset
-            query_params = [twenty_four_hours_ago] + params + [limit, offset]
+                query = f"""
+                    SELECT
+                        ni.node_id,
+                        ni.long_name,
+                        ni.short_name,
+                        ni.hw_model,
+                        ni.role,
+                        ni.last_updated,
+                        printf('!%08x', ni.node_id) as hex_id,
+                        0 as packet_count_24h,
+                        ni.last_updated as last_packet_time,
+                        datetime(ni.last_updated, 'unixepoch') as last_packet_str
+                    FROM node_info ni
+                    {where_clause}
+                    ORDER BY {order_column} {order_dir}
+                    LIMIT ? OFFSET ?
+                """
+
+            # Execute query with parameters
+            query_params = params + [limit, offset]
             cursor.execute(query, query_params)
             nodes = [dict(row) for row in cursor.fetchall()]
 
