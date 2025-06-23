@@ -1122,9 +1122,23 @@ class TestTables:
         group_checkbox.uncheck()
 
         # Wait for ungrouped data to load with better wait condition
-        # In ungrouped mode, we should see individual packet data with timestamps
-        page.wait_for_selector(
-            "table tbody tr td:nth-child(1):has-text(':')", timeout=15000
+        # Wait for the table to refresh and show ungrouped data
+        page.wait_for_function(
+            "() => document.querySelectorAll('table tbody tr').length > 0",
+            timeout=15000,
+        )
+
+        # Wait for route data to be present in ungrouped mode
+        # Look for actual route data content, not just timestamps
+        page.wait_for_function(
+            """() => {
+                const routeCells = document.querySelectorAll('table tbody tr td:nth-child(4)');
+                return Array.from(routeCells).some(cell => {
+                    const text = (cell.textContent || '').trim();
+                    return text && text !== 'No route data' && text.length > 0;
+                });
+            }""",
+            timeout=15000,
         )
 
         # Count route data entries in ungrouped mode
@@ -1135,6 +1149,12 @@ class TestTables:
             for text in ungrouped_texts
             if (text or "").strip() and (text or "").strip() != "No route data"
         )
+
+        # Debug output to help diagnose issues
+        if ungrouped_route_count == 0:
+            print(f"Debug: Ungrouped texts sample: {ungrouped_texts[:5]}")
+            total_rows = page.locator("table tbody tr").count()
+            print(f"Debug: Total ungrouped rows: {total_rows}")
 
         # Both modes should have route data (though counts may differ due to grouping)
         assert grouped_route_count > 0, (

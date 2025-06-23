@@ -179,14 +179,29 @@ class TestNodesSearch:
             "() => document.querySelectorAll('#nodesTable tbody tr').length < 10",
             timeout=5000,
         )
+        # Wait for search results to stabilize by checking the content
+        page.wait_for_function(
+            "() => document.querySelector('#nodesTable tbody tr')?.textContent?.toLowerCase().includes('gateway')",
+            timeout=3000,
+        )
         lowercase_rows = page.locator("#nodesTable tbody tr").count()
 
         # Test uppercase search for "GATEWAY"
         search_input.clear()
+        # Wait for clear to take effect
+        page.wait_for_function(
+            "() => document.querySelectorAll('#nodesTable tbody tr').length >= 10",
+            timeout=5000,
+        )
         search_input.fill("GATEWAY")
         page.wait_for_function(
             "() => document.querySelectorAll('#nodesTable tbody tr').length < 10",
             timeout=5000,
+        )
+        # Wait for search results to stabilize by checking the content
+        page.wait_for_function(
+            "() => document.querySelector('#nodesTable tbody tr')?.textContent?.toLowerCase().includes('gateway')",
+            timeout=3000,
         )
         uppercase_rows = page.locator("#nodesTable tbody tr").count()
 
