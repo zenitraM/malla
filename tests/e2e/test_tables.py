@@ -1120,8 +1120,12 @@ class TestTables:
 
         # Switch to ungrouped mode
         group_checkbox.uncheck()
-        # Wait for ungrouped data to load by looking for specific traceroute content
-        page.wait_for_selector("table tbody tr", timeout=15000)
+
+        # Wait for ungrouped data to load with better wait condition
+        # In ungrouped mode, we should see individual packet data with timestamps
+        page.wait_for_selector(
+            "table tbody tr td:nth-child(1):has-text(':')", timeout=15000
+        )
 
         # Count route data entries in ungrouped mode
         route_cells_ungrouped = page.locator("table tbody tr td:nth-child(4)")
