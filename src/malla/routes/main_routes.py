@@ -11,7 +11,6 @@ from ..database.repositories import (
     DashboardRepository,
     PacketRepository,
 )
-from ..services import LocationService
 
 logger = logging.getLogger(__name__)
 main_bp = Blueprint("main", __name__)
@@ -42,15 +41,8 @@ def dashboard():
 @main_bp.route("/map")
 def map_view():
     """Node location map view."""
-    logger.info("Map route accessed")
     try:
-        # Retrieve locations once and reuse for statistics to avoid duplicate heavy queries
-        locations = LocationService.get_node_locations()
-        stats = LocationService.get_location_statistics(locations)
-        logger.info(
-            f"Map rendered with {len(locations)} locations (stats calculated using same dataset)"
-        )
-        return render_template("map.html", locations=locations, stats=stats)
+        return render_template("map.html")
     except Exception as e:
         logger.error(f"Error in map route: {e}")
         return f"Map error: {e}", 500
