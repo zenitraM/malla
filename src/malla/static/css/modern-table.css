@@ -71,8 +71,46 @@
     background: color-mix(in srgb, var(--bs-primary) 85%, black);
 }
 
+/* Enhanced sorting indicators - complete implementation */
 .modern-table thead th.sortable {
     cursor: pointer;
+    user-select: none;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding-right: 1.5rem; /* Make room for icon */
+}
+
+.modern-table thead th.sortable:hover {
+    background: color-mix(in srgb, var(--bs-primary) 85%, black);
+}
+
+.modern-table thead th.sortable::after {
+    content: '⇅';
+    position: absolute;
+    right: 0.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0.6;
+    font-size: 0.9rem;
+    font-weight: normal;
+}
+
+.modern-table thead th.sortable.asc::after {
+    content: '↑';
+    opacity: 1;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.modern-table thead th.sortable.desc::after {
+    content: '↓';
+    opacity: 1;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.modern-table thead th.asc,
+.modern-table thead th.desc {
+    background: color-mix(in srgb, var(--bs-primary) 85%, black);
 }
 
 .modern-table thead th.sorted {
