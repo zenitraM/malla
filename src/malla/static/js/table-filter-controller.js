@@ -152,7 +152,7 @@
         _cleanFilters(obj) {
             return Object.fromEntries(
                 Object.entries(obj).filter(([_, v]) => {
-                    if (typeof v === 'boolean') return v; // keep true booleans
+                    if (typeof v === 'boolean') return true; // keep all booleans (both true and false)
                     return v !== undefined && v !== null && v !== '';
                 })
             );
