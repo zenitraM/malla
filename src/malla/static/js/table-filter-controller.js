@@ -99,15 +99,17 @@
                 // Now activate reactive mode
                 this.subscriberActive = true;
             } else {
-                // No filters: load once, then activate reactive mode.
-                if (this.table.options.deferInitialLoad) {
-                    this.table.loadData();
-                }
-                // Set initial state to include grouping checkbox to prevent duplicate requests
+                // No filters: load once with proper initial state, then activate reactive mode.
                 const initialFilters = {};
                 if (this.groupingCheckbox) {
                     initialFilters.group_packets = this.groupingCheckbox.checked;
                 }
+
+                if (this.table.options.deferInitialLoad) {
+                    // Use setFilters to ensure grouping state is included from the start
+                    this.table.setFilters(initialFilters);
+                }
+
                 this.lastAppliedJson = JSON.stringify(initialFilters);
                 this.subscriberActive = true;
             }
@@ -151,8 +153,12 @@
 
         _cleanFilters(obj) {
             return Object.fromEntries(
-                Object.entries(obj).filter(([_, v]) => {
-                    if (typeof v === 'boolean') return v; // keep true booleans
+                Object.entries(obj).filter(([key, v]) => {
+                    if (typeof v === 'boolean') {
+                        // Always include group_packets boolean (both true and false)
+                        // For other booleans, only include if true (preserve original behavior)
+                        return key === 'group_packets' || v === true;
+                    }
                     return v !== undefined && v !== null && v !== '';
                 })
             );
