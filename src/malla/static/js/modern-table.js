@@ -102,20 +102,17 @@ class ModernTable {
                     const sortable = column.sortable !== false;
                     const sortKey = column.sortKey || column.key;
                     const isSorted = this.state.sortBy === sortKey;
-                    const sortClass = isSorted ? `sorted sorted-${this.state.sortOrder}` : '';
+
+                    // Use proper CSS classes for ::after pseudo-element
+                    let sortClass = sortable ? 'sortable' : '';
+                    if (isSorted) {
+                        sortClass += ` ${this.state.sortOrder}`;
+                    }
 
                     return `
-                        <th class="${sortable ? 'sortable' : ''} ${sortClass}"
+                        <th class="${sortClass}"
                             ${sortable ? `data-sort="${sortKey}"` : ''}>
                             ${column.title}
-                            ${sortable ? `
-                                <span class="sort-indicator">
-                                    ${isSorted ?
-                                        (this.state.sortOrder === 'asc' ? '▲' : '▼') :
-                                        '⇅'
-                                    }
-                                </span>
-                            ` : ''}
                         </th>
                     `;
                 }).join('')}

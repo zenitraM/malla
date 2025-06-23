@@ -58,7 +58,9 @@
     font-weight: 500;
     border: none;
     padding: 0.6rem 0.5rem; /* Reduced padding */
-    position: relative;
+    position: sticky;
+    top: 0;
+    z-index: 10;
     user-select: none;
     vertical-align: bottom;
     transition: background-color 0.2s ease;
@@ -66,7 +68,7 @@
 }
 
 .modern-table thead th:hover {
-    background: var(--malla-primary-hover, #0a58ca);
+    background: color-mix(in srgb, var(--bs-primary) 85%, black);
 }
 
 .modern-table thead th.sortable {
@@ -74,7 +76,19 @@
 }
 
 .modern-table thead th.sorted {
-    background: var(--malla-primary-hover, #0a58ca);
+    background: color-mix(in srgb, var(--bs-primary) 85%, black);
+}
+
+/* Ensure ALL table headers remain sticky regardless of other classes */
+.modern-table thead th,
+.modern-table thead th.sortable,
+.modern-table thead th.sorted,
+.modern-table thead th.asc,
+.modern-table thead th.desc,
+.modern-table thead th:hover {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 10 !important;
 }
 
 .modern-table tbody td {
@@ -393,9 +407,11 @@
     }
 }
 
-/* Table wrapper for horizontal scrolling */
+/* Table wrapper for horizontal scrolling and sticky headers */
 .table-wrapper {
     overflow-x: auto;
+    max-height: calc(100vh - 200px); /* Allow vertical scrolling */
+    overflow-y: auto;
 }
 
 /* Ensure proper spacing for form controls */
@@ -407,131 +423,4 @@
     margin-right: 0.5rem;
 }
 
-/* --- 2025 Style Refresh Overrides --- */
-/* These rules intentionally appear at the end to override previous definitions */
-
-.modern-table-container,
-.modern-filters-card,
-.modern-table-card {
-    border-radius: var(--bs-border-radius, 0.75rem);
-    box-shadow: var(--bs-box-shadow-sm);
-    background: var(--bs-body-bg, #ffffff);
-}
-
-.modern-table thead th {
-    background: var(--bs-primary, #0d6efd);
-    color: white;
-    font-weight: 500;
-    transition: background-color 0.2s ease;
-}
-
-.modern-table thead th.sorted {
-    background: var(--malla-primary-hover, #0a58ca);
-}
-
-.modern-table tbody tr:nth-of-type(odd) {
-    background-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.025);
-}
-
-.modern-table tbody tr:hover {
-    background-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.05);
-    transition: background-color 0.2s ease;
-}
-
-/* CLEAN Enhanced sorting indicators - single icon system */
-.modern-table th.sortable {
-    cursor: pointer;
-    user-select: none;
-    position: relative;
-    padding-right: 1.5rem; /* Make room for icon */
-}
-
-.modern-table th.sortable:hover {
-    background: var(--malla-primary-hover, #0a58ca);
-}
-
-.modern-table th.sortable::after {
-    content: '⇅';
-    position: absolute;
-    right: 0.5rem;
-    top: 50%;
-    transform: translateY(-50%);
-    opacity: 0.6;
-    font-size: 0.9rem;
-    font-weight: normal;
-}
-
-.modern-table th.sortable.asc::after {
-    content: '↑';
-    opacity: 1;
-    color: rgba(255, 255, 255, 0.9);
-}
-
-.modern-table th.sortable.desc::after {
-    content: '↓';
-    opacity: 1;
-    color: rgba(255, 255, 255, 0.9);
-}
-
-/* Form elements in tables */
-.modern-table .form-control,
-.modern-table .form-select {
-    border-radius: var(--bs-border-radius-sm, 0.375rem);
-    border: 1px solid var(--bs-border-color, #dee2e6);
-}
-
-/* Badge styling in tables - smaller for compact design */
-.modern-table .badge {
-    font-size: 0.7em;
-    font-weight: 500;
-    padding: 0.25em 0.5em;
-}
-
-/* Link styling in tables */
-.modern-table a {
-    color: var(--bs-primary, #0d6efd);
-    text-decoration: none;
-    transition: color 0.2s ease;
-}
-
-.modern-table a:hover {
-    color: var(--bs-primary, #0d6efd);
-    filter: brightness(1.2);
-    text-decoration: underline;
-}
-
-/* Compact button groups in tables */
-.modern-table .btn-group .btn {
-    padding: 0.2rem 0.4rem;
-    font-size: 0.75rem;
-}
-
-/* Dark mode adjustments */
-@media (prefers-color-scheme: dark) {
-    .modern-table-container,
-    .modern-filters-card,
-    .modern-table-card {
-        background: var(--surface-2, #2b3035);
-        box-shadow: none;
-        border: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .modern-table thead th {
-        background: var(--bs-primary, #0d6efd);
-        color: #dee2e6;
-    }
-
-    .modern-table tbody tr:nth-of-type(odd) {
-        background-color: rgba(255, 255, 255, 0.03);
-    }
-
-    .modern-table tbody tr:hover {
-        background-color: rgba(var(--primary-rgb, 13, 110, 253), 0.15);
-    }
-
-    .pagination-btn {
-        background-color: var(--surface-2, #2b3035);
-        color: var(--primary, #0d6efd);
-        border-color: #3e454d;
-    }
-}
+/* Enhanced table styling - now handled in main theme */

@@ -110,8 +110,10 @@ class TestTables:
         # Wait for sort to complete
         page.wait_for_timeout(1000)
 
-        # Check that sort indicator is visible
-        expect(timestamp_header.locator(".sort-indicator")).to_be_visible()
+        # Check that header has sortable class and is now sorted
+        expect(timestamp_header).to_have_class(re.compile(r".*sortable.*"))
+        # Check that the header now has either asc or desc class indicating it's sorted
+        expect(timestamp_header).to_have_class(re.compile(r".*(asc|desc).*"))
 
     def test_packets_gateway_sorting_grouped(self, page: Page, test_server_url: str):
         """Test that gateway sorting works in grouped view."""
@@ -135,8 +137,10 @@ class TestTables:
         # Wait for sort to complete
         page.wait_for_timeout(1000)
 
-        # Check that sort indicator is visible
-        expect(gateway_header.locator(".sort-indicator")).to_be_visible()
+        # Check that header has sortable class and is now sorted
+        expect(gateway_header).to_have_class(re.compile(r".*sortable.*"))
+        # Check that the header now has either asc or desc class indicating it's sorted
+        expect(gateway_header).to_have_class(re.compile(r".*(asc|desc).*"))
 
         # Table should still have data after sorting
         rows = page.locator(".modern-table tbody tr")
