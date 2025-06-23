@@ -1,0 +1,450 @@
+/* Malla Bootstrap Theme */
+/* Leverages Bootstrap 5's CSS custom property system for maximum compatibility */
+
+/* Import Inter font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* Bootstrap theme customization using native CSS custom properties */
+:root,
+[data-bs-theme=light] {
+  /* Typography - Bootstrap native approach */
+  --bs-font-sans-serif: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --bs-body-font-family: var(--bs-font-sans-serif);
+  --bs-body-font-weight: 400;
+  --bs-headings-font-weight: 500;
+
+  /* Enhanced color palette - Bootstrap native */
+  --bs-primary: #0d6efd;
+  --bs-primary-rgb: 13, 110, 253;
+  --bs-secondary: #6c757d;
+  --bs-success: #198754;
+  --bs-info: #0dcaf0;
+  --bs-warning: #ffc107;
+  --bs-danger: #dc3545;
+
+  /* Surface colors with better contrast */
+  --bs-body-bg: #fafbfc;
+  --bs-body-bg-rgb: 250, 251, 252;
+  --bs-tertiary-bg: #f8f9fa;
+  --bs-secondary-bg: #e9ecef;
+
+  /* Modern border radius */
+  --bs-border-radius: 0.5rem;
+  --bs-border-radius-sm: 0.375rem;
+  --bs-border-radius-lg: 0.75rem;
+  --bs-border-radius-xl: 1rem;
+
+  /* Enhanced shadows using Bootstrap system */
+  --bs-box-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+  --bs-box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.1);
+  --bs-box-shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.1), 0 4px 10px rgba(0, 0, 0, 0.05);
+
+  /* Table theming - Bootstrap native */
+  --bs-table-hover-bg: rgba(var(--bs-primary-rgb), 0.025);
+  --bs-table-striped-bg: rgba(var(--bs-primary-rgb), 0.015);
+
+  /* Transition system */
+  --bs-transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Enhanced body typography */
+html body {
+  font-family: var(--bs-font-sans-serif) !important;
+  font-weight: var(--bs-body-font-weight);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Headings with appropriate weights */
+h1, h2, h3, h4, h5, h6,
+.h1, .h2, .h3, .h4, .h5, .h6 {
+  font-weight: var(--bs-headings-font-weight);
+}
+
+h1, .h1 {
+  font-weight: 600;
+}
+
+/* Bootstrap component enhancements */
+
+/* Cards with modern elevation */
+.card {
+  border: 1px solid var(--bs-border-color);
+  box-shadow: var(--bs-box-shadow-sm);
+  transition: var(--bs-transition);
+}
+
+.card:hover {
+  box-shadow: var(--bs-box-shadow);
+  transform: translateY(-1px);
+}
+
+/* Tables - Compact and modern */
+.table {
+  --bs-table-hover-bg: rgba(var(--bs-primary-rgb), 0.025);
+  font-size: 0.875rem;
+}
+
+.table > :not(caption) > * > * {
+  border-bottom-width: 1px;
+  border-color: var(--bs-border-color);
+  padding: 0.5rem;
+}
+
+.table thead th {
+  background: var(--bs-primary);
+  color: white;
+  font-weight: 500;
+  border: none;
+  padding: 0.6rem 0.5rem;
+  font-size: 0.8rem;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  transition: background-color 0.2s ease;
+}
+
+.table thead th:hover {
+  background: color-mix(in srgb, var(--bs-primary) 85%, black);
+}
+
+/* Buttons with enhanced states */
+.btn {
+  font-weight: 400;
+  transition: var(--bs-transition);
+  border-radius: var(--bs-border-radius);
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--bs-box-shadow);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+/* Form controls */
+.form-control,
+.form-select {
+  border-radius: var(--bs-border-radius-sm);
+  border: 1px solid var(--bs-border-color);
+  transition: var(--bs-transition);
+  font-weight: 400;
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--bs-primary);
+  box-shadow: 0 0 0 0.2rem rgba(var(--bs-primary-rgb), 0.15);
+}
+
+/* Navigation */
+.navbar {
+  box-shadow: var(--bs-box-shadow-sm);
+  backdrop-filter: blur(10px);
+}
+
+.nav-link {
+  font-weight: 400;
+  transition: var(--bs-transition);
+}
+
+.navbar-brand {
+  font-weight: 500;
+}
+
+/* Modern scrollbar styling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bs-secondary) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--bs-secondary);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--bs-primary);
+}
+
+/* Dark mode support - Bootstrap native */
+[data-bs-theme=dark] {
+  --bs-body-bg: #212529;
+  --bs-body-bg-rgb: 33, 37, 41;
+  --bs-tertiary-bg: #2b3035;
+  --bs-secondary-bg: #343a40;
+  --bs-body-color: #dee2e6;
+  --bs-body-color-rgb: 222, 226, 230;
+  --bs-secondary-color: #adb5bd;
+}
+
+[data-bs-theme=dark] .card {
+  background-color: var(--bs-tertiary-bg);
+  border-color: var(--bs-border-color);
+}
+
+[data-bs-theme=dark] .card:hover {
+  background-color: var(--bs-secondary-bg);
+}
+
+/* Application-specific components using Bootstrap utilities */
+
+/* Modern table container - using Bootstrap classes where possible */
+.modern-table-container {
+  background: var(--bs-body-bg);
+  border-radius: var(--bs-border-radius);
+  box-shadow: var(--bs-box-shadow);
+  overflow: hidden;
+}
+
+.modern-table thead th {
+  background: var(--bs-primary);
+  color: white;
+  font-weight: 500;
+  padding: 0.6rem 0.5rem;
+  font-size: 0.8rem;
+  border: none;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  transition: background-color 0.2s ease;
+}
+
+.modern-table thead th:hover {
+  background: color-mix(in srgb, var(--bs-primary) 85%, black);
+}
+
+/* Enhanced sorting indicators - single icon system */
+.modern-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding-right: 1.5rem; /* Make room for icon */
+}
+
+.modern-table th.sortable:hover {
+  background: color-mix(in srgb, var(--bs-primary) 85%, black);
+}
+
+.modern-table th.sortable::after {
+  content: '⇅';
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.6;
+  font-size: 0.9rem;
+  font-weight: normal;
+}
+
+.modern-table th.sortable.asc::after {
+  content: '↑';
+  opacity: 1;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.modern-table th.sortable.desc::after {
+  content: '↓';
+  opacity: 1;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.modern-table thead th.asc,
+.modern-table thead th.desc {
+  background: color-mix(in srgb, var(--bs-primary) 85%, black);
+}
+
+.modern-table tbody tr {
+  transition: var(--bs-transition);
+}
+
+.modern-table tbody tr:hover {
+  background-color: var(--bs-table-hover-bg);
+  transition: background-color 0.2s ease;
+}
+
+.modern-table tbody tr:nth-of-type(odd) {
+  background-color: var(--bs-table-striped-bg);
+}
+
+.modern-table tbody td {
+  padding: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.3;
+}
+
+/* Form elements in tables */
+.modern-table .form-control,
+.modern-table .form-select {
+  border-radius: var(--bs-border-radius-sm);
+  border: 1px solid var(--bs-border-color);
+}
+
+/* Badge styling in tables - smaller for compact design */
+.modern-table .badge {
+  font-size: 0.7em;
+  font-weight: 500;
+  padding: 0.25em 0.5em;
+}
+
+/* Link styling in tables */
+.modern-table a {
+  color: var(--bs-primary);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.modern-table a:hover {
+  color: var(--bs-primary);
+  filter: brightness(1.2);
+  text-decoration: underline;
+}
+
+/* Compact button groups in tables */
+.modern-table .btn-group .btn {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.75rem;
+}
+
+/* Sidebar components - using Bootstrap design tokens */
+.table-sidebar {
+  background: var(--bs-body-bg);
+  border-right: 1px solid var(--bs-border-color);
+  box-shadow: var(--bs-box-shadow);
+}
+
+.modern-filters-card {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  box-shadow: var(--bs-box-shadow-sm);
+}
+
+/* Enhanced focus states using Bootstrap system */
+.btn:focus-visible,
+.form-control:focus,
+.form-select:focus {
+  outline: 2px solid var(--bs-primary);
+  outline-offset: 2px;
+}
+
+/* Responsive typography using Bootstrap approach */
+@media (min-width: 768px) {
+  html {
+    font-size: 1rem;
+  }
+}
+
+@media (min-width: 1200px) {
+  html {
+    font-size: 1.05rem;
+  }
+}
+
+/* Mobile responsiveness for tables */
+@media (max-width: 768px) {
+  .modern-table {
+    font-size: 0.8rem; /* Even smaller on mobile */
+  }
+
+  .modern-table thead th,
+  .modern-table tbody td {
+    padding: 0.4rem 0.3rem; /* Very compact on mobile */
+  }
+}
+
+/* Animation utilities - Bootstrap compatible */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in-up {
+  animation: fadeInUp 0.6s ease-out;
+}
+
+/* Print styles - Bootstrap compatible */
+@media print {
+  .table-sidebar,
+  .btn,
+  .navbar {
+    display: none !important;
+  }
+
+  .modern-table-container {
+    box-shadow: none;
+    border: 1px solid #000;
+  }
+}
+
+/* Dark mode adjustments for tables */
+[data-bs-theme=dark] .modern-table-container,
+[data-bs-theme=dark] .modern-filters-card {
+  background: var(--bs-tertiary-bg);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+[data-bs-theme=dark] .modern-table tbody tr:nth-of-type(odd) {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+[data-bs-theme=dark] .modern-table tbody tr:hover {
+  background-color: rgba(var(--bs-primary-rgb), 0.15);
+}
+
+/* Utility classes following Bootstrap naming conventions */
+.shadow-modern {
+  box-shadow: var(--bs-box-shadow) !important;
+}
+
+.shadow-modern-sm {
+  box-shadow: var(--bs-box-shadow-sm) !important;
+}
+
+.shadow-modern-lg {
+  box-shadow: var(--bs-box-shadow-lg) !important;
+}
+
+.rounded-modern {
+  border-radius: var(--bs-border-radius) !important;
+}
+
+.rounded-modern-lg {
+  border-radius: var(--bs-border-radius-lg) !important;
+}
+
+/* Signal quality indicators using Bootstrap color system */
+.signal-excellent {
+  color: var(--bs-success) !important;
+}
+
+.signal-good {
+  color: var(--bs-info) !important;
+}
+
+.signal-fair {
+  color: var(--bs-warning) !important;
+}
+
+.signal-poor {
+  color: var(--bs-danger) !important;
+}
