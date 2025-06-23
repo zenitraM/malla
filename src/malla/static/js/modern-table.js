@@ -232,12 +232,18 @@ class ModernTable {
                 ...this.state.filters
             });
 
-            // Add grouping parameter if checkbox exists and is checked
-            const groupingCheckbox = document.getElementById('groupPackets') ||
-                                   document.getElementById('groupTraceroutes') ||
-                                   document.getElementById('group_packets');
-            if (groupingCheckbox && groupingCheckbox.checked) {
-                params.set('group_packets', 'true');
+            // Add grouping parameter - prefer filter value over DOM check to avoid race conditions
+            if ('group_packets' in this.state.filters) {
+                // Use the filter value when available (from reactive updates)
+                params.set('group_packets', this.state.filters.group_packets.toString());
+            } else {
+                // Fall back to DOM check for backward compatibility
+                const groupingCheckbox = document.getElementById('groupPackets') ||
+                                       document.getElementById('groupTraceroutes') ||
+                                       document.getElementById('group_packets');
+                if (groupingCheckbox && groupingCheckbox.checked) {
+                    params.set('group_packets', 'true');
+                }
             }
 
             const response = await fetch(`${this.options.endpoint}?${params}`);
