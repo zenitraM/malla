@@ -48,9 +48,61 @@ Malla (_Mesh_, in Spanish) is an ([AI-built](./AI.md)) tool that logs Meshtastic
 
 ## Installation
 
+### Using Docker (Recommended)
+
+The easiest way to run Malla is using Docker. Pre-built images are available from GitHub Container Registry:
+
+1. **Copy the environment configuration:**
+   ```bash
+   cp env.example .env
+   ```
+
+2. **Edit the configuration:**
+   ```bash
+   $EDITOR .env  # Set your MQTT broker address and other settings
+   ```
+
+3. **Start the services:**
+   ```bash
+   docker-compose up -d
+   ```
+
+4. **View logs:**
+   ```bash
+   docker-compose logs -f
+   ```
+
+5. **Access the web UI:**
+   - Open http://localhost:5008 in your browser
+
+**For development with local code changes:**
+```bash
+# Edit docker-compose.yml to uncomment the 'build: .' lines
+# Then build and run:
+docker-compose up --build -d
+```
+
+**Manual Docker run (advanced):**
+```bash
+# Run the capture service
+docker run -d \
+  --name malla-capture \
+  -v malla_data:/app/data \
+  -e MALLA_MQTT_BROKER_ADDRESS=your.mqtt.broker.address \
+  ghcr.io/zenitram/malla:latest \
+  /app/.venv/bin/malla-capture
+
+# Run the web UI
+docker run -d \
+  --name malla-web \
+  -p 5008:5008 \
+  -v malla_data:/app/data \
+  ghcr.io/zenitram/malla:latest
+```
+
 ### Using uv
 
-The recommended way to install this is using [uv](https://docs.astral.sh/uv/):
+You can also install and run Malla directly using [uv](https://docs.astral.sh/uv/):
 1. **Clone or download** the project files to your preferred directory
    ```bash
    git clone https://github.com/zenitraM/malla.git
@@ -134,6 +186,37 @@ export MALLA_MQTT_BROKER_ADDRESS="127.0.0.1"  # Replace with your broker
 
 Both tools use the same SQLite database concurrently using thread-safe connections.
 
+## Docker Configuration
+
+When using Docker, configuration is handled through environment variables defined in your `.env` file:
+
+### Environment File Setup
+1. **Copy the example:**
+   ```bash
+   cp env.example .env
+   ```
+
+2. **Configure your settings:**
+   ```bash
+   # Required: Set your MQTT broker address
+   MALLA_MQTT_BROKER_ADDRESS=your.mqtt.broker.address
+
+   # Optional: Customize other settings
+   MALLA_NAME=My Malla Instance
+   MALLA_WEB_PORT=5008
+   MALLA_SECRET_KEY=your-production-secret-key
+   ```
+
+### Key Configuration Options
+- `MALLA_MQTT_BROKER_ADDRESS`: Your MQTT broker IP/hostname (**required**)
+- `MALLA_MQTT_PORT`: MQTT broker port (default: 1883)
+- `MALLA_MQTT_USERNAME`/`MALLA_MQTT_PASSWORD`: MQTT authentication (optional)
+- `MALLA_WEB_PORT`: Port to expose the web UI (default: 5008)
+- `MALLA_NAME`: Display name in the web interface
+
+### Data Persistence
+Data is automatically stored in a Docker volume (`malla_data`) and persists across container restarts. No manual volume setup is required when using `docker-compose`.
+
 ## Configuration Options
 
 ### YAML configuration file *(recommended)*
@@ -166,6 +249,13 @@ The following keys are recognised:
 | `host`          | str    | `"0.0.0.0"`                              | Interface to bind the web server to.          | `MALLA_HOST` |
 | `port`          | int    | `5008`                                   | TCP port for the web server.                  | `MALLA_PORT` |
 | `debug`         | bool   | `false`                                  | Run Flask in debug mode (unsafe for prod!).   | `MALLA_DEBUG` |
+| `mqtt_broker_address` | str | `"127.0.0.1"`                      | MQTT broker hostname or IP address.           | `MALLA_MQTT_BROKER_ADDRESS` |
+| `mqtt_port`     | int    | `1883`                                   | MQTT broker port.                              | `MALLA_MQTT_PORT` |
+| `mqtt_username` | str    | `""`                                     | MQTT broker username (optional).               | `MALLA_MQTT_USERNAME` |
+| `mqtt_password` | str    | `""`                                     | MQTT broker password (optional).               | `MALLA_MQTT_PASSWORD` |
+| `mqtt_topic_prefix` | str | `"msh"`                                 | MQTT topic prefix for Meshtastic messages.    | `MALLA_MQTT_TOPIC_PREFIX` |
+| `mqtt_topic_suffix` | str | `"/+/+/+/#"`                           | MQTT topic suffix pattern.                     | `MALLA_MQTT_TOPIC_SUFFIX` |
+| `default_channel_key` | str | `"1PG7OiApB1nwvP+rz05pAQ=="`         | Default channel key for decryption (base64).  | `MALLA_DEFAULT_CHANNEL_KEY` |
 
 Environment variables **always override** values coming from the YAML file.
 

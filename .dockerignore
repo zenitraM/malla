@@ -1,0 +1,75 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+build
+develop-eggs
+dist
+downloads
+eggs
+.eggs
+lib
+lib64
+parts
+sdist
+var
+wheels
+*.egg-info
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv
+venv
+.env
+
+# IDEs
+.vscode
+.cursor
+.idea
+
+# Testing
+.pytest_cache
+.coverage
+htmlcov
+.tox
+
+# Development
+.ruff_cache
+.direnv
+.envrc
+
+# Database files (will be mounted as volumes)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+app.log
+
+# Screenshots and documentation
+.screenshots
+AI.md
+
+# Nix
+flake.nix
+flake.lock
+
+# Config files (should be mounted or provided via env vars)
+config.yaml
+
+# CI/CD
+.github
+
+# Other
+Makefile
+run_tests.py
+scripts/benchmark_*.py
+scripts/generate_screenshots.py
