@@ -22,8 +22,8 @@ RUN groupadd --gid 1000 app && \
 # Set working directory
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
+# Copy dependency files and LICENSE (required for package build)
+COPY pyproject.toml uv.lock LICENSE ./
 
 # Install dependencies
 RUN uv sync --frozen --no-dev
