@@ -48,9 +48,56 @@ Malla (_Mesh_, in Spanish) is an ([AI-built](./AI.md)) tool that logs Meshtastic
 
 ## Installation
 
+### Using Docker (Recommended)
+
+The easiest way to run Malla is using Docker. Pre-built images are available from GitHub Container Registry:
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/zenitram/malla:latest
+
+# Run with docker-compose (recommended)
+curl -o docker-compose.yml https://raw.githubusercontent.com/zenitraM/malla/main/docker-compose.example.yml
+
+# Create data directory
+mkdir -p data
+
+# Configure your MQTT broker (edit the docker-compose.yml or use environment variables)
+export MALLA_MQTT_BROKER_ADDRESS=your.mqtt.broker.address
+# export MALLA_MQTT_USERNAME=your_username
+# export MALLA_MQTT_PASSWORD=your_password
+
+# Start both services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+```
+
+**Manual Docker run:**
+```bash
+# Create a data directory for the database
+mkdir -p data
+
+# Run the capture service
+docker run -d \
+  --name malla-capture \
+  -v $(pwd)/data:/app/data \
+  -e MALLA_MQTT_BROKER_ADDRESS=your.mqtt.broker.address \
+  ghcr.io/zenitram/malla:latest \
+  uv run ./malla-capture
+
+# Run the web UI
+docker run -d \
+  --name malla-web \
+  -p 5008:5008 \
+  -v $(pwd)/data:/app/data \
+  ghcr.io/zenitram/malla:latest
+```
+
 ### Using uv
 
-The recommended way to install this is using [uv](https://docs.astral.sh/uv/):
+You can also install and run Malla directly using [uv](https://docs.astral.sh/uv/):
 1. **Clone or download** the project files to your preferred directory
    ```bash
    git clone https://github.com/zenitraM/malla.git
@@ -134,6 +181,36 @@ export MALLA_MQTT_BROKER_ADDRESS="127.0.0.1"  # Replace with your broker
 
 Both tools use the same SQLite database concurrently using thread-safe connections.
 
+## Docker Configuration
+
+When using Docker, you can configure Malla in several ways:
+
+### Environment Variables
+Set configuration via environment variables (recommended for Docker):
+```bash
+# In docker-compose.yml or docker run
+-e MALLA_MQTT_BROKER_ADDRESS=your.mqtt.broker.address
+-e MALLA_MQTT_PORT=1883
+-e MALLA_MQTT_USERNAME=your_username
+-e MALLA_MQTT_PASSWORD=your_password
+-e MALLA_DATABASE_FILE=/app/data/meshtastic_history.db
+-e MALLA_NAME="My Malla Instance"
+```
+
+### Configuration File
+Mount a `config.yaml` file into the container:
+```bash
+# Create your config.yaml based on config.sample.yaml
+docker run -v $(pwd)/config.yaml:/app/config.yaml:ro ...
+```
+
+### Data Persistence
+Always mount a volume for the database to persist data:
+```bash
+# Mount a data directory
+docker run -v $(pwd)/data:/app/data ...
+```
+
 ## Configuration Options
 
 ### YAML configuration file *(recommended)*
@@ -166,6 +243,13 @@ The following keys are recognised:
 | `host`          | str    | `"0.0.0.0"`                              | Interface to bind the web server to.          | `MALLA_HOST` |
 | `port`          | int    | `5008`                                   | TCP port for the web server.                  | `MALLA_PORT` |
 | `debug`         | bool   | `false`                                  | Run Flask in debug mode (unsafe for prod!).   | `MALLA_DEBUG` |
+| `mqtt_broker_address` | str | `"127.0.0.1"`                      | MQTT broker hostname or IP address.           | `MALLA_MQTT_BROKER_ADDRESS` |
+| `mqtt_port`     | int    | `1883`                                   | MQTT broker port.                              | `MALLA_MQTT_PORT` |
+| `mqtt_username` | str    | `""`                                     | MQTT broker username (optional).               | `MALLA_MQTT_USERNAME` |
+| `mqtt_password` | str    | `""`                                     | MQTT broker password (optional).               | `MALLA_MQTT_PASSWORD` |
+| `mqtt_topic_prefix` | str | `"msh"`                                 | MQTT topic prefix for Meshtastic messages.    | `MALLA_MQTT_TOPIC_PREFIX` |
+| `mqtt_topic_suffix` | str | `"/+/+/+/#"`                           | MQTT topic suffix pattern.                     | `MALLA_MQTT_TOPIC_SUFFIX` |
+| `default_channel_key` | str | `"1PG7OiApB1nwvP+rz05pAQ=="`         | Default channel key for decryption (base64).  | `MALLA_DEFAULT_CHANNEL_KEY` |
 
 Environment variables **always override** values coming from the YAML file.
 

@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  malla-web:
+    build: .
+    ports:
+      - "5008:5008"
+    environment:
+      - MALLA_HOST=0.0.0.0
+      - MALLA_PORT=5008
+      - MALLA_DATABASE_FILE=/app/data/meshtastic_history.db
+      - MALLA_NAME=Malla
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+    depends_on:
+      - malla-capture
+
+  malla-capture:
+    build: .
+    command: ["uv", "run", "./malla-capture"]
+    environment:
+      - MALLA_DATABASE_FILE=/app/data/meshtastic_history.db
+      - MALLA_MQTT_BROKER_ADDRESS=${MALLA_MQTT_BROKER_ADDRESS:-127.0.0.1}
+      - MALLA_MQTT_PORT=${MALLA_MQTT_PORT:-1883}
+      - MALLA_MQTT_USERNAME=${MALLA_MQTT_USERNAME:-}
+      - MALLA_MQTT_PASSWORD=${MALLA_MQTT_PASSWORD:-}
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+
+volumes:
+  data:
