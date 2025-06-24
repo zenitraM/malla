@@ -52,46 +52,51 @@ Malla (_Mesh_, in Spanish) is an ([AI-built](./AI.md)) tool that logs Meshtastic
 
 The easiest way to run Malla is using Docker. Pre-built images are available from GitHub Container Registry:
 
+1. **Copy the environment configuration:**
+   ```bash
+   cp env.example .env
+   ```
+
+2. **Edit the configuration:**
+   ```bash
+   $EDITOR .env  # Set your MQTT broker address and other settings
+   ```
+
+3. **Start the services:**
+   ```bash
+   docker-compose up -d
+   ```
+
+4. **View logs:**
+   ```bash
+   docker-compose logs -f
+   ```
+
+5. **Access the web UI:**
+   - Open http://localhost:5008 in your browser
+
+**For development with local code changes:**
 ```bash
-# Pull the latest image
-docker pull ghcr.io/zenitram/malla:latest
-
-# Run with docker-compose (recommended)
-curl -o docker-compose.yml https://raw.githubusercontent.com/zenitraM/malla/main/docker-compose.example.yml
-
-# Create data directory
-mkdir -p data
-
-# Configure your MQTT broker (edit the docker-compose.yml or use environment variables)
-export MALLA_MQTT_BROKER_ADDRESS=your.mqtt.broker.address
-# export MALLA_MQTT_USERNAME=your_username
-# export MALLA_MQTT_PASSWORD=your_password
-
-# Start both services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
+# Edit docker-compose.yml to uncomment the 'build: .' lines
+# Then build and run:
+docker-compose up --build -d
 ```
 
-**Manual Docker run:**
+**Manual Docker run (advanced):**
 ```bash
-# Create a data directory for the database
-mkdir -p data
-
 # Run the capture service
 docker run -d \
   --name malla-capture \
-  -v $(pwd)/data:/app/data \
+  -v malla_data:/app/data \
   -e MALLA_MQTT_BROKER_ADDRESS=your.mqtt.broker.address \
   ghcr.io/zenitram/malla:latest \
-  uv run ./malla-capture
+  /app/.venv/bin/malla-capture
 
 # Run the web UI
 docker run -d \
   --name malla-web \
   -p 5008:5008 \
-  -v $(pwd)/data:/app/data \
+  -v malla_data:/app/data \
   ghcr.io/zenitram/malla:latest
 ```
 
@@ -183,33 +188,34 @@ Both tools use the same SQLite database concurrently using thread-safe connectio
 
 ## Docker Configuration
 
-When using Docker, you can configure Malla in several ways:
+When using Docker, configuration is handled through environment variables defined in your `.env` file:
 
-### Environment Variables
-Set configuration via environment variables (recommended for Docker):
-```bash
-# In docker-compose.yml or docker run
--e MALLA_MQTT_BROKER_ADDRESS=your.mqtt.broker.address
--e MALLA_MQTT_PORT=1883
--e MALLA_MQTT_USERNAME=your_username
--e MALLA_MQTT_PASSWORD=your_password
--e MALLA_DATABASE_FILE=/app/data/meshtastic_history.db
--e MALLA_NAME="My Malla Instance"
-```
+### Environment File Setup
+1. **Copy the example:**
+   ```bash
+   cp env.example .env
+   ```
 
-### Configuration File
-Mount a `config.yaml` file into the container:
-```bash
-# Create your config.yaml based on config.sample.yaml
-docker run -v $(pwd)/config.yaml:/app/config.yaml:ro ...
-```
+2. **Configure your settings:**
+   ```bash
+   # Required: Set your MQTT broker address
+   MALLA_MQTT_BROKER_ADDRESS=your.mqtt.broker.address
+
+   # Optional: Customize other settings
+   MALLA_NAME=My Malla Instance
+   MALLA_WEB_PORT=5008
+   MALLA_SECRET_KEY=your-production-secret-key
+   ```
+
+### Key Configuration Options
+- `MALLA_MQTT_BROKER_ADDRESS`: Your MQTT broker IP/hostname (**required**)
+- `MALLA_MQTT_PORT`: MQTT broker port (default: 1883)
+- `MALLA_MQTT_USERNAME`/`MALLA_MQTT_PASSWORD`: MQTT authentication (optional)
+- `MALLA_WEB_PORT`: Port to expose the web UI (default: 5008)
+- `MALLA_NAME`: Display name in the web interface
 
 ### Data Persistence
-Always mount a volume for the database to persist data:
-```bash
-# Mount a data directory
-docker run -v $(pwd)/data:/app/data ...
-```
+Data is automatically stored in a Docker volume (`malla_data`) and persists across container restarts. No manual volume setup is required when using `docker-compose`.
 
 ## Configuration Options
 

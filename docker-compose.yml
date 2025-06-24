@@ -2,34 +2,48 @@ version: '3.8'
 
 services:
   malla-web:
-    build: .
+    # Use pre-built image by default, override with 'build: .' for development
+    image: ${MALLA_IMAGE:-ghcr.io/zenitram/malla:latest}
+    # Uncomment the following line for local development:
+    # build: .
     ports:
-      - "5008:5008"
+      - "${MALLA_WEB_PORT:-5008}:5008"
     environment:
       - MALLA_HOST=0.0.0.0
       - MALLA_PORT=5008
       - MALLA_DATABASE_FILE=/app/data/meshtastic_history.db
-      - MALLA_NAME=Malla
+      - MALLA_NAME=${MALLA_NAME:-Malla}
+      - MALLA_SECRET_KEY=${MALLA_SECRET_KEY:-dev-secret-key-change-in-production}
+      - MALLA_DEBUG=${MALLA_DEBUG:-false}
     volumes:
-      - ./data:/app/data
-      - ./config.yaml:/app/config.yaml:ro
+      - malla_data:/app/data
+      # Optional: mount your own config file (uncomment if you have one)
+      # - ./config.yaml:/app/config.yaml:ro
     restart: unless-stopped
     depends_on:
       - malla-capture
 
   malla-capture:
-    build: .
-    command: ["uv", "run", "./malla-capture"]
+    # Use pre-built image by default, override with 'build: .' for development
+    image: ${MALLA_IMAGE:-ghcr.io/zenitram/malla:latest}
+    # Uncomment the following line for local development:
+    # build: .
+    command: ["/app/.venv/bin/malla-capture"]
     environment:
       - MALLA_DATABASE_FILE=/app/data/meshtastic_history.db
-      - MALLA_MQTT_BROKER_ADDRESS=${MALLA_MQTT_BROKER_ADDRESS:-127.0.0.1}
+      # MQTT Configuration - set these in your .env file
+      - MALLA_MQTT_BROKER_ADDRESS=${MALLA_MQTT_BROKER_ADDRESS}
       - MALLA_MQTT_PORT=${MALLA_MQTT_PORT:-1883}
       - MALLA_MQTT_USERNAME=${MALLA_MQTT_USERNAME:-}
       - MALLA_MQTT_PASSWORD=${MALLA_MQTT_PASSWORD:-}
+      - MALLA_MQTT_TOPIC_PREFIX=${MALLA_MQTT_TOPIC_PREFIX:-msh}
+      - MALLA_MQTT_TOPIC_SUFFIX=${MALLA_MQTT_TOPIC_SUFFIX:-/+/+/+/#}
+      - MALLA_DEFAULT_CHANNEL_KEY=${MALLA_DEFAULT_CHANNEL_KEY:-}
     volumes:
-      - ./data:/app/data
-      - ./config.yaml:/app/config.yaml:ro
+      - malla_data:/app/data
+      # Optional: mount your own config file (uncomment if you have one)
+      # - ./config.yaml:/app/config.yaml:ro
     restart: unless-stopped
 
 volumes:
-  data:
+  malla_data:
