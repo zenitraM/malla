@@ -6,6 +6,12 @@ services:
     image: ${MALLA_IMAGE:-ghcr.io/zenitram/malla:latest}
     # Uncomment the following line for local development:
     # build: .
+
+    # Choose between Flask dev server and Gunicorn
+    # Default: Flask development server (malla-web)
+    # Production: Gunicorn WSGI server (malla-web-gunicorn)
+    command: ${MALLA_WEB_COMMAND:-/app/.venv/bin/malla-web}
+
     ports:
       - "${MALLA_WEB_PORT:-5008}:5008"
     environment:

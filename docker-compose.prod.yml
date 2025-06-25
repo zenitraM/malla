@@ -1,0 +1,11 @@
+# Production override for docker-compose.yml
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+version: '3.8'
+
+services:
+  malla-web:
+    # Override the command to use Gunicorn for production
+    command: ["/app/.venv/bin/malla-web-gunicorn"]
+    environment:
+      # Ensure debug is disabled in production
+      - MALLA_DEBUG=false

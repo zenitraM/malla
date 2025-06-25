@@ -162,3 +162,10 @@ def _override_config(new_cfg: AppConfig) -> None:  # noqa: D401, ANN001
 
     global _config_singleton  # noqa: PLW0603
     _config_singleton = new_cfg
+
+
+def _clear_config_cache() -> None:
+    """Clear the global config singleton cache (used internally by tests)."""
+
+    global _config_singleton  # noqa: PLW0603
+    _config_singleton = None

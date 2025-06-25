@@ -32,6 +32,7 @@ classifiers = [
 requires-python = ">=3.13"
 dependencies = [
     "flask>=3.0.0",
+    "gunicorn>=22.0.0",
     "paho-mqtt>=2.1.0",
     "meshtastic>=2.6.0",
     "plotly>=5.17.0",
@@ -52,6 +53,7 @@ Issues = "https://github.com/zenitraM/malla/issues"
 
 [project.scripts]
 malla-web = "malla.web_ui:main"
+malla-web-gunicorn = "malla.wsgi:main"
 malla-capture = "malla.mqtt_capture:main"
 
 [project.optional-dependencies]
@@ -86,6 +88,7 @@ include = [
     "LICENSE",
     "pyproject.toml",
     "malla-web",
+    "malla-web-gunicorn",
     "malla-capture",
 ]
 

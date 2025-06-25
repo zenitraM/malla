@@ -190,6 +190,43 @@ Both tools use the same SQLite database concurrently using thread-safe connectio
 
 When using Docker, configuration is handled through environment variables defined in your `.env` file:
 
+### Production Deployment with Gunicorn
+
+For production deployments, Malla supports running with Gunicorn, a production-ready WSGI server that provides better performance and stability than Flask's development server.
+
+**Option 1: Using environment variable (recommended)**
+```bash
+# In your .env file:
+MALLA_WEB_COMMAND=/app/.venv/bin/malla-web-gunicorn
+```
+
+**Option 2: Using the production override file**
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+**Option 3: Direct script execution**
+```bash
+# For local development with uv:
+uv run malla-web-gunicorn
+
+# Or using the executable script:
+./malla-web-gunicorn
+```
+
+The Gunicorn configuration automatically:
+- Uses multiple worker processes based on CPU cores
+- Enables proper logging and monitoring
+- Configures appropriate timeouts and connection limits
+- Provides better concurrent request handling
+
+**Benefits of Gunicorn over Flask dev server:**
+- Production-ready with proper process management
+- Better performance under load
+- Automatic worker process recycling
+- Proper signal handling for graceful shutdowns
+- Enhanced logging and monitoring capabilities
+
 ### Environment File Setup
 1. **Copy the example:**
    ```bash
