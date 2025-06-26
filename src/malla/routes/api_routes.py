@@ -1084,6 +1084,9 @@ def api_packets_data():
             "size": "payload_length",
             "gateway": "gateway_id",  # Will be handled specially for grouped data
             "gateway_count": "gateway_id",  # Will be handled specially for grouped data
+            "from_node": "from_node_id",  # Map UI field to DB column
+            "to_node": "to_node_id",  # Map UI field to DB column
+            "hops": "hop_count",  # Map UI field to computed alias
         }
         actual_sort_by = sort_field_mapping.get(sort_by, sort_by)
 
@@ -1410,6 +1413,9 @@ def api_traceroute_data():
         sort_field_mapping = {
             "size": "payload_length",
             "gateway_count": "gateway_id",
+            "from_node": "from_node_id",  # UI -> DB
+            "to_node": "to_node_id",  # UI -> DB
+            "hops": "hop_count",  # UI -> computed alias
         }
         actual_sort_by = sort_field_mapping.get(sort_by, sort_by)
 

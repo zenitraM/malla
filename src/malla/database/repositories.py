@@ -955,13 +955,13 @@ class NodeRepository:
                     FROM node_info ni
                     LEFT JOIN (
                         SELECT
-                            from_node_id,
+                            from_node_id as node_id,
                             COUNT(*) as packet_count_24h,
                             MAX(timestamp) as last_packet_time
                         FROM packet_history
                         WHERE timestamp > (strftime('%s', 'now') - 86400)
                         GROUP BY from_node_id
-                    ) stats ON ni.node_id = stats.from_node_id
+                    ) stats ON ni.node_id = stats.node_id
                     {where_clause}
                     ORDER BY {order_column} {order_dir}
                     LIMIT ? OFFSET ?
@@ -2485,6 +2485,7 @@ class TracerouteRepository:
                     "rssi",
                     "snr",
                     "payload_length",
+                    "hop_count",  # Allow ordering by computed hops
                 ]
                 if order_by not in valid_order_columns:
                     order_by = "timestamp"
@@ -2496,7 +2497,8 @@ class TracerouteRepository:
                         id, timestamp, from_node_id, to_node_id, gateway_id,
                         hop_start, hop_limit, rssi, snr, payload_length, raw_payload,
                         processed_successfully, mesh_packet_id,
-                        datetime(timestamp, 'unixepoch') as timestamp_str
+                        datetime(timestamp, 'unixepoch') as timestamp_str,
+                        (hop_start - hop_limit) AS hop_count
                     FROM packet_history
                     {where_clause}
                     ORDER BY {order_by} {order_dir_sql}
