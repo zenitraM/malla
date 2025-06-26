@@ -176,17 +176,35 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Fetch ALL node data once and keep it client-side for filtering
+    // ------------------------------------------------------------------
+    let allNodeData = [];
+
+    async function fetchAllNodes() {
+        try {
+            // Fetch up to 10k nodes in a single request – more than enough for typical deployments
+            const response = await fetch('/api/nodes/data?limit=10000&page=1');
+            const json = await response.json();
+            // The endpoint returns an object with a "data" property
+            allNodeData = json.data || [];
+        } catch (err) {
+            console.error('Error fetching all node data:', err);
+            allNodeData = [];
+        }
+    }
+
     // Initialize page with filters and load data
     async function initializePageWithFilters() {
         // Apply URL parameters
         const hasParams = await urlManager.applyURLParameters();
 
-        // Initialize the filter controller
+        // Initialize the filter controller (after data + UI ready)
         controller.initialLoad(hasParams);
     }
 
-    // Load data after options are loaded
-    Promise.all([loadHardwareModels(), loadNodeRoles()]).then(async () => {
+    // Load supporting data (hardware models, roles) AND all nodes, then start
+    Promise.all([loadHardwareModels(), loadNodeRoles(), fetchAllNodes()]).then(async () => {
         initializePageWithFilters();
     });
 
@@ -194,7 +212,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const table = new ModernTable('nodesTable', {
         endpoint: '/api/nodes/data',
         enableSearch: false,
-        enablePagination: true,
+        enablePagination: false,
         pageSize: 25,
         deferInitialLoad: true,
         defaultSort: { column: 'last_packet_str', direction: 'desc' },
@@ -312,6 +330,82 @@ document.addEventListener('DOMContentLoaded', function() {
         ]
     });
 
+    // We no longer paginate or infinite-scroll; the whole dataset will be rendered at once.
+
+    // ------------------------------------------------------------------
+    // Override ModernTable logic – perform all processing client-side
+    // ------------------------------------------------------------------
+    table.loadData = async function() {
+        // If dataset not yet available (should not happen after initial Promise), fetch it now
+        if (allNodeData.length === 0) {
+            await fetchAllNodes();
+        }
+
+        this.state.loading = true;
+        // Only show loading spinner when first page loads
+        if (this.state.page === 1) this.showLoading();
+
+        try {
+            // Start with full dataset
+            let filtered = [...allNodeData];
+            const filters = this.state.filters || {};
+
+            // --- Search filter -------------------------------------------------
+            const searchQuery = (filters.search || '').toString().trim().toLowerCase();
+            if (searchQuery) {
+                filtered = filtered.filter((n) => {
+                    const haystack = [
+                        n.node_name,
+                        n.long_name,
+                        n.short_name,
+                        n.hex_id,
+                        n.hw_model,
+                        n.role
+                    ].map(v => (v || '').toString().toLowerCase()).join(' ');
+                    return haystack.includes(searchQuery);
+                });
+            }
+
+            // --- Role filter ---------------------------------------------------
+            if (filters.role) filtered = filtered.filter((n) => n.role === filters.role);
+            // --- Hardware model filter ----------------------------------------
+            if (filters.hw_model) filtered = filtered.filter((n) => n.hw_model === filters.hw_model);
+            // --- Active only ---------------------------------------------------
+            if (filters.active_only === true || filters.active_only === '1') {
+                filtered = filtered.filter((n) => (n.packet_count_24h || 0) > 0);
+            }
+            // --- Named only ----------------------------------------------------
+            if (filters.named_only === true || filters.named_only === '1') {
+                filtered = filtered.filter((n) => (n.long_name || n.short_name));
+            }
+
+            // --- Sorting -------------------------------------------------------
+            if (!this.state.sortBy) {
+                this.state.sortBy = 'last_packet_time';
+                this.state.sortOrder = 'desc';
+            }
+            const dir = this.state.sortOrder === 'asc' ? 1 : -1;
+            const key = this.state.sortBy;
+            filtered.sort((a, b) => {
+                const av = a[key] ?? '';
+                const bv = b[key] ?? '';
+                return av < bv ? -1 * dir : (av > bv ? 1 * dir : 0);
+            });
+
+            // --- Render entire dataset (no pagination) -------------------------
+            this.state.totalCount = filtered.length;
+            this.state.data = filtered;
+            this.renderTableBody();
+
+            this.emit('dataLoaded', { data: this.state.data, totalCount: this.state.totalCount });
+        } catch (error) {
+            console.error('Error processing node data locally:', error);
+            this.showError(error.message || 'Failed to process data');
+        } finally {
+            this.state.loading = false;
+        }
+    };
+
     // Update stats function (removed - stats section was removed from UI)
     function updateStats() {
         // No-op - stats section removed
@@ -339,8 +433,6 @@ document.addEventListener('DOMContentLoaded', function() {
     refreshBtn.addEventListener('click', () => {
         table.refresh();
     });
-
-
 
     // Initialize tooltips after table loads
     table.on('dataLoaded', function() {
