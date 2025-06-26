@@ -113,8 +113,9 @@ def api_packets():
 
         # Build filters
         filters: dict[str, Any] = {}
-        if request.args.get("gateway_id"):
-            filters["gateway_id"] = request.args.get("gateway_id")
+        gateway_id_arg = request.args.get("gateway_id")
+        if gateway_id_arg:
+            filters["gateway_id"] = gateway_id_arg
         from_node_str = request.args.get("from_node")
         if from_node_str:
             try:
@@ -389,8 +390,9 @@ def api_packets_signal():
     try:
         # Build filters
         filters: dict[str, Any] = {}
-        if request.args.get("gateway_id"):
-            filters["gateway_id"] = request.args.get("gateway_id")
+        gateway_id_arg = request.args.get("gateway_id")
+        if gateway_id_arg:
+            filters["gateway_id"] = gateway_id_arg
         from_node_str = request.args.get("from_node")
         if from_node_str:
             try:
@@ -495,71 +497,39 @@ def api_traceroute_details(packet_id):
 
 @api_bp.route("/locations")
 def api_locations():
-    """API endpoint for node locations with optional filtering."""
+    """
+    API endpoint for node location data with network topology.
+    Returns up to 14 days of data for client-side filtering.
+    """
     logger.info("API locations endpoint accessed")
     try:
-        # Build filters from query parameters
-        filters: dict[str, Any] = {}
+        # Build filters from request parameters
+        filters = {}
 
-        # Time range filters
-        start_time_str = request.args.get("start_time")
-        if start_time_str:
+        # Always limit to last 14 days for performance
+        from datetime import datetime, timedelta
+
+        end_time = datetime.now()
+        start_time = end_time - timedelta(days=14)
+        filters["start_time"] = start_time.timestamp()
+        filters["end_time"] = end_time.timestamp()
+
+        # Gateway filter (keep this server-side for performance)
+        gateway_id_arg = request.args.get("gateway_id")
+        if gateway_id_arg is not None:
             try:
-                filters["start_time"] = float(start_time_str)
+                filters["gateway_id"] = int(gateway_id_arg)
             except ValueError:
-                return jsonify({"error": "Invalid start_time format"}), 400
+                return jsonify({"error": "Invalid gateway_id format"}), 400
 
-        end_time_str = request.args.get("end_time")
-        if end_time_str:
-            try:
-                filters["end_time"] = float(end_time_str)
-            except ValueError:
-                return jsonify({"error": "Invalid end_time format"}), 400
-
-        # Node filters
-        from_node_str = request.args.get("from_node")
-        if from_node_str:
-            try:
-                filters["from_node"] = int(from_node_str)
-            except ValueError:
-                return jsonify({"error": "Invalid from_node format"}), 400
-
-        node_ids_str = request.args.get("node_ids")
-        if node_ids_str:
-            try:
-                filters["node_ids"] = [
-                    int(x.strip()) for x in node_ids_str.split(",") if x.strip()
-                ]
-            except ValueError:
-                return jsonify({"error": "Invalid node_ids format"}), 400
-
-        # Gateway filter
-        if request.args.get("gateway_id"):
-            filters["gateway_id"] = request.args.get("gateway_id")
-
-        # Age filters
-        min_age_hours_str = request.args.get("min_age_hours")
-        if min_age_hours_str:
-            try:
-                filters["min_age_hours"] = float(min_age_hours_str)
-            except ValueError:
-                return jsonify({"error": "Invalid min_age_hours format"}), 400
-
-        max_age_hours_str = request.args.get("max_age_hours")
-        if max_age_hours_str:
-            try:
-                filters["max_age_hours"] = float(max_age_hours_str)
-            except ValueError:
-                return jsonify({"error": "Invalid max_age_hours format"}), 400
-
-        # Search filter
+        # Search filter (keep this server-side for performance)
         if request.args.get("search"):
             filters["search"] = request.args.get("search")
 
         # Get enhanced location data with network topology
         locations = LocationService.get_node_locations(filters)
 
-        # Get traceroute links for map visualization
+        # Get traceroute links for map visualization (also 14 days)
         traceroute_links = LocationService.get_traceroute_links(filters)
 
         return jsonify(
@@ -568,6 +538,7 @@ def api_locations():
                 "traceroute_links": traceroute_links,
                 "total_count": len(locations) if isinstance(locations, list) else 0,
                 "filters_applied": filters,
+                "data_period_days": 14,
             }
         )
     except Exception as e:
@@ -1051,9 +1022,9 @@ def api_packets_data():
 
         # Build filters from query parameters
         filters: dict[str, Any] = {}
-        gateway_id = request.args.get("gateway_id", "").strip()
-        if gateway_id:
-            filters["gateway_id"] = gateway_id
+        gateway_id_arg = request.args.get("gateway_id")
+        if gateway_id_arg:
+            filters["gateway_id"] = gateway_id_arg
         from_node_str = request.args.get("from_node", "").strip()
         if from_node_str:
             try:
@@ -1383,9 +1354,9 @@ def api_traceroute_data():
 
         # Build filters from query parameters
         filters: dict[str, Any] = {}
-        gateway_id = request.args.get("gateway_id", "").strip()
-        if gateway_id:
-            filters["gateway_id"] = gateway_id
+        gateway_id_arg = request.args.get("gateway_id")
+        if gateway_id_arg:
+            filters["gateway_id"] = gateway_id_arg
         from_node_str = request.args.get("from_node", "").strip()
         if from_node_str:
             try:

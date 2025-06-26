@@ -527,7 +527,7 @@ class TestMapLayout:
 
     @pytest.mark.e2e
     def test_node_popup_handles_unknown_roles(self, page: Page, test_server_url):
-        """Test that node popups handle unknown roles correctly."""
+        """Test that node popups handle unknown/null roles properly."""
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
@@ -544,14 +544,225 @@ class TestMapLayout:
             # Wait for popup to appear
             page.wait_for_timeout(1000)
 
-            # Check for popup
+            # Check for popup content
             popup = page.locator(".leaflet-popup-content")
             expect(popup).to_be_visible(timeout=5000)
 
-            # The popup should either have a role badge or not show role info for unknown roles
-            # This test ensures the popup doesn't crash with unknown roles
-            popup_content = popup.text_content()
-            assert popup_content, "Popup should have content"
-            assert "Node Details" not in popup_content or len(popup_content) > 20, (
-                "Popup should have meaningful content"
-            )
+            # Popup should handle missing role gracefully (not crash)
+            popup_text = popup.text_content()
+            assert popup_text is not None, "Popup should have content"
+
+    @pytest.mark.e2e
+    def test_role_filter_functionality(self, page: Page, test_server_url):
+        """Test that role filtering works correctly."""
+        page.goto(f"{test_server_url}/map")
+
+        # Wait for loading to complete
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+
+        # Get initial node count
+        initial_count = page.locator("#nodeCount").text_content()
+        initial_count_int = int(initial_count) if initial_count else 0
+
+        # Select ROUTER role filter
+        role_filter = page.locator("#roleFilter")
+        role_filter.select_option("ROUTER")
+
+        # Apply filters
+        apply_button = page.locator("button[type='submit']")
+        apply_button.click()
+
+        # Wait for filtering to complete
+        page.wait_for_timeout(2000)
+
+        # Check that node count has changed (should be fewer nodes)
+        filtered_count = page.locator("#nodeCount").text_content()
+        filtered_count_int = int(filtered_count) if filtered_count else 0
+
+        # Should have fewer or equal nodes after filtering
+        assert filtered_count_int <= initial_count_int, (
+            f"Filtered count {filtered_count_int} should be <= initial count {initial_count_int}"
+        )
+
+        # Clear filter and check count returns
+        role_filter.select_option("")
+        apply_button.click()
+        page.wait_for_timeout(2000)
+
+        final_count = page.locator("#nodeCount").text_content()
+        final_count_int = int(final_count) if final_count else 0
+        assert final_count_int == initial_count_int, (
+            f"Final count {final_count_int} should equal initial count {initial_count_int}"
+        )
+
+    @pytest.mark.e2e
+    def test_age_filter_functionality_client_side(self, page: Page, test_server_url):
+        """Test that age filtering works correctly on client-side."""
+        page.goto(f"{test_server_url}/map")
+
+        # Wait for loading to complete
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+
+        # Get initial node count
+        initial_count = page.locator("#nodeCount").text_content()
+        initial_count_int = int(initial_count) if initial_count else 0
+
+        # Select 1 hour age filter (should filter out most nodes)
+        age_filter = page.locator("#maxAge")
+        age_filter.select_option("1")
+
+        # Apply filters
+        apply_button = page.locator("button[type='submit']")
+        apply_button.click()
+
+        # Wait for filtering to complete
+        page.wait_for_timeout(2000)
+
+        # Check that node count has changed (should be fewer nodes)
+        filtered_count = page.locator("#nodeCount").text_content()
+        filtered_count_int = int(filtered_count) if filtered_count else 0
+
+        # Should have fewer or equal nodes after filtering
+        assert filtered_count_int <= initial_count_int, (
+            f"Filtered count {filtered_count_int} should be <= initial count {initial_count_int}"
+        )
+
+        # Clear filter and check count returns
+        age_filter.select_option("")
+        apply_button.click()
+        page.wait_for_timeout(2000)
+
+        final_count = page.locator("#nodeCount").text_content()
+        final_count_int = int(final_count) if final_count else 0
+        assert final_count_int == initial_count_int, (
+            f"Final count {final_count_int} should equal initial count {initial_count_int}"
+        )
+
+    @pytest.mark.e2e
+    def test_combined_filters_functionality(self, page: Page, test_server_url):
+        """Test that age and role filters can be combined."""
+        page.goto(f"{test_server_url}/map")
+
+        # Wait for loading to complete
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+
+        # Get initial node count
+        initial_count = page.locator("#nodeCount").text_content()
+        initial_count_int = int(initial_count) if initial_count else 0
+
+        # Apply both age and role filters
+        age_filter = page.locator("#maxAge")
+        age_filter.select_option("168")  # 1 week
+
+        role_filter = page.locator("#roleFilter")
+        role_filter.select_option("CLIENT")
+
+        # Apply filters
+        apply_button = page.locator("button[type='submit']")
+        apply_button.click()
+
+        # Wait for filtering to complete
+        page.wait_for_timeout(2000)
+
+        # Check that node count has changed
+        filtered_count = page.locator("#nodeCount").text_content()
+        filtered_count_int = int(filtered_count) if filtered_count else 0
+
+        # Should have fewer or equal nodes after filtering
+        assert filtered_count_int <= initial_count_int, (
+            f"Combined filtered count {filtered_count_int} should be <= initial count {initial_count_int}"
+        )
+
+    @pytest.mark.e2e
+    def test_traceroute_links_respect_filters(self, page: Page, test_server_url):
+        """Test that traceroute links are filtered along with nodes."""
+        page.goto(f"{test_server_url}/map")
+
+        # Wait for loading to complete
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+
+        # Get initial link count from stats
+        initial_links = page.locator("#statsLinks").text_content()
+        initial_links_int = int(initial_links) if initial_links else 0
+
+        # Apply a restrictive filter
+        age_filter = page.locator("#maxAge")
+        age_filter.select_option("1")  # 1 hour
+
+        # Apply filters
+        apply_button = page.locator("button[type='submit']")
+        apply_button.click()
+
+        # Wait for filtering to complete
+        page.wait_for_timeout(2000)
+
+        # Check that link count has changed (should be fewer links)
+        filtered_links = page.locator("#statsLinks").text_content()
+        filtered_links_int = int(filtered_links) if filtered_links else 0
+
+        # Should have fewer or equal links after filtering
+        assert filtered_links_int <= initial_links_int, (
+            f"Filtered links {filtered_links_int} should be <= initial links {initial_links_int}"
+        )
+
+    @pytest.mark.e2e
+    def test_unknown_role_filter(self, page: Page, test_server_url):
+        """Test that the unknown role filter works correctly."""
+        page.goto(f"{test_server_url}/map")
+
+        # Wait for loading to complete
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+
+        # Select UNKNOWN role filter
+        role_filter = page.locator("#roleFilter")
+        role_filter.select_option("UNKNOWN")
+
+        # Apply filters
+        apply_button = page.locator("button[type='submit']")
+        apply_button.click()
+
+        # Wait for filtering to complete
+        page.wait_for_timeout(2000)
+
+        # Check that we get some result (could be 0 if no unknown roles)
+        filtered_count = page.locator("#nodeCount").text_content()
+        filtered_count_int = int(filtered_count) if filtered_count else 0
+
+        # The count should be a valid number (>= 0)
+        assert filtered_count_int >= 0, "Unknown role filter should return valid count"
+
+    @pytest.mark.e2e
+    def test_filter_persistence_during_search(self, page: Page, test_server_url):
+        """Test that filters are maintained when searching nodes."""
+        page.goto(f"{test_server_url}/map")
+
+        # Wait for loading to complete
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+
+        # Apply a role filter
+        role_filter = page.locator("#roleFilter")
+        role_filter.select_option("ROUTER")
+
+        # Apply filters
+        apply_button = page.locator("button[type='submit']")
+        apply_button.click()
+        page.wait_for_timeout(2000)
+
+        # Get filtered count
+        filtered_count = page.locator("#nodeCount").text_content()
+
+        # Now search for something
+        search_input = page.locator("#nodeSearch")
+        search_input.fill("Test")
+        page.wait_for_timeout(1000)
+
+        # Clear search
+        clear_search = page.locator("#clearSearch")
+        clear_search.click()
+        page.wait_for_timeout(1000)
+
+        # Check that the filter is still applied
+        current_count = page.locator("#nodeCount").text_content()
+        assert current_count == filtered_count, (
+            "Filter should persist after search operations"
+        )

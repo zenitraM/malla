@@ -356,9 +356,7 @@ class TestLocationEndpoints:
             enhanced_fields = [
                 "age_hours",
                 "timestamp_str",
-                "min_hops_to_gateway",
                 "direct_neighbors",
-                "gateway_count",
                 "neighbors",
                 "sats_in_view",
             ]
@@ -369,7 +367,6 @@ class TestLocationEndpoints:
             assert isinstance(location["age_hours"], int | float)
             assert isinstance(location["timestamp_str"], str)
             assert isinstance(location["direct_neighbors"], int)
-            assert isinstance(location["gateway_count"], int)
             assert isinstance(location["neighbors"], list)
 
             # Test neighbor structure if neighbors exist
@@ -426,6 +423,36 @@ class TestLocationEndpoints:
         assert "hop_distances" in data
         assert "total_pairs" in data
         assert isinstance(data["hop_distances"], list)
+
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_locations_endpoint_returns_14_day_data(self, client):
+        """Test that locations endpoint returns 14 days of data for client-side filtering."""
+        response = client.get("/api/locations")
+        assert response.status_code == 200
+
+        data = response.get_json()
+        assert "data_period_days" in data
+        assert data["data_period_days"] == 14
+
+        # Verify the response structure includes all expected fields
+        assert "locations" in data
+        assert "traceroute_links" in data
+        assert "total_count" in data
+        assert "filters_applied" in data
+
+        # Verify that filters_applied includes time range
+        filters = data["filters_applied"]
+        assert "start_time" in filters
+        assert "end_time" in filters
+
+        # Verify the time range is approximately 14 days
+        time_diff = filters["end_time"] - filters["start_time"]
+        expected_seconds = 14 * 24 * 3600  # 14 days in seconds
+        # Allow some tolerance for execution time
+        assert abs(time_diff - expected_seconds) < 300, (
+            f"Time range should be ~14 days, got {time_diff / 3600 / 24:.2f} days"
+        )
 
 
 class TestNodeSpecificEndpoints:

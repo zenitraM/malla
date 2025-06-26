@@ -86,13 +86,24 @@
                         <option value="168">1 Week</option>
                     </select>
                 </div>
+                <div class="mb-3">
+                    <label for="roleFilter" class="form-label">Node Role</label>
+                    <select class="form-select form-select-sm" id="roleFilter" name="roleFilter">
+                        <option value="">All Roles</option>
+                        <option value="CLIENT">Client</option>
+                        <option value="ROUTER">Router</option>
+                        <option value="REPEATER">Repeater</option>
+                        <option value="CLIENT_MUTE">Client Mute</option>
+                        <option value="ROUTER_CLIENT">Router Client</option>
+                        <option value="SENSOR">Sensor</option>
+                        <option value="UNKNOWN">Unknown/Other</option>
+                    </select>
+                </div>
                 <button type="submit" class="btn btn-primary btn-sm w-100">
                     <i class="bi bi-funnel"></i> Apply Filters
                 </button>
             </form>
         </div>
-
-
 
         <!-- Map Stats -->
         <div class="sidebar-section">
@@ -334,6 +345,8 @@ let markerClusterGroup;
 let tracerouteLinks = [];
 let nodeData = [];
 let linkData = [];
+let allNodeData = []; // Store all fetched node data for client-side filtering
+let allLinkData = []; // Store all fetched link data for client-side filtering
 let selectedNodeId = null;
 let showLinks = true;
 let precisionCircle = null;
@@ -425,7 +438,7 @@ function initializeInterface() {
     // Handle filter form submission
     $('#locationFilterForm').on('submit', function(e) {
         e.preventDefault();
-        loadNodeLocations();
+        applyClientSideFilters();
     });
 }
 
@@ -475,12 +488,8 @@ function buildFilterParams() {
     const formData = new FormData(form);
     const params = new URLSearchParams();
 
-    // Handle max age filter
-    const maxAge = formData.get('maxAge');
-    if (maxAge) {
-        const hours = parseInt(maxAge);
-        params.append('max_age_hours', hours.toString());
-    }
+    // Only send server-side filters (gateway, search, etc.)
+    // Age and role filtering is now done client-side
 
     return params;
 }
@@ -499,42 +508,97 @@ async function loadNodeLocations() {
             return;
         }
 
-        nodeData = data.locations || [];
-        linkData = data.traceroute_links || [];
-        allNodes = nodeData; // Set the unified node list
+        // Store all data for client-side filtering
+        allNodeData = data.locations || [];
+        allLinkData = data.traceroute_links || [];
 
-        // Update statistics
-        updateStats();
-
-        // Clear existing markers
-        markerClusterGroup.clearLayers();
-        nodeMarkers = [];
-
-        // Add markers for each node
-        nodeData.forEach(node => {
-            addNodeMarker(node);
-        });
-
-        // Update unified node list
-        showAllNodes();
-
-        // Load traceroute links if enabled
-        if (showLinks && linkData.length > 0) {
-            drawTracerouteLinks();
-        }
-
-        // Fit map to show all nodes
-        if (nodeMarkers.length > 0) {
-            setTimeout(() => {
-                fitMapToNodes();
-            }, 500);
-        }
+        // Apply client-side filters
+        applyClientSideFilters();
 
         hideLoading();
 
     } catch (error) {
         console.error('Error loading node locations:', error);
         showError('Failed to load node locations');
+    }
+}
+
+// Apply client-side filters to the data
+function applyClientSideFilters() {
+    const form = document.getElementById('locationFilterForm');
+    const formData = new FormData(form);
+
+    // Get filter values
+    const maxAge = formData.get('maxAge');
+    const roleFilter = formData.get('roleFilter');
+
+    // Start with all data
+    let filteredNodes = [...allNodeData];
+    let filteredLinks = [...allLinkData];
+
+    const currentTime = Date.now() / 1000;
+
+    // Apply age filter
+    if (maxAge) {
+        const maxAgeSeconds = parseInt(maxAge) * 3600;
+        const cutoffTime = currentTime - maxAgeSeconds;
+        filteredNodes = filteredNodes.filter(node => node.timestamp >= cutoffTime);
+    }
+
+    // Apply role filter
+    if (roleFilter) {
+        if (roleFilter === 'UNKNOWN') {
+            // Filter for nodes with null, undefined, or unknown roles
+            filteredNodes = filteredNodes.filter(node =>
+                !node.role || node.role === 'UNKNOWN' || node.role === 'Unknown'
+            );
+        } else {
+            filteredNodes = filteredNodes.filter(node => node.role === roleFilter);
+        }
+    }
+
+    // Filter links to only include those between visible nodes
+    const visibleNodeIds = new Set(filteredNodes.map(node => node.node_id));
+    filteredLinks = filteredLinks.filter(link =>
+        visibleNodeIds.has(link.from_node_id) && visibleNodeIds.has(link.to_node_id)
+    );
+
+    // Update global variables
+    nodeData = filteredNodes;
+    linkData = filteredLinks;
+    allNodes = nodeData; // Set the unified node list
+
+    // Update the map display
+    updateMapDisplay();
+}
+
+// Update map display with filtered data
+function updateMapDisplay() {
+    // Update statistics
+    updateStats();
+
+    // Clear existing markers
+    markerClusterGroup.clearLayers();
+    nodeMarkers = [];
+
+    // Add markers for each filtered node
+    nodeData.forEach(node => {
+        addNodeMarker(node);
+    });
+
+    // Update unified node list
+    showAllNodes();
+
+    // Load traceroute links if enabled
+    if (showLinks && linkData.length > 0) {
+        drawTracerouteLinks();
+    }
+
+    // Fit map to show all nodes
+    if (nodeMarkers.length > 0) {
+        setTimeout(() => {
+            fitMapToNodes();
+        }, 500);
     }
 }
 
@@ -597,7 +661,7 @@ function createNodePopupContent(node) {
             ${node.altitude ? `<div><strong>Altitude:</strong> ${node.altitude}m</div>` : ''}
             ${node.hw_model ? `<div><strong>Hardware:</strong> ${node.hw_model}</div>` : ''}
             <div><strong>Age:</strong> <span class="age-indicator ${ageClass}">${formatAge(ageHours)}</span></div>
-            ${node.gateway_count ? `<div><strong>Gateways:</strong> ${node.gateway_count}</div>` : ''}
+
             <div class="mt-2">
                 <button class="btn btn-sm btn-primary" onclick="viewNodeDetails(${node.node_id})">
                     View Details

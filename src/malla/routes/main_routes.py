@@ -9,7 +9,6 @@ from flask import Blueprint, render_template
 # Import from the new modular architecture
 from ..database.repositories import (
     DashboardRepository,
-    PacketRepository,
 )
 
 logger = logging.getLogger(__name__)
@@ -18,24 +17,32 @@ main_bp = Blueprint("main", __name__)
 
 @main_bp.route("/")
 def dashboard():
-    """Comprehensive dashboard showing overview statistics."""
-    logger.info("Dashboard route accessed")
+    """Dashboard route with network statistics."""
     try:
-        # Get basic dashboard stats (without gateway filtering for heterogeneous networks)
+        # Get basic dashboard stats
         stats = DashboardRepository.get_stats()
 
-        # Get gateway count for informational purposes (only need the count, not the full list)
-        gateway_count = PacketRepository.get_unique_gateway_count()
+        # Get gateway statistics from the new cached service
+        from ..services.gateway_service import GatewayService
 
-        logger.info("Dashboard rendered successfully")
+        gateway_stats = GatewayService.get_gateway_statistics(hours=24)
+        gateway_count = gateway_stats.get("total_gateways", 0)
+
         return render_template(
             "dashboard.html",
             stats=stats,
             gateway_count=gateway_count,
         )
     except Exception as e:
-        logger.error(f"Error in dashboard route: {e}")
-        return f"Dashboard error: {e}", 500
+        logger.error(f"Error loading dashboard: {e}")
+        # Fallback to basic stats without gateway info
+        stats = DashboardRepository.get_stats()
+        return render_template(
+            "dashboard.html",
+            stats=stats,
+            gateway_count=0,
+            error_message="Some dashboard features may be unavailable",
+        )
 
 
 @main_bp.route("/map")

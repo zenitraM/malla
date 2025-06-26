@@ -48,13 +48,14 @@ class LocationService:
         # Apply age filtering if specified
         age_filter_start = time.time()
         current_time = datetime.now().timestamp()
-        if filters.get("max_age_hours"):
-            max_age_seconds = filters["max_age_hours"] * 3600
-            cutoff_time = current_time - max_age_seconds
-            locations = [loc for loc in locations if loc["timestamp"] >= cutoff_time]
-            logger.info(
-                f"Applied max_age_hours filter: {len(locations)} locations remain after filtering"
-            )
+        # Remove server-side max_age filtering - now handled client-side
+        # if filters.get("max_age_hours"):
+        #     max_age_seconds = filters["max_age_hours"] * 3600
+        #     cutoff_time = current_time - max_age_seconds
+        #     locations = [loc for loc in locations if loc["timestamp"] >= cutoff_time]
+        #     logger.info(
+        #         f"Applied max_age_hours filter: {len(locations)} locations remain after filtering"
+        #     )
 
         if filters.get("min_age_hours"):
             min_age_seconds = filters["min_age_hours"] * 3600
@@ -108,10 +109,8 @@ class LocationService:
         network_processing_start = time.time()
         network_nodes = {node["id"]: node for node in network_data.get("nodes", [])}
 
-        # Create neighbor and gateway count maps
+        # Create neighbor count maps
         neighbor_counts = {}
-        gateway_counts = {}
-        min_hops_to_gateway = {}
         neighbor_details: dict[int, list[dict[str, Any]]] = {}
 
         # Process network links to build neighbor relationships
@@ -141,82 +140,6 @@ class LocationService:
                 {"neighbor_id": source_id, "avg_rssi": avg_rssi}
             )
         timing_breakdown["neighbor_processing"] = time.time() - network_processing_start
-
-        # Get gateway information and calculate hop counts
-        gateway_start = time.time()
-
-        try:
-            from ..database.connection import get_db_connection
-
-            conn = get_db_connection()
-            cursor = conn.cursor()
-
-            # Build time filter for gateway analysis
-            gateway_time_filter = ""
-            gateway_params = []
-
-            if filters.get("start_time"):
-                gateway_time_filter = "AND timestamp >= ?"
-                gateway_params.append(filters["start_time"])
-            elif not filters.get("end_time"):
-                # Default to last 3 hours if no time filters specified (faster, still accurate)
-                gateway_time_filter = "AND timestamp > ?"
-                gateway_params.append(datetime.now().timestamp() - 3 * 3600)
-
-            if filters.get("end_time"):
-                gateway_time_filter += " AND timestamp <= ?"
-                gateway_params.append(filters["end_time"])
-
-            cursor.execute(
-                f"""
-                SELECT
-                    gateway_id,
-                    COUNT(DISTINCT from_node_id) as unique_sources
-                FROM packet_history
-                WHERE gateway_id IS NOT NULL
-                {gateway_time_filter}
-                GROUP BY gateway_id
-                HAVING unique_sources >= 3
-                ORDER BY unique_sources DESC
-            """,
-                gateway_params,
-            )
-
-            gateway_nodes = {row["gateway_id"] for row in cursor.fetchall()}
-
-            # Count how many gateways heard each node
-            cursor.execute(
-                f"""
-                SELECT from_node_id, COUNT(DISTINCT gateway_id) as gateway_count
-                FROM packet_history
-                WHERE gateway_id IS NOT NULL
-                {gateway_time_filter}
-                GROUP BY from_node_id
-            """,
-                gateway_params,
-            )
-
-            gateway_counts = {}
-            for row in cursor.fetchall():
-                gateway_counts[row["from_node_id"]] = row["gateway_count"]
-
-            conn.close()
-
-            # Calculate minimum hops to gateways in a single multi-source BFS for efficiency
-            hop_calc_start = time.time()
-            min_hops_to_gateway = LocationService._calculate_all_min_hops_to_gateway(
-                gateway_nodes, neighbor_details
-            )
-
-            # Ensure every node has a value (use 999 if unreachable)
-            for n_id in [loc["node_id"] for loc in locations]:
-                if n_id not in min_hops_to_gateway:
-                    min_hops_to_gateway[n_id] = 0 if n_id in gateway_nodes else 999
-            timing_breakdown["hop_calculation"] = time.time() - hop_calc_start
-
-        except Exception as e:
-            logger.warning(f"Failed to calculate gateway information: {e}")
-        timing_breakdown["gateway_analysis"] = time.time() - gateway_start
 
         # Enhance location data with network topology information
         enhancement_start = time.time()
@@ -254,9 +177,7 @@ class LocationService:
                 # Enhanced fields for map display
                 "age_hours": round(age_hours, 2),
                 "timestamp_str": timestamp_str,
-                "min_hops_to_gateway": min_hops_to_gateway.get(node_id),
                 "direct_neighbors": direct_neighbors,
-                "gateway_count": gateway_counts.get(node_id, 0),
                 "neighbors": neighbors,
                 "sats_in_view": location.get("sats_in_view"),
                 "precision_bits": location.get("precision_bits"),
@@ -278,105 +199,9 @@ class LocationService:
             f"in {total_service_time:.3f}s "
             f"(Repo: {timing_breakdown['repository_call']:.3f}s, "
             f"Network: {timing_breakdown['network_topology']:.3f}s, "
-            f"Gateway: {timing_breakdown['gateway_analysis']:.3f}s, "
             f"Enhancement: {timing_breakdown['enhancement']:.3f}s)"
         )
         return enhanced_locations
-
-    @staticmethod
-    def _calculate_min_hops_to_gateway(
-        start_node_id: int,
-        gateway_nodes: set,
-        neighbor_details: dict,
-        max_hops: int = 10,
-    ) -> int | None:
-        """
-        Calculate minimum hops to reach any gateway using BFS.
-
-        Args:
-            start_node_id: Starting node ID
-            gateway_nodes: Set of gateway node IDs
-            neighbor_details: Dictionary mapping node_id to list of neighbors
-            max_hops: Maximum hops to search
-
-        Returns:
-            Minimum hops to gateway, or None if unreachable
-        """
-        if start_node_id in gateway_nodes:
-            return 0
-
-        if start_node_id not in neighbor_details:
-            return None
-
-        visited = {start_node_id}
-        queue = [(start_node_id, 0)]  # (node_id, hops)
-
-        while queue:
-            current_node, hops = queue.pop(0)
-
-            if hops >= max_hops:
-                continue
-
-            # Check neighbors
-            for neighbor in neighbor_details.get(current_node, []):
-                neighbor_id = neighbor["neighbor_id"]
-
-                if neighbor_id in gateway_nodes:
-                    return hops + 1
-
-                if neighbor_id not in visited:
-                    visited.add(neighbor_id)
-                    queue.append((neighbor_id, hops + 1))
-
-        return None  # No path found
-
-    @staticmethod
-    def _calculate_all_min_hops_to_gateway(
-        gateway_nodes: set[int],
-        neighbor_details: dict[int, list[dict[str, Any]]],
-        max_hops: int = 10,
-    ) -> dict[int, int]:
-        """Calculate minimum hops to reach any gateway for **all** nodes simultaneously.
-
-        This uses a multi-source BFS starting from all gateway nodes, which
-        visits every reachable node at most once.  It is drastically faster
-        than running a separate BFS from each node.
-
-        Args:
-            gateway_nodes: Set of gateway node IDs.
-            neighbor_details: Mapping of node_id -> list[{neighbor_id, ...}].
-            max_hops: Optional maximum hop search depth.
-
-        Returns:
-            Dictionary mapping node_id -> min hops to the nearest gateway.
-            Nodes that are unreachable will be *omitted* from the dictionary.
-        """
-
-        from collections import deque
-
-        if not gateway_nodes:
-            return {}
-
-        # Prepare BFS queue with all gateways as starting points
-        queue: deque[tuple[int, int]] = deque()
-        distance: dict[int, int] = {}
-
-        for g in gateway_nodes:
-            distance[g] = 0
-            queue.append((g, 0))
-
-        while queue:
-            current, hops = queue.popleft()
-            if hops >= max_hops:
-                continue
-
-            for nbr in neighbor_details.get(current, []):
-                nbr_id = nbr["neighbor_id"]
-                if nbr_id not in distance:
-                    distance[nbr_id] = hops + 1
-                    queue.append((nbr_id, hops + 1))
-
-        return distance
 
     @staticmethod
     def get_traceroute_links(

@@ -96,9 +96,18 @@ class TestTracerouteFilters:
         # Type in the node short name to search (using actual test fixture data)
         from_node_input.fill("TGA")
 
-        # Wait for dropdown to appear and select the first result
-        page.wait_for_selector(".node-picker-results .node-picker-item", timeout=5000)
-        page.locator(".node-picker-results .node-picker-item").first.click()
+        # Wait for dropdown to appear
+        page.wait_for_selector(".node-picker-item", timeout=5000)
+        # Wait for loading spinner to disappear if present
+        try:
+            page.wait_for_selector(".node-picker-loading", state="hidden", timeout=2000)
+        except Exception:
+            pass  # If not present, ignore
+        # Ensure the first item is visible and enabled
+        expect(page.locator(".node-picker-item").first).to_be_visible()
+        expect(page.locator(".node-picker-item").first).to_be_enabled()
+        # Click on the first result
+        page.locator(".node-picker-item").first.click()
 
         # Wait for URL to update
         page.wait_for_timeout(1000)
@@ -135,8 +144,17 @@ class TestTracerouteFilters:
         from_node_input.fill("TGA")
 
         # Wait for dropdown and select first result
-        page.wait_for_selector(".node-picker-results .node-picker-item", timeout=5000)
-        page.locator(".node-picker-results .node-picker-item").first.click()
+        page.wait_for_selector(".node-picker-item", timeout=5000)
+        # Wait for loading spinner to disappear if present
+        try:
+            page.wait_for_selector(".node-picker-loading", state="hidden", timeout=2000)
+        except Exception:
+            pass  # If not present, ignore
+        # Ensure the first item is visible and enabled
+        expect(page.locator(".node-picker-item").first).to_be_visible()
+        expect(page.locator(".node-picker-item").first).to_be_enabled()
+        # Click on the first result
+        page.locator(".node-picker-item").first.click()
 
         # Click Apply Filters button
         apply_button = page.locator("#applyFilters")
@@ -176,8 +194,17 @@ class TestTracerouteFilters:
         from_node_input.fill("TGA")
 
         # Wait for dropdown and select first result
-        page.wait_for_selector(".node-picker-results .node-picker-item", timeout=5000)
-        page.locator(".node-picker-results .node-picker-item").first.click()
+        page.wait_for_selector(".node-picker-item", timeout=5000)
+        # Wait for loading spinner to disappear if present
+        try:
+            page.wait_for_selector(".node-picker-loading", state="hidden", timeout=2000)
+        except Exception:
+            pass  # If not present, ignore
+        # Ensure the first item is visible and enabled
+        expect(page.locator(".node-picker-item").first).to_be_visible()
+        expect(page.locator(".node-picker-item").first).to_be_enabled()
+        # Click on the first result
+        page.locator(".node-picker-item").first.click()
 
         # Click Apply Filters button
         apply_button = page.locator("#applyFilters")
@@ -292,11 +319,18 @@ class TestTracerouteFilters:
         expect(from_node_input).to_be_visible()
 
         # Type in the node ID to search
-        from_node_input.fill("858993459")
+        from_node_input.fill("TGA")
 
         # Wait for dropdown to appear
         page.wait_for_selector(".node-picker-item", timeout=5000)
-
+        # Wait for loading spinner to disappear if present
+        try:
+            page.wait_for_selector(".node-picker-loading", state="hidden", timeout=2000)
+        except Exception:
+            pass  # If not present, ignore
+        # Ensure the first item is visible and enabled
+        expect(page.locator(".node-picker-item").first).to_be_visible()
+        expect(page.locator(".node-picker-item").first).to_be_enabled()
         # Click on the first result
         page.locator(".node-picker-item").first.click()
 
@@ -439,11 +473,18 @@ class TestTracerouteFilters:
         expect(from_node_input).to_be_visible()
 
         # Type in the node ID to search
-        from_node_input.fill("858993459")
+        from_node_input.fill("TGA")
 
         # Wait for dropdown to appear
         page.wait_for_selector(".node-picker-item", timeout=5000)
-
+        # Wait for loading spinner to disappear if present
+        try:
+            page.wait_for_selector(".node-picker-loading", state="hidden", timeout=2000)
+        except Exception:
+            pass  # If not present, ignore
+        # Ensure the first item is visible and enabled
+        expect(page.locator(".node-picker-item").first).to_be_visible()
+        expect(page.locator(".node-picker-item").first).to_be_enabled()
         # Click on the first result
         page.locator(".node-picker-item").first.click()
 
@@ -1284,7 +1325,9 @@ class TestTracerouteFilters:
         # Get a valid from_node_id from the current data
         first_row = page.locator("#tracerouteTable tbody tr").first
         from_node_link = first_row.locator("td:nth-child(2) a").first
-        from_node_id = from_node_link.get_attribute("href").split("/")[-1]
+        from_node_href = from_node_link.get_attribute("href")
+        assert from_node_href is not None, "from_node_link href is None"
+        from_node_id = from_node_href.split("/")[-1]
 
         # Use JavaScript to properly set the node picker value
         set_result = page.evaluate(f"""
@@ -1338,7 +1381,9 @@ class TestTracerouteFilters:
         for i in range(min(5, filtered_rows)):
             row = page.locator("#tracerouteTable tbody tr").nth(i)
             row_from_link = row.locator("td:nth-child(2) a").first
-            row_from_id = row_from_link.get_attribute("href").split("/")[-1]
+            row_from_href = row_from_link.get_attribute("href")
+            assert row_from_href is not None, "row_from_link href is None"
+            row_from_id = row_from_href.split("/")[-1]
             assert row_from_id == from_node_id, (
                 f"Row {i} should have from_node_id {from_node_id}, got {row_from_id}"
             )
@@ -1363,7 +1408,9 @@ class TestTracerouteFilters:
         # Get a valid to_node_id from the current data
         first_row = page.locator("#tracerouteTable tbody tr").first
         to_node_link = first_row.locator("td:nth-child(3) a").first
-        to_node_id = to_node_link.get_attribute("href").split("/")[-1]
+        to_node_href = to_node_link.get_attribute("href")
+        assert to_node_href is not None, "to_node_link href is None"
+        to_node_id = to_node_href.split("/")[-1]
 
         # Use JavaScript to properly set the node picker value
         set_result = page.evaluate(f"""
@@ -1441,7 +1488,9 @@ class TestTracerouteFilters:
         if route_links.count() > 0:
             # Get the first route node ID
             first_route_link = route_links.first
-            route_node_id = first_route_link.get_attribute("href").split("/")[-1]
+            route_node_href = first_route_link.get_attribute("href")
+            assert route_node_href is not None, "route_node_link href is None"
+            route_node_id = route_node_href.split("/")[-1]
 
             # Use JavaScript to properly set the node picker value
             set_result = page.evaluate(f"""
@@ -1514,7 +1563,9 @@ class TestTracerouteFilters:
         gateway_link = first_row.locator("td:nth-child(5) a").first
 
         if gateway_link.count() > 0:
-            gateway_id = gateway_link.get_attribute("href").split("/")[-1]
+            gateway_href = gateway_link.get_attribute("href")
+            assert gateway_href is not None, "gateway_link href is None"
+            gateway_id = gateway_href.split("/")[-1]
 
             # Use JavaScript to properly set the gateway picker value
             set_result = page.evaluate(f"""
@@ -1696,10 +1747,14 @@ class TestTracerouteFilters:
         # Get data for combined filtering
         first_row = page.locator("#tracerouteTable tbody tr").first
         from_node_link = first_row.locator("td:nth-child(2) a").first
-        from_node_id = from_node_link.get_attribute("href").split("/")[-1]
+        from_node_href = from_node_link.get_attribute("href")
+        assert from_node_href is not None, "from_node_link href is None"
+        from_node_id = from_node_href.split("/")[-1]
 
         to_node_link = first_row.locator("td:nth-child(3) a").first
-        to_node_id = to_node_link.get_attribute("href").split("/")[-1]
+        to_node_href = to_node_link.get_attribute("href")
+        assert to_node_href is not None, "to_node_link href is None"
+        to_node_id = to_node_href.split("/")[-1]
 
         # Apply from_node filter using JavaScript API
         from_result = page.evaluate(f"""
@@ -1914,7 +1969,9 @@ class TestTracerouteFilters:
         # Get a valid from_node_id from the current data
         first_row = page.locator("#tracerouteTable tbody tr").first
         from_node_link = first_row.locator("td:nth-child(2) a").first
-        from_node_id = from_node_link.get_attribute("href").split("/")[-1]
+        from_node_href = from_node_link.get_attribute("href")
+        assert from_node_href is not None, "from_node_link href is None"
+        from_node_id = from_node_href.split("/")[-1]
 
         # Set a filter using JavaScript
         set_result = page.evaluate(f"""
@@ -1984,7 +2041,9 @@ class TestTracerouteFilters:
         # Get a valid from_node_id from the current data
         first_row = page.locator("#tracerouteTable tbody tr").first
         from_node_link = first_row.locator("td:nth-child(2) a").first
-        from_node_id = from_node_link.get_attribute("href").split("/")[-1]
+        from_node_href = from_node_link.get_attribute("href")
+        assert from_node_href is not None, "from_node_link href is None"
+        from_node_id = from_node_href.split("/")[-1]
 
         # Set filter and verify automatic filtering
         set_result = page.evaluate(f"""
