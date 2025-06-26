@@ -1516,12 +1516,22 @@ def api_traceroute_data():
 
             # Final fallback: use from -> to
             if not route_nodes:
+                # Use short names (with hex fallback) to ensure consistency in UI display
                 if from_node_id:
                     route_nodes.append(from_node_id)
-                    route_names.append(from_node_name)
+                    # Prefer provided short name or fall back to hex short format
+                    route_names.append(
+                        from_node_short
+                        or node_short_names.get(
+                            from_node_id, f"{from_node_id:08x}"[-4:]
+                        )
+                    )
                 if to_node_id and to_node_id != from_node_id:
                     route_nodes.append(to_node_id)
-                    route_names.append(to_node_name)
+                    route_names.append(
+                        to_node_short
+                        or node_short_names.get(to_node_id, f"{to_node_id:08x}"[-4:])
+                    )
 
             # Handle gateway display for both grouped and individual packets
             gateway_display = tr.get("gateway_id", "N/A")
