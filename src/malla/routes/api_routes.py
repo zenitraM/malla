@@ -42,7 +42,7 @@ def api_stats():
     try:
         gateway_id = request.args.get("gateway_id")
         stats = DashboardRepository.get_stats(gateway_id=gateway_id)
-        return jsonify(stats)
+        return safe_jsonify(stats)
     except Exception as e:
         logger.error(f"Error in API stats: {e}")
         return jsonify({"error": str(e)}), 500
@@ -96,7 +96,7 @@ def api_analytics():
         analytics_data = AnalyticsService.get_analytics_data(
             gateway_id=gateway_id, from_node=from_node, hop_count=hop_count
         )
-        return jsonify(analytics_data)
+        return safe_jsonify(analytics_data)
     except Exception as e:
         logger.error(f"Error in API analytics: {e}")
         return jsonify({"error": str(e)}), 500
@@ -532,7 +532,7 @@ def api_locations():
         # Get traceroute links for map visualization (also 14 days)
         traceroute_links = LocationService.get_traceroute_links(filters)
 
-        return jsonify(
+        return safe_jsonify(
             {
                 "locations": locations,
                 "traceroute_links": traceroute_links,
@@ -593,7 +593,7 @@ def api_node_location_history(node_id):
     try:
         limit = request.args.get("limit", 100, type=int)
         history = NodeService.get_node_location_history(node_id, limit=limit)
-        return jsonify(history)
+        return safe_jsonify(history)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
@@ -643,7 +643,7 @@ def api_location_statistics():
     logger.info("API location statistics endpoint accessed")
     try:
         stats = LocationService.get_location_statistics()
-        return jsonify(stats)
+        return safe_jsonify(stats)
     except Exception as e:
         logger.error(f"Error in API location statistics: {e}")
         return jsonify({"error": str(e)}), 500
@@ -655,7 +655,7 @@ def api_location_hop_distances():
     logger.info("API location hop distances endpoint accessed")
     try:
         distances = LocationService.get_node_hop_distances()
-        return jsonify({"hop_distances": distances, "total_pairs": len(distances)})
+        return safe_jsonify({"hop_distances": distances, "total_pairs": len(distances)})
     except Exception as e:
         logger.error(f"Error in API location hop distances: {e}")
         return jsonify({"error": str(e)}), 500
@@ -668,7 +668,7 @@ def api_node_neighbors(node_id):
     try:
         max_distance = request.args.get("max_distance", 10.0, type=float)
         neighbors = NodeService.get_node_neighbors(node_id, max_distance=max_distance)
-        return jsonify(neighbors)
+        return safe_jsonify(neighbors)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
@@ -691,7 +691,7 @@ def api_longest_links():
             min_distance_km=min_distance, min_snr=min_snr, max_results=max_results
         )
 
-        return jsonify(data)
+        return safe_jsonify(data)
     except Exception as e:
         logger.error(f"Error in API longest links: {e}")
         return jsonify({"error": str(e)}), 500
@@ -998,7 +998,7 @@ def api_traceroute_graph():
             hours=hours, min_snr=min_snr, include_indirect=include_indirect
         )
 
-        return jsonify(graph_data)
+        return safe_jsonify(graph_data)
 
     except Exception as e:
         logger.error(f"Error in API traceroute graph: {e}")
@@ -1629,50 +1629,19 @@ def api_traceroute_data():
         return jsonify({"error": str(e), "data": [], "total_count": 0}), 500
 
 
-@api_bp.after_request  # type: ignore[misc]
-def _sanitize_json_response(response):
-    """Post-process every JSON response sent by this blueprint.
+def safe_jsonify(data, *args, **kwargs):
+    """
+    A drop-in replacement for Flask's jsonify() that sanitizes NaN/Inf values.
 
-    We walk the JSON payload and convert any special IEEE-754 float values
-    (``NaN``, ``Infinity``, ``-Infinity``) to ``null`` so that clients using the
-    standard `JSON.parse` implementation do not fail.
-
-    This hook acts as a final safety-net on top of targeted fixes in specific
-    endpoints (e.g. ``/api/locations``).  It ensures that *all* current and
-    future endpoints under the *api* blueprint remain standards-compliant even
-    if they inadvertently include problematic float values.
-
-    (Human note: this is likely a bit suboptimal in terms of performance, but...)
+    This prevents JSON parsing errors in browsers by converting special IEEE-754
+    float values to null before Flask processes the response.
     """
     try:
-        if response.mimetype == "application/json":
-            # Decode the payload.  Using ``parse_constant`` lets us gracefully
-            # handle the non-standard tokens without raising an exception.
-            data_text = response.get_data(as_text=True)
-            if not data_text:
-                return response
-
-            # Fast-path – skip if no offending tokens present to save CPU cycles.
-            if "NaN" not in data_text and "Infinity" not in data_text:
-                return response
-
-            parsed = json.loads(data_text, parse_constant=lambda _x: None)
-
-            # Deep-sanitize (e.g. convert float("nan") objects that were coerced
-            # to strings during dumping) and re-serialize.
-            sanitized = json.dumps(
-                sanitize_floats(parsed),
-                separators=(",", ":"),
-                ensure_ascii=False,
-            )
-            response.set_data(sanitized)
-            response.headers["Content-Length"] = str(len(sanitized))
-    except Exception as _err:
-        # Silently ignore to avoid breaking the original response flow; we log
-        # at *debug* level to avoid noise in production logs.
-        logger.debug(f"JSON sanitation failed: {_err}")
-
-    return response
+        sanitized_data = sanitize_floats(data)
+        return jsonify(sanitized_data, *args, **kwargs)
+    except Exception as err:
+        logger.debug(f"JSON sanitation failed, using original data: {err}")
+        return jsonify(data, *args, **kwargs)
 
 
 def register_api_routes(app):
