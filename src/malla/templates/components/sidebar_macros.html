@@ -194,7 +194,7 @@
 @media (max-width: 768px) {
     .sidebar {
         width: 100%;
-        height: 40vh;
+        height: 60vh; /* Increased height for better usability */
         border-left: none;
         border-top: 1px solid #dee2e6;
         position: fixed;
@@ -230,8 +230,8 @@
     }
 
     .sidebar-section {
-        flex: 1;
-        overflow-y: auto;
+        flex: unset; /* Allow sections to take natural height */
+        overflow: visible; /* Remove nested scrolling on each section */
     }
 
     /* Update toggle button icon for mobile */

@@ -328,6 +328,17 @@
         order: 1;
         flex: 1;
     }
+
+    /* Keep nested scroll only for node list and reduce its height for better usability */
+    .node-list-container {
+        max-height: 40vh; /* Smaller scrollable area */
+        overflow-y: auto;
+    }
+
+    .node-list {
+        max-height: 30vh; /* Nested list scroll area */
+        overflow-y: auto;
+    }
 }
 
 /* Legend line style */
@@ -430,6 +441,18 @@ function initializeInterface() {
             }
         }
     });
+
+    // Set initial icon orientation on page load
+    const sidebar = document.getElementById('sidebar');
+    const initialIcon = document.querySelector('#toggleSidebar i');
+    const isMobileInitial = window.innerWidth <= 768;
+    if (sidebar && initialIcon) {
+        if (sidebar.classList.contains('collapsed')) {
+            initialIcon.className = isMobileInitial ? 'bi bi-chevron-up' : 'bi bi-chevron-left';
+        } else {
+            initialIcon.className = isMobileInitial ? 'bi bi-chevron-down' : 'bi bi-chevron-right';
+        }
+    }
 
     // Handle clear selection button
     $('#clearSelection').on('click', function() {
