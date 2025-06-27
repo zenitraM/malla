@@ -221,10 +221,10 @@ class TestMapLayout:
         expect(fit_button).to_be_visible()
         fit_button.click()
 
-        # Test RF links toggle button
-        links_button = page.locator("#linkToggleBtn")
-        expect(links_button).to_be_visible()
-        links_button.click()
+        # Test RF links toggle checkbox
+        links_checkbox = page.locator("#tracerouteLinksCheckbox")
+        expect(links_checkbox).to_be_visible()
+        links_checkbox.click()
 
         # Test refresh button
         refresh_button = page.locator("button:has-text('Refresh')")
