@@ -514,18 +514,50 @@ class GatewayPicker {
         this.openDropdown();
 
         try {
-            // Search gateways via API
-            const response = await fetch(`/api/gateways/search?q=${encodeURIComponent(query)}&limit=20`);
+            await window.NodeCache.load();
 
-            if (!response.ok) {
-                // Fallback to getting all gateways and filtering client-side
-                const allGatewaysResponse = await fetch('/api/gateways');
-                const allGatewaysData = await allGatewaysResponse.json();
-                this.gateways = this.filterGateways(allGatewaysData.gateways, query);
+            const nodeToGateway = (node) => {
+                const hexId = `!${node.node_id.toString(16).padStart(8, '0')}`;
+                return {
+                    id: hexId,
+                    gateway_id: hexId,
+                    name: node.long_name && node.short_name && node.long_name !== node.short_name
+                        ? `${node.long_name} (${node.short_name})`
+                        : (node.long_name || node.short_name || hexId),
+                    display_name: node.long_name && node.short_name && node.long_name !== node.short_name
+                        ? `${node.long_name} (${node.short_name})`
+                        : (node.long_name || node.short_name || hexId),
+                    node_id: node.node_id.toString(),
+                    packet_count: node.gateway_packet_count_24h || 0,
+                };
+            };
+
+            if (!query) {
+                const popularNodes = await window.NodeCache.topByGatewayPackets(20);
+                this.gateways = popularNodes.map(nodeToGateway);
+                this.isPopular = true;
             } else {
-                const data = await response.json();
-                this.gateways = data.gateways || [];
-                this.isPopular = data.is_popular || false;
+                const matchedNodes = await window.NodeCache.search(query, 20);
+                this.gateways = matchedNodes.map(nodeToGateway);
+                this.isPopular = false;
+            }
+
+            // If no results (could be non-node gateways), fallback to API
+            if (this.gateways.length === 0) {
+                try {
+                    const response = await fetch(`/api/gateways/search?q=${encodeURIComponent(query)}&limit=20`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.gateways = data.gateways || [];
+                        this.isPopular = data.is_popular || false;
+                    } else {
+                        const allGatewaysResponse = await fetch('/api/gateways');
+                        const allGatewaysData = await allGatewaysResponse.json();
+                        this.gateways = this.filterGateways(allGatewaysData.gateways, query);
+                    }
+                } catch (fallbackErr) {
+                    console.warn('GatewayPicker: API fallback failed', fallbackErr);
+                }
             }
 
             this.renderResults();
@@ -570,7 +602,7 @@ class GatewayPicker {
                 }
             } else {
                 gatewayId = gateway.id || gateway.gateway_id;
-                displayName = gateway.name || gateway.display_name || gatewayId;
+                displayName = gateway.display_name || gateway.name || gatewayId;
 
                 if (gateway.node_id) {
                     details.push('Node Gateway');

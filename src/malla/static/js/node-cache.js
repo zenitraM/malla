@@ -146,6 +146,15 @@
         },
 
         /**
+         * Return nodes ordered by gateway_packet_count_24h desc.
+         */
+        async topByGatewayPackets(limit = 20) {
+            await this.load();
+            const sorted = [..._nodes].sort((a, b) => (b.gateway_packet_count_24h || 0) - (a.gateway_packet_count_24h || 0));
+            return sorted.slice(0, limit);
+        },
+
+        /**
          * Add/merge a node object into the cache (e.g., after individual API fetch).
          */
         addNode(node) {

@@ -950,6 +950,7 @@ class NodeRepository:
                         ni.last_updated,
                         printf('!%08x', ni.node_id) as hex_id,
                         COALESCE(stats.packet_count_24h, 0) as packet_count_24h,
+                        COALESCE(gstats.gateway_packet_count_24h, 0) as gateway_packet_count_24h,
                         COALESCE(stats.last_packet_time, ni.last_updated) as last_packet_time,
                         datetime(COALESCE(stats.last_packet_time, ni.last_updated), 'unixepoch') as last_packet_str
                     FROM node_info ni
@@ -962,6 +963,15 @@ class NodeRepository:
                         WHERE timestamp > (strftime('%s', 'now') - 86400)
                         GROUP BY from_node_id
                     ) stats ON ni.node_id = stats.node_id
+                    LEFT JOIN (
+                        SELECT
+                            gateway_id,
+                            COUNT(*) as gateway_packet_count_24h
+                        FROM packet_history
+                        WHERE timestamp > (strftime('%s', 'now') - 86400)
+                          AND gateway_id IS NOT NULL AND gateway_id != ''
+                        GROUP BY gateway_id
+                    ) gstats ON gstats.gateway_id = printf('!%08x', ni.node_id)
                     {where_clause}
                     ORDER BY {order_column} {order_dir}
                     LIMIT ? OFFSET ?
@@ -986,6 +996,7 @@ class NodeRepository:
                         ni.last_updated,
                         printf('!%08x', ni.node_id) as hex_id,
                         0 as packet_count_24h,
+                        0 as gateway_packet_count_24h,
                         ni.last_updated as last_packet_time,
                         datetime(ni.last_updated, 'unixepoch') as last_packet_str
                     FROM node_info ni
