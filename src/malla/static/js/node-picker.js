@@ -13,15 +13,15 @@ class NodePicker {
         this.loadingElement = container.querySelector('.node-picker-loading');
         this.noResultsElement = container.querySelector('.node-picker-no-results');
         this.resultsContainer = container.querySelector('.node-picker-results');
-        
+
         this.searchTimeout = null;
         this.currentFocus = -1;
         this.nodes = [];
         this.isOpen = false;
-        
+
         this.init();
     }
-    
+
     init() {
         // Bind event listeners with explicit context
         this.input.addEventListener('input', (e) => this.handleInput(e));
@@ -33,7 +33,7 @@ class NodePicker {
             e.stopPropagation();
             this.clearSelection();
         });
-        
+
         // Close dropdown when clicking outside - use capture phase for Firefox
         document.addEventListener('click', (e) => {
             if (!this.container.contains(e.target)) {
@@ -41,28 +41,28 @@ class NodePicker {
             }
         }, true);
     }
-    
+
     handleInput(e) {
         const query = e.target.value.trim();
-        
+
         // Clear the search timeout
         if (this.searchTimeout) {
             clearTimeout(this.searchTimeout);
         }
-        
+
         // If input is empty, clear selection
         if (!query) {
             this.clearSelection();
             this.closeDropdown();
             return;
         }
-        
+
         // Debounce the search
         this.searchTimeout = setTimeout(() => {
             this.searchNodes(query);
         }, 300);
     }
-    
+
     handleFocus(e) {
         const query = e.target.value.trim();
         if (query && this.nodes.length > 0) {
@@ -72,7 +72,7 @@ class NodePicker {
             this.searchNodes('');
         }
     }
-    
+
     handleBlur(e) {
         // Delay closing to allow for clicks on dropdown items
         // Use longer delay for Firefox
@@ -82,32 +82,32 @@ class NodePicker {
             }
         }, 200);
     }
-    
+
     handleKeydown(e) {
         if (!this.isOpen) return;
-        
+
         const items = this.dropdown.querySelectorAll('.node-picker-item');
-        
+
         switch (e.key) {
             case 'ArrowDown':
                 e.preventDefault();
                 this.currentFocus = Math.min(this.currentFocus + 1, items.length - 1);
                 this.updateFocus(items);
                 break;
-                
+
             case 'ArrowUp':
                 e.preventDefault();
                 this.currentFocus = Math.max(this.currentFocus - 1, -1);
                 this.updateFocus(items);
                 break;
-                
+
             case 'Enter':
                 e.preventDefault();
                 if (this.currentFocus >= 0 && items[this.currentFocus]) {
                     this.selectNode(items[this.currentFocus].dataset.nodeId);
                 }
                 break;
-                
+
             case 'Escape':
                 e.preventDefault();
                 this.closeDropdown();
@@ -115,7 +115,7 @@ class NodePicker {
                 break;
         }
     }
-    
+
     updateFocus(items) {
         items.forEach((item, index) => {
             if (index === this.currentFocus) {
@@ -124,7 +124,7 @@ class NodePicker {
                 item.classList.remove('keyboard-active');
             }
         });
-        
+
         // Scroll focused item into view - Firefox-compatible version
         if (this.currentFocus >= 0 && items[this.currentFocus]) {
             const item = items[this.currentFocus];
@@ -133,7 +133,7 @@ class NodePicker {
             const itemBottom = itemTop + item.offsetHeight;
             const containerTop = container.scrollTop;
             const containerBottom = containerTop + container.clientHeight;
-            
+
             if (itemTop < containerTop) {
                 container.scrollTop = itemTop;
             } else if (itemBottom > containerBottom) {
@@ -141,88 +141,93 @@ class NodePicker {
             }
         }
     }
-    
+
     async searchNodes(query) {
         this.showLoading();
         this.openDropdown();
-        
+
         try {
-            // Search nodes via API
-            const response = await fetch(`/api/nodes/search?q=${encodeURIComponent(query)}&limit=20`);
-            
-            if (!response.ok) {
-                // Fallback to getting all nodes and filtering client-side
-                const allNodesResponse = await fetch('/api/nodes?limit=1000');
-                const allNodesData = await allNodesResponse.json();
-                this.nodes = this.filterNodes(allNodesData.nodes, query);
-                this.isPopular = false;
+            // Ensure the global node list is loaded (from cache or API)
+            await window.NodeCache.load();
+
+            if (!query) {
+                // Show popular nodes (top by packets) when query is empty
+                this.nodes = await window.NodeCache.topByPackets(20);
+                this.isPopular = true;
             } else {
-                const data = await response.json();
-                this.nodes = data.nodes || [];
-                this.isPopular = data.is_popular || false;
+                // Client-side search
+                this.nodes = await window.NodeCache.search(query, 20);
+                this.isPopular = false;
             }
-            
+
             this.renderResults();
-            
         } catch (error) {
             console.error('Error searching nodes:', error);
             this.showNoResults();
         }
     }
-    
+
     filterNodes(nodes, query) {
         const lowerQuery = query.toLowerCase();
-        
+
         return nodes.filter(node => {
             const name = (node.long_name || node.short_name || '').toLowerCase();
             const hexId = `!${node.node_id.toString(16).padStart(8, '0')}`.toLowerCase();
             const nodeIdStr = node.node_id.toString();
-            
-            return name.includes(lowerQuery) || 
-                   hexId.includes(lowerQuery) || 
+
+            return name.includes(lowerQuery) ||
+                   hexId.includes(lowerQuery) ||
                    nodeIdStr.includes(lowerQuery);
         }).slice(0, 20); // Limit results
     }
-    
+
     renderResults() {
         this.hideLoading();
         this.hideNoResults();
-        
+
         if (this.nodes.length === 0) {
             this.showNoResults();
             return;
         }
-        
+
         const html = this.nodes.map(node => {
-            const displayName = node.long_name || node.short_name || 'Unnamed';
+            const longName = node.long_name || null;
+            const shortName = node.short_name || null;
+            let displayName = longName || shortName || 'Unnamed';
+            // If both names present and different, append short in parentheses
+            if (longName && shortName && longName !== shortName) {
+                displayName = `${longName} (${shortName})`;
+            }
+
             const hexId = `!${node.node_id.toString(16).padStart(8, '0')}`;
             const details = [];
-            
+
             if (node.hw_model) {
                 details.push(node.hw_model);
             }
-            
+
             if (node.packet_count_24h !== undefined) {
                 details.push(`${node.packet_count_24h} packets/24h`);
             } else if (this.isPopular) {
                 details.push('Popular Node');
             }
-            
+
             // Escape HTML attributes for Firefox compatibility
             const escapedDisplayName = this.escapeHtml(displayName);
+            const escapedShortName = this.escapeHtml(shortName || '');
             const escapedNodeId = this.escapeHtml(node.node_id.toString());
-            
+
             return `
-                <div class="node-picker-item" data-node-id="${escapedNodeId}" data-display-name="${escapedDisplayName}">
+                <div class="node-picker-item" data-node-id="${escapedNodeId}" data-display-name="${escapedDisplayName}" data-short-name="${escapedShortName}">
                     <div class="node-picker-item-name">${escapedDisplayName}</div>
                     <div class="node-picker-item-id">${hexId}</div>
                     ${details.length > 0 ? `<div class="node-picker-item-details">${details.join(' • ')}</div>` : ''}
                 </div>
             `;
         }).join('');
-        
+
         this.resultsContainer.innerHTML = html;
-        
+
         // Add click listeners to items - Firefox-compatible approach
         const items = this.resultsContainer.querySelectorAll('.node-picker-item');
         items.forEach(item => {
@@ -231,22 +236,22 @@ class NodePicker {
                 e.stopPropagation();
                 this.selectNode(item.dataset.nodeId, item.dataset.displayName);
             });
-            
+
             // Add mousedown event for Firefox compatibility
             item.addEventListener('mousedown', (e) => {
                 e.preventDefault();
             });
         });
-        
+
         this.currentFocus = -1;
     }
-    
+
     escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
-    
+
     selectNode(nodeId, displayName = null) {
         // Find the node data if displayName not provided
         if (!displayName) {
@@ -257,73 +262,73 @@ class NodePicker {
                 displayName = `!${parseInt(nodeId).toString(16).padStart(8, '0')}`;
             }
         }
-        
+
         // Update the inputs
         this.hiddenInput.value = nodeId;
         this.input.value = displayName;
-        
+
         // Show clear button
         this.clearButton.style.display = 'block';
-        
+
         // Close dropdown
         this.closeDropdown();
-        
+
         // Trigger change event for form handling - Firefox-compatible
         const changeEvent = document.createEvent('Event');
         changeEvent.initEvent('change', true, true);
         this.hiddenInput.dispatchEvent(changeEvent);
-        
+
         // Also trigger input event for additional compatibility
         const inputEvent = document.createEvent('Event');
         inputEvent.initEvent('input', true, true);
         this.hiddenInput.dispatchEvent(inputEvent);
     }
-    
+
     clearSelection() {
         this.hiddenInput.value = '';
         this.input.value = '';
         this.clearButton.style.display = 'none';
         this.closeDropdown();
-        
+
         // Trigger change event - Firefox-compatible
         const changeEvent = document.createEvent('Event');
         changeEvent.initEvent('change', true, true);
         this.hiddenInput.dispatchEvent(changeEvent);
     }
-    
+
     openDropdown() {
         this.dropdown.classList.add('show');
         this.dropdown.style.display = 'block';
         this.isOpen = true;
     }
-    
+
     closeDropdown() {
         this.dropdown.classList.remove('show');
         this.dropdown.style.display = 'none';
         this.isOpen = false;
         this.currentFocus = -1;
     }
-    
+
     showLoading() {
         this.loadingElement.style.display = 'block';
         this.noResultsElement.style.display = 'none';
         this.resultsContainer.innerHTML = '';
     }
-    
+
     hideLoading() {
         this.loadingElement.style.display = 'none';
     }
-    
+
     showNoResults() {
         this.noResultsElement.style.display = 'block';
         this.loadingElement.style.display = 'none';
         this.resultsContainer.innerHTML = '';
     }
-    
+
     hideNoResults() {
         this.noResultsElement.style.display = 'none';
     }
-    
+
     // Public method to set initial value
     setValue(nodeId, displayName) {
         if (nodeId && displayName) {
@@ -375,15 +380,15 @@ class GatewayPicker {
         this.loadingElement = container.querySelector('.gateway-picker-loading');
         this.noResultsElement = container.querySelector('.gateway-picker-no-results');
         this.resultsContainer = container.querySelector('.gateway-picker-results');
-        
+
         this.searchTimeout = null;
         this.currentFocus = -1;
         this.gateways = [];
         this.isOpen = false;
-        
+
         this.init();
     }
-    
+
     init() {
         // Bind event listeners with explicit context
         this.input.addEventListener('input', (e) => this.handleInput(e));
@@ -395,7 +400,7 @@ class GatewayPicker {
             e.stopPropagation();
             this.clearSelection();
         });
-        
+
         // Close dropdown when clicking outside - use capture phase for Firefox
         document.addEventListener('click', (e) => {
             if (!this.container.contains(e.target)) {
@@ -403,28 +408,28 @@ class GatewayPicker {
             }
         }, true);
     }
-    
+
     handleInput(e) {
         const query = e.target.value.trim();
-        
+
         // Clear the search timeout
         if (this.searchTimeout) {
             clearTimeout(this.searchTimeout);
         }
-        
+
         // If input is empty, clear selection
         if (!query) {
             this.clearSelection();
             this.closeDropdown();
             return;
         }
-        
+
         // Debounce the search
         this.searchTimeout = setTimeout(() => {
             this.searchGateways(query);
         }, 300);
     }
-    
+
     handleFocus(e) {
         const query = e.target.value.trim();
         if (query && this.gateways.length > 0) {
@@ -434,7 +439,7 @@ class GatewayPicker {
             this.searchGateways('');
         }
     }
-    
+
     handleBlur(e) {
         // Delay closing to allow for clicks on dropdown items
         // Use longer delay for Firefox
@@ -444,32 +449,32 @@ class GatewayPicker {
             }
         }, 200);
     }
-    
+
     handleKeydown(e) {
         if (!this.isOpen) return;
-        
+
         const items = this.dropdown.querySelectorAll('.gateway-picker-item');
-        
+
         switch (e.key) {
             case 'ArrowDown':
                 e.preventDefault();
                 this.currentFocus = Math.min(this.currentFocus + 1, items.length - 1);
                 this.updateFocus(items);
                 break;
-                
+
             case 'ArrowUp':
                 e.preventDefault();
                 this.currentFocus = Math.max(this.currentFocus - 1, -1);
                 this.updateFocus(items);
                 break;
-                
+
             case 'Enter':
                 e.preventDefault();
                 if (this.currentFocus >= 0 && items[this.currentFocus]) {
                     this.selectGateway(items[this.currentFocus].dataset.gatewayId);
                 }
                 break;
-                
+
             case 'Escape':
                 e.preventDefault();
                 this.closeDropdown();
@@ -477,7 +482,7 @@ class GatewayPicker {
                 break;
         }
     }
-    
+
     updateFocus(items) {
         items.forEach((item, index) => {
             if (index === this.currentFocus) {
@@ -486,7 +491,7 @@ class GatewayPicker {
                 item.classList.remove('keyboard-active');
             }
         });
-        
+
         // Scroll focused item into view - Firefox-compatible version
         if (this.currentFocus >= 0 && items[this.currentFocus]) {
             const item = items[this.currentFocus];
@@ -495,7 +500,7 @@ class GatewayPicker {
             const itemBottom = itemTop + item.offsetHeight;
             const containerTop = container.scrollTop;
             const containerBottom = containerTop + container.clientHeight;
-            
+
             if (itemTop < containerTop) {
                 container.scrollTop = itemTop;
             } else if (itemBottom > containerBottom) {
@@ -503,15 +508,15 @@ class GatewayPicker {
             }
         }
     }
-    
+
     async searchGateways(query) {
         this.showLoading();
         this.openDropdown();
-        
+
         try {
             // Search gateways via API
             const response = await fetch(`/api/gateways/search?q=${encodeURIComponent(query)}&limit=20`);
-            
+
             if (!response.ok) {
                 // Fallback to getting all gateways and filtering client-side
                 const allGatewaysResponse = await fetch('/api/gateways');
@@ -522,42 +527,42 @@ class GatewayPicker {
                 this.gateways = data.gateways || [];
                 this.isPopular = data.is_popular || false;
             }
-            
+
             this.renderResults();
-            
+
         } catch (error) {
             console.error('Error searching gateways:', error);
             this.showNoResults();
         }
     }
-    
+
     filterGateways(gateways, query) {
         const lowerQuery = query.toLowerCase();
-        
+
         return gateways.filter(gateway => {
             // Gateway can be a string ID or an object with name/id
             const gatewayStr = typeof gateway === 'string' ? gateway : (gateway.name || gateway.id || '');
             return gatewayStr.toLowerCase().includes(lowerQuery);
         }).slice(0, 20); // Limit results
     }
-    
+
     renderResults() {
         this.hideLoading();
         this.hideNoResults();
-        
+
         if (this.gateways.length === 0) {
             this.showNoResults();
             return;
         }
-        
+
         const html = this.gateways.map(gateway => {
             // Handle both string gateways and gateway objects
             let gatewayId, displayName, details = [];
-            
+
             if (typeof gateway === 'string') {
                 gatewayId = gateway;
                 displayName = gateway;
-                
+
                 // If it looks like a node ID, format it nicely
                 if (gateway.startsWith('!')) {
                     displayName = gateway;
@@ -566,7 +571,7 @@ class GatewayPicker {
             } else {
                 gatewayId = gateway.id || gateway.gateway_id;
                 displayName = gateway.name || gateway.display_name || gatewayId;
-                
+
                 if (gateway.node_id) {
                     details.push('Node Gateway');
                 }
@@ -577,11 +582,11 @@ class GatewayPicker {
                     details.push('Popular Gateway');
                 }
             }
-            
+
             // Escape HTML attributes for Firefox compatibility
             const escapedGatewayId = this.escapeHtml(gatewayId);
             const escapedDisplayName = this.escapeHtml(displayName);
-            
+
             return `
                 <div class="gateway-picker-item" data-gateway-id="${escapedGatewayId}" data-display-name="${escapedDisplayName}">
                     <div class="gateway-picker-item-name">${escapedDisplayName}</div>
@@ -590,9 +595,9 @@ class GatewayPicker {
                 </div>
             `;
         }).join('');
-        
+
         this.resultsContainer.innerHTML = html;
-        
+
         // Add click listeners to items - Firefox-compatible approach
         const items = this.resultsContainer.querySelectorAll('.gateway-picker-item');
         items.forEach(item => {
@@ -601,89 +606,89 @@ class GatewayPicker {
                 e.stopPropagation();
                 this.selectGateway(item.dataset.gatewayId, item.dataset.displayName);
             });
-            
+
             // Add mousedown event for Firefox compatibility
             item.addEventListener('mousedown', (e) => {
                 e.preventDefault();
             });
         });
-        
+
         this.currentFocus = -1;
     }
-    
+
     escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
-    
+
     selectGateway(gatewayId, displayName = null) {
         // Use displayName if provided, otherwise use gatewayId
         if (!displayName) {
             displayName = gatewayId;
         }
-        
+
         // Update the inputs
         this.hiddenInput.value = gatewayId;
         this.input.value = displayName;
-        
+
         // Show clear button
         this.clearButton.style.display = 'block';
-        
+
         // Close dropdown
         this.closeDropdown();
-        
+
         // Trigger change event for form handling - Firefox-compatible
         const changeEvent = document.createEvent('Event');
         changeEvent.initEvent('change', true, true);
         this.hiddenInput.dispatchEvent(changeEvent);
     }
-    
+
     clearSelection() {
         this.hiddenInput.value = '';
         this.input.value = '';
         this.clearButton.style.display = 'none';
         this.closeDropdown();
-        
+
         // Trigger change event - Firefox-compatible
         const changeEvent = document.createEvent('Event');
         changeEvent.initEvent('change', true, true);
         this.hiddenInput.dispatchEvent(changeEvent);
     }
-    
+
     openDropdown() {
         this.dropdown.classList.add('show');
         this.dropdown.style.display = 'block';
         this.isOpen = true;
     }
-    
+
     closeDropdown() {
         this.dropdown.classList.remove('show');
         this.dropdown.style.display = 'none';
         this.isOpen = false;
         this.currentFocus = -1;
     }
-    
+
     showLoading() {
         this.loadingElement.style.display = 'block';
         this.noResultsElement.style.display = 'none';
         this.resultsContainer.innerHTML = '';
     }
-    
+
     hideLoading() {
         this.loadingElement.style.display = 'none';
     }
-    
+
     showNoResults() {
         this.noResultsElement.style.display = 'block';
         this.loadingElement.style.display = 'none';
         this.resultsContainer.innerHTML = '';
     }
-    
+
     hideNoResults() {
         this.noResultsElement.style.display = 'none';
     }
-    
+
     // Public method to set initial value
     setValue(gatewayId, displayName) {
         if (gatewayId && displayName) {
@@ -727,4 +732,4 @@ window.NodePicker = NodePicker;
 window.GatewayPicker = GatewayPicker;
 window.initializeNodePickers = initializeNodePickers;
 window.initializeGatewayPickers = initializeGatewayPickers;
-window.initializeAllPickers = initializeAllPickers; 
+window.initializeAllPickers = initializeAllPickers;

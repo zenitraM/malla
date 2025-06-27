@@ -218,6 +218,8 @@
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <!-- URL Filter Manager (global utility) -->
     <script src="{{ url_for('static', filename='js/url-filter-manager.js') }}"></script>
+    <!-- NodeCache utility (shared across pages) -->
+    <script src="{{ url_for('static', filename='js/node-cache.js') }}"></script>
 
     <!-- Node tooltip functionality -->
     <script>
@@ -265,13 +267,28 @@
             });
         }
 
-        // Fetch node information from API
+        // Fetch node information from cache first, fall back to API if necessary
         async function fetchNodeInfo(nodeId) {
+            // Try NodeCache (populated by node-picker or preloaded)
+            if (window.NodeCache) {
+                const cachedNode = await window.NodeCache.getNode(nodeId);
+                if (cachedNode) {
+                    return cachedNode;
+                }
+            }
+
+            // Fallback to API
             const response = await fetch(`/api/node/${nodeId}/info`);
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-            return await response.json();
+            const data = await response.json();
+
+            // Merge into NodeCache for future lookups
+            if (window.NodeCache && (data.node || data).node_id !== undefined) {
+                window.NodeCache.addNode(data.node || data);
+            }
+            return data;
         }
 
         // Update tooltip content with node information
