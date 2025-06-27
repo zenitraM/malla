@@ -28,7 +28,7 @@ from ..utils.node_utils import (
     get_bulk_node_names,
     get_bulk_node_short_names,
 )
-from ..utils.serialization_utils import convert_bytes_to_base64
+from ..utils.serialization_utils import convert_bytes_to_base64, sanitize_floats
 from ..utils.traceroute_utils import parse_traceroute_payload
 
 logger = logging.getLogger(__name__)
@@ -1627,6 +1627,52 @@ def api_traceroute_data():
     except Exception as e:
         logger.error(f"Error in API traceroute modern: {e}")
         return jsonify({"error": str(e), "data": [], "total_count": 0}), 500
+
+
+@api_bp.after_request  # type: ignore[misc]
+def _sanitize_json_response(response):
+    """Post-process every JSON response sent by this blueprint.
+
+    We walk the JSON payload and convert any special IEEE-754 float values
+    (``NaN``, ``Infinity``, ``-Infinity``) to ``null`` so that clients using the
+    standard `JSON.parse` implementation do not fail.
+
+    This hook acts as a final safety-net on top of targeted fixes in specific
+    endpoints (e.g. ``/api/locations``).  It ensures that *all* current and
+    future endpoints under the *api* blueprint remain standards-compliant even
+    if they inadvertently include problematic float values.
+
+    (Human note: this is likely a bit suboptimal in terms of performance, but...)
+    """
+    try:
+        if response.mimetype == "application/json":
+            # Decode the payload.  Using ``parse_constant`` lets us gracefully
+            # handle the non-standard tokens without raising an exception.
+            data_text = response.get_data(as_text=True)
+            if not data_text:
+                return response
+
+            # Fast-path – skip if no offending tokens present to save CPU cycles.
+            if "NaN" not in data_text and "Infinity" not in data_text:
+                return response
+
+            parsed = json.loads(data_text, parse_constant=lambda _x: None)
+
+            # Deep-sanitize (e.g. convert float("nan") objects that were coerced
+            # to strings during dumping) and re-serialize.
+            sanitized = json.dumps(
+                sanitize_floats(parsed),
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            response.set_data(sanitized)
+            response.headers["Content-Length"] = str(len(sanitized))
+    except Exception as _err:
+        # Silently ignore to avoid breaking the original response flow; we log
+        # at *debug* level to avoid noise in production logs.
+        logger.debug(f"JSON sanitation failed: {_err}")
+
+    return response
 
 
 def register_api_routes(app):
