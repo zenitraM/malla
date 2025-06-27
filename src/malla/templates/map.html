@@ -458,7 +458,7 @@ function initMap() {
     markerClusterGroup = L.markerClusterGroup({
         maxClusterRadius: 50, // Cluster markers within 50 pixels
         spiderfyOnMaxZoom: true,
-        showCoverageOnHover: false,
+        showCoverageOnHover: true,
         zoomToBoundsOnClick: true,
         iconCreateFunction: function(cluster) {
             const childCount = cluster.getChildCount();
