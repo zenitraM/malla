@@ -66,8 +66,6 @@
 
         {% set map_controls = [
             {"class": "btn-outline-secondary", "onclick": "fitMapToNodes()", "icon": "bi bi-arrows-move", "text": "Fit All Nodes"},
-            {"class": "btn-outline-info", "onclick": "toggleTracerouteLinks()", "icon": "bi bi-link-45deg", "text": "Hide Traceroute Links", "id": "linkToggleBtn"},
-            {"class": "btn-outline-warning", "onclick": "togglePacketLinks()", "icon": "bi bi-envelope", "text": "Hide Packet Links", "id": "packetLinkToggleBtn"},
             {"class": "btn-outline-primary", "onclick": "refreshMap()", "icon": "bi bi-arrow-clockwise", "text": "Refresh"}
         ] %}
         {{ controls_section(map_controls) }}
@@ -100,6 +98,23 @@
                         <option value="UNKNOWN">Unknown/Other</option>
                     </select>
                 </div>
+                <div class="mb-3">
+                    <label for="startDateTime" class="form-label">Start Date & Time</label>
+                    <input type="datetime-local" class="form-control form-control-sm" id="startDateTime" name="startDateTime">
+                </div>
+                <div class="mb-3">
+                    <label for="endDateTime" class="form-label">End Date & Time</label>
+                    <input type="datetime-local" class="form-control form-control-sm" id="endDateTime" name="endDateTime">
+                </div>
+                <div class="d-flex justify-content-end mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="clearDateRange">
+                        <i class="bi bi-x-circle"></i> Clear Dates
+                    </button>
+                </div>
+                <div class="mb-3">
+                    <label for="minContacts" class="form-label">Min Contacts</label>
+                    <input type="number" class="form-control form-control-sm" id="minContacts" name="minContacts" value="1" min="1">
+                </div>
                 <button type="submit" class="btn btn-primary btn-sm w-100">
                     <i class="bi bi-funnel"></i> Apply Filters
                 </button>
@@ -114,6 +129,19 @@
                 <div><strong>With Location:</strong> <span id="statsWithLocation">0</span></div>
                 <div><strong>RF Links:</strong> <span id="statsLinks">0</span></div>
                 <div><strong>Last Update:</strong> <span id="statsLastUpdate">--</span></div>
+            </div>
+        </div>
+
+        <!-- Link visibility checkboxes -->
+        <div class="sidebar-section">
+            <h6><i class="bi bi-diagram-3"></i> Link Types</h6>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="tracerouteLinksCheckbox" checked>
+                <label class="form-check-label" for="tracerouteLinksCheckbox">Traceroute Links</label>
+            </div>
+            <div class="form-check mt-1">
+                <input class="form-check-input" type="checkbox" id="packetLinksCheckbox">
+                <label class="form-check-label" for="packetLinksCheckbox">Packet Links</label>
             </div>
         </div>
 
@@ -375,11 +403,12 @@ let allTracerouteLinks = [];
 let allPacketLinks = [];
 let selectedNodeId = null;
 let showTracerouteLinks = true;
-let showPacketLinks = true;
+let showPacketLinks = false;
 let precisionCircle = null;
 let searchResults = [];
 let allNodes = [];
 let linkData = [];
+let firstDisplay = true; // prevent recenter after initial load
 
 // Initialize the page
 document.addEventListener('DOMContentLoaded', function() {
@@ -480,6 +509,53 @@ function initializeInterface() {
         e.preventDefault();
         applyClientSideFilters();
     });
+
+    // Link type checkbox handlers
+    $('#tracerouteLinksCheckbox').on('change', function() {
+        const desiredState = this.checked;
+        if (desiredState !== showTracerouteLinks) {
+            toggleTracerouteLinks();
+        }
+    });
+
+    $('#packetLinksCheckbox').on('change', function() {
+        const desiredState = this.checked;
+        if (desiredState !== showPacketLinks) {
+            togglePacketLinks();
+        }
+    });
+
+    // Sync MaxAge select with date-time pickers
+    function toLocalInputValue(dateObj) {
+        const pad = (n)=> n.toString().padStart(2,'0');
+        return `${dateObj.getFullYear()}-${pad(dateObj.getMonth()+1)}-${pad(dateObj.getDate())}T${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
+    }
+
+    $('#maxAge').on('change', function() {
+        const val = this.value;
+        if (!val) {
+            // No Limit selected – clear date inputs
+            $('#startDateTime').val('');
+            $('#endDateTime').val('');
+        } else {
+            const hours = parseInt(val,10);
+            if (!isNaN(hours)) {
+                const end = new Date();
+                const start = new Date(end.getTime() - hours*3600*1000);
+                $('#startDateTime').val(toLocalInputValue(start));
+                $('#endDateTime').val(toLocalInputValue(end));
+            }
+        }
+        applyClientSideFilters();
+    });
+
+    // Clear dates button
+    $('#clearDateRange').on('click', function() {
+        $('#startDateTime').val('');
+        $('#endDateTime').val('');
+        $('#maxAge').val('');
+        applyClientSideFilters();
+    });
 }
 
 // Initialize the map
@@ -574,21 +650,17 @@ function applyClientSideFilters() {
     const formData = new FormData(form);
 
     // Get filter values
-    const maxAge = formData.get('maxAge');
+    const maxAge = formData.get('maxAge'); // still read to sync UI but no longer used for filtering
     const roleFilter = formData.get('roleFilter');
+    const startDateTime = formData.get('startDateTime');
+    const endDateTime = formData.get('endDateTime');
+    const minContacts = formData.get('minContacts');
 
     // Start with all data
     let filteredNodes = [...allNodeData];
     let filteredLinks = [...allLinkData];
 
     const currentTime = Date.now() / 1000;
-
-    // Apply age filter
-    if (maxAge) {
-        const maxAgeSeconds = parseInt(maxAge) * 3600;
-        const cutoffTime = currentTime - maxAgeSeconds;
-        filteredNodes = filteredNodes.filter(node => node.timestamp >= cutoffTime);
-    }
 
     // Apply role filter
     if (roleFilter) {
@@ -602,15 +674,28 @@ function applyClientSideFilters() {
         }
     }
 
-    // Apply age filter to links if set
-    if (maxAge) {
-        const maxAgeHours = parseInt(maxAge);
+    // Convert date inputs to timestamps for comparison
+    let startTimestamp = null;
+    let endTimestamp = null;
+    if (startDateTime) {
+        startTimestamp = new Date(startDateTime).getTime() / 1000;
+        filteredNodes = filteredNodes.filter(node => node.timestamp >= startTimestamp);
+    }
+
+    if (endDateTime) {
+        endTimestamp = new Date(endDateTime).getTime() / 1000;
+        filteredNodes = filteredNodes.filter(node => node.timestamp <= endTimestamp);
+    }
+
+    // Filter links by minimum number of direct contacts (total_hops_seen)
+    const minContactsNum = parseInt(minContacts || '1', 10);
+    if (!isNaN(minContactsNum) && minContactsNum > 1) {
         filteredLinks = filteredLinks.filter(link => {
-            if (link.age_hours !== undefined && link.age_hours !== null) {
-                return link.age_hours <= maxAgeHours;
+            if (link.total_hops_seen !== undefined && link.total_hops_seen !== null) {
+                return link.total_hops_seen >= minContactsNum;
             }
-            // Fallback: include if we don't have age info
-            return true;
+            // If metric not available, exclude link when threshold >1
+            return false;
         });
     }
 
@@ -619,6 +704,17 @@ function applyClientSideFilters() {
     filteredLinks = filteredLinks.filter(link =>
         visibleNodeIds.has(link.from_node_id) && visibleNodeIds.has(link.to_node_id)
     );
+
+    // Apply date filters to links based on last_seen if available
+    if (startTimestamp !== null || endTimestamp !== null) {
+        filteredLinks = filteredLinks.filter(link => {
+            if (!link.last_seen_str) return true;
+            const linkTs = Date.parse(link.last_seen_str) / 1000;
+            if (startTimestamp !== null && linkTs < startTimestamp) return false;
+            if (endTimestamp !== null && linkTs > endTimestamp) return false;
+            return true;
+        });
+    }
 
     // Update global variables
     nodeData = filteredNodes;
@@ -656,11 +752,12 @@ function updateMapDisplay() {
         drawPacketLinks();
     }
 
-    // Fit map to show all nodes
-    if (nodeMarkers.length > 0) {
+    // Fit map only on first render
+    if (firstDisplay && nodeMarkers.length > 0) {
         setTimeout(() => {
             fitMapToNodes();
         }, 500);
+        firstDisplay = false;
     }
 }
 
@@ -1134,8 +1231,8 @@ function togglePacketLinks() {
         } else {
             drawPacketLinks();
         }
-        btn.innerHTML = '<i class="bi bi-envelope"></i> Hide Packet Links';
-        btn.className = 'btn btn-sm btn-outline-warning';
+        btn.innerHTML = '<i class="bi bi-envelope-open"></i> Show Packet Links';
+        btn.className = 'btn btn-sm btn-outline-secondary';
     } else {
         btn.innerHTML = '<i class="bi bi-envelope-open"></i> Show Packet Links';
         btn.className = 'btn btn-sm btn-outline-secondary';
