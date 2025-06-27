@@ -129,16 +129,109 @@ class LocationService:
             neighbor_counts[source_id] += 1
             neighbor_counts[target_id] += 1
 
-            # Add neighbor details (using SNR as proxy for RSSI)
-            avg_rssi = (
-                link.get("avg_snr", 0) - 10 if link.get("avg_snr") else None
-            )  # Rough SNR to RSSI conversion
+            # Add neighbor details with proper SNR values and traceroute count
+            avg_snr = link.get("avg_snr")
+            traceroute_count = link.get("packet_count", 0)
+
             neighbor_details[source_id].append(
-                {"neighbor_id": target_id, "avg_rssi": avg_rssi}
+                {
+                    "neighbor_id": target_id,
+                    "avg_snr": avg_snr,
+                    "traceroute_count": traceroute_count,
+                    "packet_count": 0,  # Will be updated if direct packets exist
+                }
             )
             neighbor_details[target_id].append(
-                {"neighbor_id": source_id, "avg_rssi": avg_rssi}
+                {
+                    "neighbor_id": source_id,
+                    "avg_snr": avg_snr,
+                    "traceroute_count": traceroute_count,
+                    "packet_count": 0,  # Will be updated if direct packets exist
+                }
             )
+
+        # Get direct packet links to include in neighbor data
+        try:
+            # Pass the same filters to get packet links for consistency
+            packet_filters = {}
+            if filters.get("start_time"):
+                packet_filters["start_time"] = filters["start_time"]
+            if filters.get("end_time"):
+                packet_filters["end_time"] = filters["end_time"]
+            if filters.get("gateway_id"):
+                packet_filters["gateway_id"] = filters["gateway_id"]
+
+            packet_links = LocationService.get_packet_links(packet_filters)
+
+            # Process packet links to add to neighbor details
+            for link in packet_links:
+                from_node_id = link["from_node_id"]
+                to_node_id = link["to_node_id"]
+                packet_count = link.get("total_hops_seen", 0)
+
+                # Initialize neighbor tracking if not already present
+                if from_node_id not in neighbor_counts:
+                    neighbor_counts[from_node_id] = 0
+                    neighbor_details[from_node_id] = []
+                if to_node_id not in neighbor_counts:
+                    neighbor_counts[to_node_id] = 0
+                    neighbor_details[to_node_id] = []
+
+                # Check if we already have this neighbor relationship from traceroute data
+                existing_neighbor_from = next(
+                    (
+                        n
+                        for n in neighbor_details[from_node_id]
+                        if n["neighbor_id"] == to_node_id
+                    ),
+                    None,
+                )
+                existing_neighbor_to = next(
+                    (
+                        n
+                        for n in neighbor_details[to_node_id]
+                        if n["neighbor_id"] == from_node_id
+                    ),
+                    None,
+                )
+
+                if existing_neighbor_from:
+                    # Update existing neighbor with packet data
+                    existing_neighbor_from["packet_count"] = packet_count
+                    existing_neighbor_from["avg_rssi"] = link.get("avg_rssi")
+                else:
+                    # Add new neighbor from packet data
+                    neighbor_counts[from_node_id] += 1
+                    neighbor_details[from_node_id].append(
+                        {
+                            "neighbor_id": to_node_id,
+                            "avg_snr": link.get("avg_snr"),
+                            "avg_rssi": link.get("avg_rssi"),
+                            "traceroute_count": 0,
+                            "packet_count": packet_count,
+                        }
+                    )
+
+                if existing_neighbor_to:
+                    # Update existing neighbor with packet data
+                    existing_neighbor_to["packet_count"] = packet_count
+                    existing_neighbor_to["avg_rssi"] = link.get("avg_rssi")
+                else:
+                    # Add new neighbor from packet data
+                    neighbor_counts[to_node_id] += 1
+                    neighbor_details[to_node_id].append(
+                        {
+                            "neighbor_id": from_node_id,
+                            "avg_snr": link.get("avg_snr"),
+                            "avg_rssi": link.get("avg_rssi"),
+                            "traceroute_count": 0,
+                            "packet_count": packet_count,
+                        }
+                    )
+
+        except Exception as e:
+            logger.warning(f"Failed to get packet links for neighbor data: {e}")
+
         timing_breakdown["neighbor_processing"] = time.time() - network_processing_start
 
         # Enhance location data with network topology information
@@ -273,9 +366,6 @@ class LocationService:
                     "to_node_id": link["target"],
                     "success_rate": success_rate,
                     "avg_snr": link.get("avg_snr"),
-                    "avg_rssi": link.get("avg_snr", 0) - 10
-                    if link.get("avg_snr")
-                    else None,  # Rough conversion
                     "age_hours": round(age_hours, 2),
                     "last_seen_str": last_seen_str,
                     "is_bidirectional": True,  # Network graph links are bidirectional by design

@@ -373,7 +373,16 @@ class TestLocationEndpoints:
             if location["neighbors"]:
                 neighbor = location["neighbors"][0]
                 assert "neighbor_id" in neighbor
-                assert "avg_rssi" in neighbor
+                assert "traceroute_count" in neighbor
+                assert "packet_count" in neighbor
+                # All neighbors should have these fields
+                assert isinstance(neighbor["traceroute_count"], int)
+                assert isinstance(neighbor["packet_count"], int)
+                # SNR should be present (may be None)
+                assert "avg_snr" in neighbor
+                # RSSI may be present for direct packet neighbors
+                if neighbor["packet_count"] > 0:
+                    assert "avg_rssi" in neighbor
 
         # Test traceroute_links structure
         traceroute_links = data["traceroute_links"]

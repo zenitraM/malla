@@ -145,6 +145,20 @@
             </div>
         </div>
 
+        <!-- Hop depth selector (shown only when a node is selected) -->
+        <div class="sidebar-section" id="hopDepthSection" style="display: none;">
+            <h6><i class="bi bi-stack"></i> Hop Depth</h6>
+            <div class="small text-muted mb-2">Choose how many RF hops from the selected node remain visible.</div>
+            <select class="form-select form-select-sm" id="hopDepthSelect">
+                <option value="1" selected>1 hop</option>
+                <option value="2">2 hops</option>
+                <option value="3">3 hops</option>
+                <option value="4">4 hops</option>
+                <option value="5">5 hops</option>
+                <option value="999">All</option>
+            </select>
+        </div>
+
         {% set map_legend_items = [
             {"type": "span", "class": "role-color-indicator", "style": "background-color: #007bff;", "content": "", "text": "Client"},
             {"type": "span", "class": "role-color-indicator", "style": "background-color: #28a745;", "content": "", "text": "Router"},
@@ -409,6 +423,7 @@ let searchResults = [];
 let allNodes = [];
 let linkData = [];
 let firstDisplay = true; // prevent recenter after initial load
+let currentHopDepth = 1; // max hop depth to display around selected node
 
 // Initialize the page
 document.addEventListener('DOMContentLoaded', function() {
@@ -526,6 +541,14 @@ function initializeInterface() {
         }
     });
 
+    // Hop depth selector change handler
+    $('#hopDepthSelect').on('change', function() {
+        currentHopDepth = parseInt(this.value, 10);
+        if (selectedNodeId !== null) {
+            drawHopNetwork();
+        }
+    });
+
     // Sync MaxAge select with date-time pickers
     function toLocalInputValue(dateObj) {
         const pad = (n)=> n.toString().padStart(2,'0');
@@ -557,6 +580,9 @@ function initializeInterface() {
         $('#maxAge').val('');
         applyClientSideFilters();
     });
+
+    // Move hop depth section just below the selected details container
+    $('#hopDepthSection').insertAfter($('#selectedDetails'));
 }
 
 // Initialize the map
@@ -920,21 +946,17 @@ function focusOnNode(node) {
 function selectNode(node) {
     selectedNodeId = node.node_id;
 
+    // Show hop depth controls
+    document.getElementById('hopDepthSection').style.display = 'block';
+
     // Update node list selection
     updateNodeListSelection();
 
     // Show node details
     showSelectedNodeDetails(node);
 
-    // Show filtered links if enabled
-    if (showTracerouteLinks && tracerouteLinkData.length > 0) {
-        drawFilteredTracerouteLinks(node.node_id);
-    }
-
-    // Show packet links if enabled
-    if (showPacketLinks && packetLinkData.length > 0) {
-        drawFilteredPacketLinks(node.node_id);
-    }
+    // Apply hop filter & render (skip map fit so we stay centered on the clicked node)
+    drawHopNetwork(true);
 
     // Show precision circle
     showPrecisionCircle(node);
@@ -1011,6 +1033,11 @@ function showSelectedNodeDetails(node) {
 function clearNodeSelection() {
     selectedNodeId = null;
 
+    // Hide hop depth controls
+    document.getElementById('hopDepthSection').style.display = 'none';
+    currentHopDepth = 1;
+    document.getElementById('hopDepthSelect').value = '1';
+
     // Clear search result highlights
     document.querySelectorAll('.search-result-item').forEach(item => {
         item.classList.remove('selected');
@@ -1028,15 +1055,8 @@ function clearNodeSelection() {
         precisionCircle = null;
     }
 
-    // Show all links if enabled
-    if (showTracerouteLinks && tracerouteLinkData.length > 0) {
-        drawTracerouteLinks();
-    }
-
-    // Show all packet links if enabled
-    if (showPacketLinks && packetLinkData.length > 0) {
-        drawPacketLinks();
-    }
+    // Restore full map display
+    updateMapDisplay();
 }
 
 // Clear search results
@@ -1237,45 +1257,58 @@ function fitMapToNodes() {
 
 function toggleTracerouteLinks() {
     showTracerouteLinks = !showTracerouteLinks;
-    const btn = document.getElementById('linkToggleBtn');
 
     // Clear existing traceroute polylines
     tracerouteLinks.forEach(link => map.removeLayer(link));
     tracerouteLinks = [];
 
+    if (selectedNodeId !== null) {
+        // When a node is selected, just redraw hop network respecting new visibility
+        drawHopNetwork();
+        return;
+    }
+
+    const btn = document.getElementById('linkToggleBtn'); // may be null on this page
+
     if (showTracerouteLinks) {
-        if (selectedNodeId !== null) {
-            drawFilteredTracerouteLinks(selectedNodeId);
-        } else {
-            drawTracerouteLinks();
+        drawTracerouteLinks();
+        if (btn) {
+            btn.innerHTML = '<i class="bi bi-link-45deg"></i> Hide Traceroute Links';
+            btn.className = 'btn btn-sm btn-outline-info';
         }
-        btn.innerHTML = '<i class="bi bi-link-45deg"></i> Hide Traceroute Links';
-        btn.className = 'btn btn-sm btn-outline-info';
     } else {
-        btn.innerHTML = '<i class="bi bi-link-45deg-off"></i> Show Traceroute Links';
-        btn.className = 'btn btn-sm btn-outline-secondary';
+        if (btn) {
+            btn.innerHTML = '<i class="bi bi-link-45deg-off"></i> Show Traceroute Links';
+            btn.className = 'btn btn-sm btn-outline-secondary';
+        }
     }
 }
 
 function togglePacketLinks() {
     showPacketLinks = !showPacketLinks;
-    const btn = document.getElementById('packetLinkToggleBtn');
 
     // Clear existing packet polylines
     packetLinks.forEach(link => map.removeLayer(link));
     packetLinks = [];
 
+    if (selectedNodeId !== null) {
+        drawHopNetwork();
+        return;
+    }
+
+    const btn = document.getElementById('packetLinkToggleBtn'); // may be null
+
     if (showPacketLinks) {
-        if (selectedNodeId !== null) {
-            drawFilteredPacketLinks(selectedNodeId);
-        } else {
-            drawPacketLinks();
+        drawPacketLinks();
+        if (btn) {
+            btn.innerHTML = '<i class="bi bi-envelope-open"></i> Show Packet Links';
+            btn.className = 'btn btn-sm btn-outline-secondary';
         }
-        btn.innerHTML = '<i class="bi bi-envelope-open"></i> Show Packet Links';
-        btn.className = 'btn btn-sm btn-outline-secondary';
     } else {
-        btn.innerHTML = '<i class="bi bi-envelope-open"></i> Show Packet Links';
-        btn.className = 'btn btn-sm btn-outline-secondary';
+        if (btn) {
+            btn.innerHTML = '<i class="bi bi-envelope-open"></i> Show Packet Links';
+            btn.className = 'btn btn-sm btn-outline-secondary';
+        }
     }
 }
 
@@ -1519,6 +1552,88 @@ window.addEventListener('resize', function() {
         }, 100);
     }
 });
+
+// Compute nodes within given hop depth using allLinkData
+function computeNodesWithinHops(startNodeId, maxHops) {
+    const visited = new Set([startNodeId]);
+    let frontier = [startNodeId];
+    let hops = 0;
+    while (frontier.length > 0 && hops < maxHops) {
+        const nextFrontier = [];
+        frontier.forEach(nodeId => {
+            allLinkData.forEach(link => {
+                if (link.from_node_id === nodeId && !visited.has(link.to_node_id)) {
+                    visited.add(link.to_node_id);
+                    nextFrontier.push(link.to_node_id);
+                } else if (link.to_node_id === nodeId && !visited.has(link.from_node_id)) {
+                    visited.add(link.from_node_id);
+                    nextFrontier.push(link.from_node_id);
+                }
+            });
+        });
+        frontier = nextFrontier;
+        hops += 1;
+    }
+    return visited;
+}
+
+// Draw network limited by hop depth around the selected node
+function drawHopNetwork(skipFit = false) {
+    if (selectedNodeId === null) {
+        return;
+    }
+
+    // Determine visible nodes
+    const visibleNodesSet = (currentHopDepth >= 999) ? new Set(nodeData.map(n => n.node_id)) : computeNodesWithinHops(selectedNodeId, currentHopDepth);
+    visibleNodesSet.add(selectedNodeId); // ensure selected node visible
+
+    // Backup full dataset
+    const originalNodeData = [...nodeData];
+
+    // Filter nodes for display
+    nodeData = originalNodeData.filter(n => visibleNodesSet.has(n.node_id));
+
+    // Re-render markers and links
+    markerClusterGroup.clearLayers();
+    nodeMarkers = [];
+
+    // Clear existing links
+    tracerouteLinks.forEach(l => map.removeLayer(l));
+    tracerouteLinks = [];
+    packetLinks.forEach(l => map.removeLayer(l));
+    packetLinks = [];
+
+    // Add markers
+    nodeData.forEach(addNodeMarker);
+
+    // Draw links restricted to visible nodes
+    if (showTracerouteLinks) {
+        if (currentHopDepth === 1) {
+            drawFilteredTracerouteLinks(selectedNodeId);
+        } else {
+            drawTracerouteLinks();
+        }
+    }
+    if (showPacketLinks) {
+        if (currentHopDepth === 1) {
+            drawFilteredPacketLinks(selectedNodeId);
+        } else {
+            drawPacketLinks();
+        }
+    }
+
+    // Update node list display & stats
+    displayNodeList(nodeData, false);
+    updateStats();
+
+    // Refit map unless caller requested otherwise
+    if (!skipFit) {
+        fitMapToNodes();
+    }
+
+    // Restore original data for other operations
+    nodeData = originalNodeData;
+}
 </script>
 {% endblock %}
 
