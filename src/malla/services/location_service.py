@@ -723,3 +723,195 @@ class LocationService:
             "max_node_separation_km": round(max_separation, 2),
             "total_node_pairs": len(distances),
         }
+
+    @staticmethod
+    def get_packet_links(
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Build RF link data based on direct (0-hop) packet receptions.
+
+        A link is created between a transmitting node (from_node_id) and the gateway
+        node that received the packet (gateway_id). Only packets with a hop count
+        of 0 (direct RF reception) are considered so that the link set represents
+        real RF coverage between neighbouring radios – the same definition that is
+        used for the "Direct Receptions" feature on the node detail page.
+
+        The returned schema matches that of ``get_traceroute_links`` so that the
+        front-end can consume both interchangeably.
+
+        Args:
+            filters: Optional map/location filters identical to those accepted by
+                     :py:meth:`get_node_locations`.
+
+        Returns:
+            A list of dictionaries describing each RF link.  Where the same two
+            nodes are seen in both directions we merge the statistics and mark
+            the link as bidirectional.
+        """
+        if filters is None:
+            filters = {}
+
+        logger.info(
+            "Getting packet-based RF links for map visualisation with filters: %s",
+            filters,
+        )
+
+        try:
+            # Lazily import here to avoid circular deps and keep startup fast
+            from datetime import datetime
+
+            from ..database.connection import get_db_connection
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            # ------------------------------------------------------------------
+            # Build WHERE clause based on provided filters.
+            # ------------------------------------------------------------------
+            where_clauses: list[str] = [
+                "from_node_id IS NOT NULL",
+                "gateway_id IS NOT NULL",
+                "hop_start IS NOT NULL",
+                "hop_limit IS NOT NULL",
+                "(hop_start - hop_limit) = 0",  # 0-hop packets only
+            ]
+            params: list[Any] = []
+
+            # Time range – same handling as get_node_locations / get_traceroute_links
+            if filters.get("start_time") is not None:
+                where_clauses.append("timestamp >= ?")
+                params.append(filters["start_time"])
+            if filters.get("end_time") is not None:
+                where_clauses.append("timestamp <= ?")
+                params.append(filters["end_time"])
+
+            # Optional server-side gateway filter.  ``gateway_id`` is stored as the
+            # hex node id prefixed with '!'.  Convert here if filter is int.
+            if filters.get("gateway_id") is not None:
+                gw_val = filters["gateway_id"]
+                try:
+                    gw_int = int(gw_val)
+                    gw_hex = f"!{gw_int:08x}"
+                except Exception:
+                    # Assume caller already supplied the string format
+                    gw_hex = str(gw_val)
+                where_clauses.append("gateway_id = ?")
+                params.append(gw_hex)
+
+            where_sql = "WHERE " + " AND ".join(where_clauses)
+
+            query = f"""
+                SELECT
+                    from_node_id,
+                    gateway_id,
+                    COUNT(*)               AS packet_count,
+                    AVG(CAST(rssi AS FLOAT)) AS avg_rssi,
+                    AVG(CAST(snr  AS FLOAT)) AS avg_snr,
+                    MAX(timestamp)         AS last_seen
+                FROM packet_history
+                {where_sql}
+                GROUP BY from_node_id, gateway_id
+            """
+            cursor.execute(query, params)
+            rows = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+
+            # ------------------------------------------------------------------
+            # Convert DB rows into link dictionaries.
+            # ------------------------------------------------------------------
+            link_map: dict[tuple[int, int], dict[str, Any]] = {}
+            now_ts = datetime.now().timestamp()
+
+            for row in rows:
+                from_node_id: int | None = row["from_node_id"]
+                gw_id_raw: str | None = row["gateway_id"]
+                if from_node_id is None or not gw_id_raw:
+                    continue
+
+                # Parse the gateway node id.  The DB stores "!<8-char-hex>".
+                try:
+                    to_node_id = int(gw_id_raw.lstrip("!"), 16)
+                except ValueError:
+                    logger.warning(
+                        "Skipping gateway id that could not be parsed: %s", gw_id_raw
+                    )
+                    continue
+
+                # Ignore self-reception – should already be filtered but extra guard.
+                if from_node_id == to_node_id:
+                    continue
+
+                # Symmetric key → (smaller, larger) ensures undirected uniqueness
+                if from_node_id < to_node_id:
+                    key: tuple[int, int] = (from_node_id, to_node_id)
+                else:
+                    key = (to_node_id, from_node_id)
+
+                # Calculate derived metrics.
+                age_hours = (
+                    (now_ts - row["last_seen"]) / 3600.0 if row["last_seen"] else None
+                )
+                last_seen_str = (
+                    datetime.fromtimestamp(row["last_seen"]).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
+                    if row["last_seen"]
+                    else None
+                )
+
+                # Crude success-rate proxy: scale packet count to 10-100 like traceroute_links
+                success_rate = max(10, min(100, row["packet_count"] * 10))
+
+                link_payload = {
+                    "from_node_id": key[0],
+                    "to_node_id": key[1],
+                    "success_rate": success_rate,
+                    "avg_snr": row["avg_snr"],
+                    "avg_rssi": row["avg_rssi"],
+                    "age_hours": round(age_hours, 2) if age_hours is not None else None,
+                    "last_seen_str": last_seen_str,
+                    "is_bidirectional": False,  # will be updated below if we see both directions
+                    "total_hops_seen": row["packet_count"],
+                    "last_packet_id": None,
+                }
+
+                if key in link_map:
+                    # We have already seen the opposite direction – merge stats.
+                    existing = link_map[key]
+                    existing["total_hops_seen"] += row["packet_count"]
+                    existing["success_rate"] = min(
+                        100, max(existing["success_rate"], success_rate)
+                    )
+                    existing["is_bidirectional"] = True
+                    # Update recency if this direction newer
+                    if age_hours is not None and (
+                        existing.get("age_hours") is None
+                        or age_hours < existing["age_hours"]
+                    ):
+                        existing["age_hours"] = round(age_hours, 2)
+                        existing["last_seen_str"] = last_seen_str
+                    # Merge SNR / RSSI averages (simple mean of means)
+                    if row["avg_snr"] is not None:
+                        if existing["avg_snr"] is None:
+                            existing["avg_snr"] = row["avg_snr"]
+                        else:
+                            existing["avg_snr"] = (
+                                existing["avg_snr"] + row["avg_snr"]
+                            ) / 2.0
+                    if row["avg_rssi"] is not None:
+                        if existing["avg_rssi"] is None:
+                            existing["avg_rssi"] = row["avg_rssi"]
+                        else:
+                            existing["avg_rssi"] = (
+                                existing["avg_rssi"] + row["avg_rssi"]
+                            ) / 2.0
+                else:
+                    link_map[key] = link_payload
+
+            logger.info("Generated %d packet-based RF links", len(link_map))
+            return list(link_map.values())
+
+        except Exception as e:
+            logger.error("Error getting packet links: %s", e)
+            return []

@@ -66,7 +66,8 @@
 
         {% set map_controls = [
             {"class": "btn-outline-secondary", "onclick": "fitMapToNodes()", "icon": "bi bi-arrows-move", "text": "Fit All Nodes"},
-            {"class": "btn-outline-info", "onclick": "toggleLinks()", "icon": "bi bi-link-45deg", "text": "Hide RF Links", "id": "linkToggleBtn"},
+            {"class": "btn-outline-info", "onclick": "toggleTracerouteLinks()", "icon": "bi bi-link-45deg", "text": "Hide Traceroute Links", "id": "linkToggleBtn"},
+            {"class": "btn-outline-warning", "onclick": "togglePacketLinks()", "icon": "bi bi-envelope", "text": "Hide Packet Links", "id": "packetLinkToggleBtn"},
             {"class": "btn-outline-primary", "onclick": "refreshMap()", "icon": "bi bi-arrow-clockwise", "text": "Refresh"}
         ] %}
         {{ controls_section(map_controls) }}
@@ -126,7 +127,9 @@
             {"type": "span", "class": "role-color-indicator", "style": "background-color: #dc3545;", "content": "", "text": "Unknown Role"},
             {"type": "span", "class": "signal-indicator bg-success", "content": "", "text": "Excellent coverage"},
             {"type": "span", "class": "signal-indicator bg-warning", "content": "", "text": "Good coverage"},
-            {"type": "span", "class": "signal-indicator bg-danger", "content": "", "text": "Limited coverage"}
+            {"type": "span", "class": "signal-indicator bg-danger", "content": "", "text": "Limited coverage"},
+            {"type": "span", "class": "legend-line", "style": "border-top: 4px solid #0d6efd;", "content": "", "text": "Traceroute link"},
+            {"type": "span", "class": "legend-line", "style": "border-top: 4px dashed #0d6efd;", "content": "", "text": "Packet link"}
         ] %}
         {% call legend_section(map_legend_items) %}
             <div class="legend-item mt-2">
@@ -326,6 +329,15 @@
         flex: 1;
     }
 }
+
+/* Legend line style */
+.legend-line {
+    display: inline-block;
+    width: 22px;
+    height: 0;
+    margin-right: 4px;
+    vertical-align: middle;
+}
 </style>
 
 {{ sidebar_styles() }}
@@ -343,15 +355,20 @@ let map;
 let nodeMarkers = [];
 let markerClusterGroup;
 let tracerouteLinks = [];
+let packetLinks = [];
 let nodeData = [];
-let linkData = [];
-let allNodeData = []; // Store all fetched node data for client-side filtering
-let allLinkData = []; // Store all fetched link data for client-side filtering
+let tracerouteLinkData = [];
+let packetLinkData = [];
+let allNodeData = [];
+let allTracerouteLinks = [];
+let allPacketLinks = [];
 let selectedNodeId = null;
-let showLinks = true;
+let showTracerouteLinks = true;
+let showPacketLinks = true;
 let precisionCircle = null;
 let searchResults = [];
 let allNodes = [];
+let linkData = [];
 
 // Initialize the page
 document.addEventListener('DOMContentLoaded', function() {
@@ -510,7 +527,12 @@ async function loadNodeLocations() {
 
         // Store all data for client-side filtering
         allNodeData = data.locations || [];
-        allLinkData = data.traceroute_links || [];
+
+        // Combine traceroute and packet links but tag with type for filtering
+        const tracerouteLinksFetched = (data.traceroute_links || []).map(l => ({ ...l, link_type: 'traceroute' }));
+        const packetLinksFetched = (data.packet_links || []).map(l => ({ ...l, link_type: 'packet' }));
+
+        allLinkData = [...tracerouteLinksFetched, ...packetLinksFetched];
 
         // Apply client-side filters
         applyClientSideFilters();
@@ -557,6 +579,18 @@ function applyClientSideFilters() {
         }
     }
 
+    // Apply age filter to links if set
+    if (maxAge) {
+        const maxAgeHours = parseInt(maxAge);
+        filteredLinks = filteredLinks.filter(link => {
+            if (link.age_hours !== undefined && link.age_hours !== null) {
+                return link.age_hours <= maxAgeHours;
+            }
+            // Fallback: include if we don't have age info
+            return true;
+        });
+    }
+
     // Filter links to only include those between visible nodes
     const visibleNodeIds = new Set(filteredNodes.map(node => node.node_id));
     filteredLinks = filteredLinks.filter(link =>
@@ -565,7 +599,8 @@ function applyClientSideFilters() {
 
     // Update global variables
     nodeData = filteredNodes;
-    linkData = filteredLinks;
+    tracerouteLinkData = filteredLinks.filter(link => link.link_type === 'traceroute');
+    packetLinkData = filteredLinks.filter(link => link.link_type === 'packet');
     allNodes = nodeData; // Set the unified node list
 
     // Update the map display
@@ -589,9 +624,13 @@ function updateMapDisplay() {
     // Update unified node list
     showAllNodes();
 
-    // Load traceroute links if enabled
-    if (showLinks && linkData.length > 0) {
+    // Load links if at least one type is enabled
+    if (showTracerouteLinks && tracerouteLinkData.length > 0) {
         drawTracerouteLinks();
+    }
+
+    if (showPacketLinks && packetLinkData.length > 0) {
+        drawPacketLinks();
     }
 
     // Fit map to show all nodes
@@ -767,8 +806,13 @@ function selectNode(node) {
     showSelectedNodeDetails(node);
 
     // Show filtered links if enabled
-    if (showLinks && linkData.length > 0) {
-        drawFilteredLinks(node.node_id);
+    if (showTracerouteLinks && tracerouteLinkData.length > 0) {
+        drawFilteredTracerouteLinks(node.node_id);
+    }
+
+    // Show packet links if enabled
+    if (showPacketLinks && packetLinkData.length > 0) {
+        drawFilteredPacketLinks(node.node_id);
     }
 
     // Show precision circle
@@ -864,8 +908,13 @@ function clearNodeSelection() {
     }
 
     // Show all links if enabled
-    if (showLinks && linkData.length > 0) {
+    if (showTracerouteLinks && tracerouteLinkData.length > 0) {
         drawTracerouteLinks();
+    }
+
+    // Show all packet links if enabled
+    if (showPacketLinks && packetLinkData.length > 0) {
+        drawPacketLinks();
     }
 }
 
@@ -928,7 +977,7 @@ function updateNodeListSelection() {
 function updateStats() {
     document.getElementById('statsNodes').textContent = nodeData.length;
     document.getElementById('statsWithLocation').textContent = nodeData.length;
-    document.getElementById('statsLinks').textContent = linkData.length;
+    document.getElementById('statsLinks').textContent = tracerouteLinkData.length + packetLinkData.length;
     document.getElementById('statsLastUpdate').textContent = new Date().toLocaleTimeString();
 }
 
@@ -1026,26 +1075,46 @@ function fitMapToNodes() {
     }
 }
 
-function toggleLinks() {
-    showLinks = !showLinks;
+function toggleTracerouteLinks() {
+    showTracerouteLinks = !showTracerouteLinks;
     const btn = document.getElementById('linkToggleBtn');
 
-    if (showLinks) {
-        // Show links - use current filtering state
-        if (linkData.length > 0) {
-            if (selectedNodeId !== null) {
-                drawFilteredLinks(selectedNodeId);
-            } else {
-                drawTracerouteLinks();
-            }
+    // Clear existing traceroute polylines
+    tracerouteLinks.forEach(link => map.removeLayer(link));
+    tracerouteLinks = [];
+
+    if (showTracerouteLinks) {
+        if (selectedNodeId !== null) {
+            drawFilteredTracerouteLinks(selectedNodeId);
+        } else {
+            drawTracerouteLinks();
         }
-        btn.innerHTML = '<i class="bi bi-link-45deg"></i> Hide RF Links';
+        btn.innerHTML = '<i class="bi bi-link-45deg"></i> Hide Traceroute Links';
         btn.className = 'btn btn-sm btn-outline-info';
     } else {
-        // Hide links
-        tracerouteLinks.forEach(link => map.removeLayer(link));
-        tracerouteLinks = [];
-        btn.innerHTML = '<i class="bi bi-link-45deg-off"></i> Show RF Links';
+        btn.innerHTML = '<i class="bi bi-link-45deg-off"></i> Show Traceroute Links';
+        btn.className = 'btn btn-sm btn-outline-secondary';
+    }
+}
+
+function togglePacketLinks() {
+    showPacketLinks = !showPacketLinks;
+    const btn = document.getElementById('packetLinkToggleBtn');
+
+    // Clear existing packet polylines
+    packetLinks.forEach(link => map.removeLayer(link));
+    packetLinks = [];
+
+    if (showPacketLinks) {
+        if (selectedNodeId !== null) {
+            drawFilteredPacketLinks(selectedNodeId);
+        } else {
+            drawPacketLinks();
+        }
+        btn.innerHTML = '<i class="bi bi-envelope"></i> Hide Packet Links';
+        btn.className = 'btn btn-sm btn-outline-warning';
+    } else {
+        btn.innerHTML = '<i class="bi bi-envelope-open"></i> Show Packet Links';
         btn.className = 'btn btn-sm btn-outline-secondary';
     }
 }
@@ -1057,7 +1126,7 @@ function drawTracerouteLinks() {
 
 // Draw traceroute links with optional filtering by node
 function drawTracerouteLinksFiltered(filterNodeId = null) {
-    // Clear existing links
+    // Clear existing traceroute polylines
     tracerouteLinks.forEach(link => map.removeLayer(link));
     tracerouteLinks = [];
 
@@ -1068,10 +1137,10 @@ function drawTracerouteLinksFiltered(filterNodeId = null) {
         nodePositions[node.node_id] = [node.latitude, node.longitude];
     });
 
-    // Filter links if a node is selected
-    let linksToShow = linkData;
+    // Start with traceroute link data only
+    let linksToShow = tracerouteLinkData;
     if (filterNodeId !== null) {
-        linksToShow = linkData.filter(link =>
+        linksToShow = linksToShow.filter(link =>
             link.from_node_id === filterNodeId ||
             link.to_node_id === filterNodeId
         );
@@ -1122,8 +1191,86 @@ function drawTracerouteLinksFiltered(filterNodeId = null) {
 }
 
 // Draw only links connected to a specific node
-function drawFilteredLinks(nodeId) {
+function drawFilteredTracerouteLinks(nodeId) {
     drawTracerouteLinksFiltered(nodeId);
+}
+
+// Draw packet links on the map
+function drawPacketLinks() {
+    drawPacketLinksFiltered(null);
+}
+
+// Draw packet links with optional filtering by node
+function drawPacketLinksFiltered(filterNodeId = null) {
+    // Clear existing packet polylines
+    packetLinks.forEach(link => map.removeLayer(link));
+    packetLinks = [];
+
+    const nodePositions = {};
+
+    // Build node position lookup
+    nodeData.forEach(node => {
+        nodePositions[node.node_id] = [node.latitude, node.longitude];
+    });
+
+    // Start with packet link data only
+    let linksToShow = packetLinkData;
+    if (filterNodeId !== null) {
+        linksToShow = linksToShow.filter(link =>
+            link.from_node_id === filterNodeId ||
+            link.to_node_id === filterNodeId
+        );
+    }
+
+    linksToShow.forEach(link => {
+        const fromPos = nodePositions[link.from_node_id];
+        const toPos = nodePositions[link.to_node_id];
+
+        if (!fromPos || !toPos) {
+            return; // Skip if either node doesn't have position
+        }
+
+        // Determine link color and style based on success rate and SNR
+        let linkColor = '#999999';
+        let linkWeight = 2;
+        let linkOpacity = 0.6;
+
+        // If filtering by node, highlight the selected node's links
+        if (filterNodeId !== null) {
+            linkWeight = 3; // Make filtered links thicker
+            linkOpacity = 0.9; // Make them more opaque
+        }
+
+        if (link.success_rate >= 80) {
+            linkColor = '#28a745'; // Green for high success
+        } else if (link.success_rate >= 50) {
+            linkColor = '#ffc107'; // Yellow for medium success
+        } else {
+            linkColor = '#dc3545'; // Red for low success
+        }
+
+        // Packet links get dashed style to visually distinguish
+        const isPacket = link.link_type === 'packet';
+
+        const line = L.polyline([fromPos, toPos], {
+            color: linkColor,
+            weight: linkWeight,
+            opacity: linkOpacity,
+            dashArray: isPacket ? '3, 6' : (link.success_rate < 50 ? '5, 5' : null)
+        });
+
+        // Add popup with link information
+        const popupContent = createLinkPopupContent(link);
+        line.bindPopup(popupContent);
+
+        line.addTo(map);
+        packetLinks.push(line);
+    });
+}
+
+// Draw only links connected to a specific node
+function drawFilteredPacketLinks(nodeId) {
+    drawPacketLinksFiltered(nodeId);
 }
 
 // Create popup content for traceroute links
@@ -1140,7 +1287,7 @@ function createLinkPopupContent(link) {
 
     return `
         <div class="traceroute-link-info">
-            <div class="fw-bold mb-2">RF Hop Link</div>
+            <div class="fw-bold mb-2">${link.link_type === 'packet' ? 'Direct Packet Link' : 'Traceroute RF Hop'}</div>
             <div><strong>From:</strong> ${fromName}</div>
             <div><strong>To:</strong> ${toName}</div>
             <div><strong>Success Rate:</strong> <span class="${qualityClass}">${link.success_rate.toFixed(1)}%</span></div>

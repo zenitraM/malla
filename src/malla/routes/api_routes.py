@@ -529,13 +529,20 @@ def api_locations():
         # Get enhanced location data with network topology
         locations = LocationService.get_node_locations(filters)
 
-        # Get traceroute links for map visualization (also 14 days)
+        # ------------------------------------------------------------------
+        # Link data
+        #   • traceroute_links  – extracted from traceroute packets
+        #   • packet_links      – direct (0-hop) packet receptions
+        # ------------------------------------------------------------------
+
         traceroute_links = LocationService.get_traceroute_links(filters)
+        packet_links = LocationService.get_packet_links(filters)
 
         return safe_jsonify(
             {
                 "locations": locations,
                 "traceroute_links": traceroute_links,
+                "packet_links": packet_links,
                 "total_count": len(locations) if isinstance(locations, list) else 0,
                 "filters_applied": filters,
                 "data_period_days": 14,
