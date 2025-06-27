@@ -2396,6 +2396,48 @@ class TracerouteRepository:
 
                     aggregated_packets.append(aggregated)
 
+                if needs_route_filtering:
+                    filtered_packets: list[dict[str, Any]] = []
+                    for packet in aggregated_packets:
+                        # Direct match on source/destination
+                        if (
+                            packet.get("from_node_id") == route_node_filter
+                            or packet.get("to_node_id") == route_node_filter
+                        ):
+                            filtered_packets.append(packet)
+                            continue
+
+                        # Attempt to match within the hop route
+                        # Prefer already extracted route information if available
+                        route_nodes: list[int] | None = None
+                        if packet.get("route"):
+                            try:
+                                import json as _json
+
+                                route_nodes = _json.loads(packet["route"])
+                            except Exception:
+                                route_nodes = None
+
+                        # If not available, fall back to parsing the raw payload
+                        if route_nodes is None and packet.get("raw_payload"):
+                            try:
+                                from ..models.traceroute import TraceroutePacket as _TRP
+
+                                tr_packet = _TRP(packet, resolve_names=False)
+                                route_nodes = tr_packet.route_data.get(
+                                    "route_nodes", []
+                                )
+                            except Exception as e:
+                                logger.debug(
+                                    f"Failed to parse route for grouped route_node filtering: {e}"
+                                )
+                        if route_nodes and route_node_filter in route_nodes:
+                            filtered_packets.append(packet)
+
+                    aggregated_packets = filtered_packets
+                    # For grouped queries we can now set an accurate total_count
+                    total_count = len(aggregated_packets)
+
                 # Apply sorting to aggregated packets
                 reverse_sort = order_dir.lower() == "desc"
 
