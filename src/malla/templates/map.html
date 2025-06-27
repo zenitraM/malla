@@ -452,6 +452,7 @@ function initializeInterface() {
         setTimeout(() => {
             if (map) {
                 map.invalidateSize();
+                fitMapToNodes();
             }
         }, 300);
     });
@@ -1189,10 +1190,49 @@ function formatRole(role) {
 
 // Map control functions
 function fitMapToNodes() {
-    if (nodeMarkers.length > 0) {
-        const bounds = nodeMarkers.map(marker => marker.getLatLng());
-        map.fitBounds(bounds, { padding: [20, 20] });
+    if (nodeMarkers.length === 0) {
+        return;
     }
+
+    // Collect lat/lngs from markers
+    const latLngs = nodeMarkers.map(m => m.getLatLng());
+
+    // If we have enough markers, trim extreme outliers (top / bottom 2.5%)
+    let bounds;
+    if (latLngs.length > 4) {
+        const lats = latLngs.map(ll => ll.lat).sort((a, b) => a - b);
+        const lngs = latLngs.map(ll => ll.lng).sort((a, b) => a - b);
+
+        const lowerIdx = Math.floor(lats.length * 0.025);
+        const upperIdx = Math.ceil(lats.length * 0.975) - 1;
+
+        const minLat = lats[lowerIdx];
+        const maxLat = lats[upperIdx];
+        const minLng = lngs[lowerIdx];
+        const maxLng = lngs[upperIdx];
+
+        bounds = L.latLngBounds([[minLat, minLng], [maxLat, maxLng]]);
+    } else {
+        bounds = L.latLngBounds(latLngs);
+    }
+
+    // Determine extra bottom padding on mobile when the sidebar is expanded
+    let paddingTopLeft = [20, 20];
+    let paddingBottomRight = [20, 20];
+
+    if (window.innerWidth <= 768) {
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar) {
+            // Collapsed sidebar shows only a ~60px header, otherwise full 60vh
+            const sidebarHeight = sidebar.classList.contains('collapsed') ? 60 : sidebar.clientHeight || window.innerHeight * 0.6;
+            paddingBottomRight = [20, 20 + sidebarHeight];
+        }
+    }
+
+    map.fitBounds(bounds, {
+        paddingTopLeft: paddingTopLeft,
+        paddingBottomRight: paddingBottomRight,
+    });
 }
 
 function toggleTracerouteLinks() {
@@ -1475,6 +1515,7 @@ window.addEventListener('resize', function() {
     if (map) {
         setTimeout(() => {
             map.invalidateSize();
+            fitMapToNodes();
         }, 100);
     }
 });
