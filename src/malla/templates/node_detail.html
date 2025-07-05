@@ -172,8 +172,6 @@
                                                                                 <span class="signal-indicator signal-good">{{ node.avg_rssi|format_rssi }} dBm</span>
                             {% elif node.avg_rssi >= -80 %}
                                 <span class="signal-indicator signal-fair">{{ node.avg_rssi|format_rssi }} dBm</span>
-                            {% else %}
-                                <span class="signal-indicator signal-poor">{{ node.avg_rssi|format_rssi }} dBm</span>
                                             {% endif %}
                                         {% else %}
                                             <span class="text-muted">Unknown</span>
@@ -365,102 +363,186 @@
             </div>
             {% endif %}
 
-            <!-- Recent Packets -->
-            {% if recent_packets %}
+            <!-- Recent Packets (Sent / Reported) -->
+            {% if recent_packets or recent_reported_packets %}
             <div class="card mb-4">
                 <div class="card-header">
                     <h5><i class="bi bi-clock-history"></i> Recent Packets</h5>
-                    <small class="text-muted">Last 20 packets from this node</small>
                 </div>
                 <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>Time</th>
-                                    <th>Protocol</th>
-                                    <th>To Node</th>
-                                    <th>Gateway</th>
-                                    <th>RSSI</th>
-                                    <th>SNR</th>
-                                    <th>Hops</th>
-                                    <th>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for packet in recent_packets %}
-                                <tr>
-                                    <td>
-                                        <small>{{ packet.timestamp_relative }}</small>
-                                    </td>
-                                    <td>
-                                        {{ protocol_badge(packet.protocol) }}
-                                    </td>
-                                    <td>
-                                        {% if packet.to_node_id %}
-                                            {{ node_link(packet.to_node_id, packet.to_node_name) }}
-                                        {% else %}
-                                            {{ packet.to_node_name or "Unknown" }}
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if packet.is_grouped %}
-                                            <span class="text-info">{{ packet.gateway_display }}</span>
-                                            {% if packet.gateway_list %}
-                                                <i class="bi bi-info-circle text-muted"
-                                                   data-bs-toggle="tooltip"
-                                                   data-bs-placement="top"
-                                                   title="Gateways: {{ packet.gateway_list|join(', ') }}"></i>
-                                            {% endif %}
-                                        {% else %}
-                                            {% if packet.gateway_node_id %}
-                                                {{ node_link(packet.gateway_node_id, packet.gateway_name) }}
-                                            {% else %}
-                                                {{ packet.gateway_id or "Unknown" }}
-                                            {% endif %}
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if packet.rssi %}
-                                            {% if packet.is_grouped %}
-                                                <span class="text-info">{{ packet.rssi }}</span>
-                                            {% else %}
-                                                {{ packet.rssi }} dBm
-                                            {% endif %}
-                                        {% else %}
-                                            -
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if packet.snr %}
-                                            {% if packet.is_grouped %}
-                                                <span class="text-info">{{ packet.snr }}</span>
-                                            {% else %}
-                                                {{ packet.snr }} dB
-                                            {% endif %}
-                                        {% else %}
-                                            -
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if packet.hop_count is not none %}
-                                            {{ packet.hop_count }}
-                                        {% else %}
-                                            -
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        <a href="/packet/{{ packet.id }}" class="btn btn-sm btn-outline-primary">View</a>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="mt-3">
-                        <a href="/packets?from_node={{ node.node_id }}" class="btn btn-outline-primary">
-                            <i class="bi bi-box"></i> View All Packets from This Node
-                        </a>
+                    <!-- Tab selector -->
+                    <ul class="nav nav-tabs" id="recentPacketsTab" role="tablist">
+                        {% if recent_packets %}
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="sent-tab" data-bs-toggle="tab" data-bs-target="#sent-tab-pane" type="button" role="tab">Sent</button>
+                        </li>
+                        {% endif %}
+                        {% if recent_reported_packets %}
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link {% if not recent_packets %}active{% endif %}" id="reported-tab" data-bs-toggle="tab" data-bs-target="#reported-tab-pane" type="button" role="tab">Reported</button>
+                        </li>
+                        {% endif %}
+                    </ul>
+
+                    <div class="tab-content mt-3">
+                        {% if recent_packets %}
+                        <div class="tab-pane fade show active" id="sent-tab-pane" role="tabpanel" aria-labelledby="sent-tab">
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Time</th>
+                                            <th>Protocol</th>
+                                            <th>To Node</th>
+                                            <th>Gateway</th>
+                                            <th>RSSI</th>
+                                            <th>SNR</th>
+                                            <th>Hops</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for packet in recent_packets %}
+                                        <tr>
+                                            <td><small>{{ packet.timestamp_relative }}</small></td>
+                                            <td>{{ protocol_badge(packet.protocol) }}</td>
+                                            <td>
+                                                {% if packet.to_node_id %}
+                                                    {{ node_link(packet.to_node_id, packet.to_node_name) }}
+                                                {% else %}
+                                                    {{ packet.to_node_name or "Unknown" }}
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if packet.is_grouped %}
+                                                    <span class="text-info">{{ packet.gateway_display }}</span>
+                                                    {% if packet.gateway_list %}
+                                                        <i class="bi bi-info-circle text-muted" data-bs-toggle="tooltip" title="Gateways: {{ packet.gateway_list|join(', ') }}"></i>
+                                                    {% endif %}
+                                                {% else %}
+                                                    {% if packet.gateway_node_id %}
+                                                        {{ node_link(packet.gateway_node_id, packet.gateway_name) }}
+                                                    {% else %}
+                                                        {{ packet.gateway_id or "Unknown" }}
+                                                    {% endif %}
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if packet.rssi %}
+                                                    {% if packet.is_grouped %}
+                                                        <span class="text-info">{{ packet.rssi }}</span>
+                                                    {% else %}
+                                                        {{ packet.rssi }} dBm
+                                                    {% endif %}
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if packet.snr %}
+                                                    {% if packet.is_grouped %}
+                                                        <span class="text-info">{{ packet.snr }}</span>
+                                                    {% else %}
+                                                        {{ packet.snr }} dB
+                                                    {% endif %}
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if packet.hop_count is not none %}
+                                                    {{ packet.hop_count }}
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <a href="/packet/{{ packet.id }}" class="btn btn-sm btn-outline-primary">View</a>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="mt-3">
+                                <a href="/packets?from_node={{ node.node_id }}" class="btn btn-outline-primary">
+                                    <i class="bi bi-box"></i> View All Packets from This Node
+                                </a>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% if recent_reported_packets %}
+                        <div class="tab-pane fade {% if not recent_packets %}show active{% endif %}" id="reported-tab-pane" role="tabpanel" aria-labelledby="reported-tab">
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Time</th>
+                                            <th>Protocol</th>
+                                            <th>From Node</th>
+                                            <th>To Node</th>
+                                            <th>RSSI</th>
+                                            <th>SNR</th>
+                                            <th>Hops</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for packet in recent_reported_packets %}
+                                        <tr>
+                                            <td><small>{{ packet.timestamp_relative }}</small></td>
+                                            <td>{{ protocol_badge(packet.protocol) }}</td>
+                                            <td>
+                                                {% if packet.from_node_id %}
+                                                    {{ node_link(packet.from_node_id, packet.from_node_name) }}
+                                                {% else %}
+                                                    {{ packet.from_node_name or "Unknown" }}
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if packet.to_node_id %}
+                                                    {{ node_link(packet.to_node_id, packet.to_node_name) }}
+                                                {% else %}
+                                                    {{ packet.to_node_name or "Unknown" }}
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if packet.rssi is not none %}
+                                                    {{ packet.rssi }} dBm
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if packet.snr is not none %}
+                                                    {{ packet.snr }} dB
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if packet.hop_count is not none %}
+                                                    {{ packet.hop_count }}
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <a href="/packet/{{ packet.id }}" class="btn btn-sm btn-outline-primary">View</a>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="mt-3">
+                                <a href="/packets?gateway_id={{ node.node_id }}&exclude_self=true" class="btn btn-outline-primary">
+                                    <i class="bi bi-box"></i> View All Packets Reported by This Node
+                                </a>
+                            </div>
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
             </div>

@@ -5,6 +5,8 @@ End-to-end tests for packets page URL filter behavior.
 import requests
 from playwright.sync_api import Page, expect
 
+DEFAULT_TIMEOUT = 20000  # ms – common timeout for waits
+
 
 class TestPacketsURLFilters:
     """Test suite for packets page URL filter functionality."""
@@ -181,3 +183,31 @@ class TestPacketsURLFilters:
             f"Expected exactly 1 API request for unfiltered page, "
             f"but found {len(api_requests)} requests"
         )
+
+    def test_packets_exclude_self_param_populates_checkbox(
+        self, page: Page, test_server_url: str
+    ):
+        """Passing exclude_self=true in URL should check the checkbox automatically."""
+        test_gateway_id = "1128011076"
+
+        # Navigate with exclude_self param
+        page.goto(
+            f"{test_server_url}/packets?gateway_id={test_gateway_id}&exclude_self=true"
+        )
+
+        # Wait for page and table to load
+        page.wait_for_selector("#packetsTable", timeout=DEFAULT_TIMEOUT)
+        page.wait_for_timeout(2000)
+
+        # Verify gateway hidden field populated
+        hidden_gateway = page.locator('input[name="gateway_id"]')
+        expect(hidden_gateway).to_have_value(test_gateway_id)
+
+        # Verify exclude_self checkbox is checked
+        exclude_checkbox = page.locator("#exclude_self")
+        expect(exclude_checkbox).to_be_checked()
+
+        # Optionally verify table has data and first rows do not match gateway node id
+        rows = page.locator("#packetsTable tbody tr")
+        assert rows.count() > 0, "Table should show data with exclude filter applied"
+        # Could further inspect via API but out-of-scope for UI checkbox population check

@@ -85,7 +85,15 @@
                 const filters = this.urlManager.getCurrentFilters();
                 const cleaned = this._cleanFilters(filters);
 
-                // Include grouping checkbox state in the filters for comparison
+                // Auto-disable grouping if gateway_id filter present
+                if (cleaned.gateway_id && this.groupingCheckbox && this.groupingCheckbox.checked) {
+                    this.groupingCheckbox.checked = false;
+                    cleaned.group_packets = false;
+                    // Sync back to filter store
+                    this.filterStore.state['group_packets'] = false;
+                }
+
+                // Ensure grouping checkbox state reflected in cleaned filters
                 if (this.groupingCheckbox) {
                     cleaned.group_packets = this.groupingCheckbox.checked;
                 }
@@ -179,7 +187,15 @@
 
                     const cleaned = this._cleanFilters(current);
 
-                    // Include grouping checkbox state in the filters for comparison
+                    // If a specific gateway filter is applied, automatically disable grouping
+                    if (current.gateway_id && current.gateway_id.toString().trim() !== '' && this.groupingCheckbox && this.groupingCheckbox.checked) {
+                        // Uncheck grouping and update store once (avoid infinite loop)
+                        this.groupingCheckbox.checked = false;
+                        this.filterStore.state['group_packets'] = false;
+                        cleaned.group_packets = false;
+                    }
+
+                    // Ensure grouping checkbox state reflected in cleaned filters
                     if (this.groupingCheckbox) {
                         cleaned.group_packets = this.groupingCheckbox.checked;
                     }

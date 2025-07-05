@@ -216,8 +216,8 @@ class TestTracerouteURLFilters:
 
     def test_traceroute_gateway_filter_url(self, page: Page, test_server_url: str):
         """Test that gateway_id URL parameter is applied correctly."""
-        # Use a known gateway ID from test fixtures
-        test_gateway_id = "!433c1544"  # This should exist in test data
+        # Use a known gateway node decimal ID from test fixtures
+        test_gateway_id = "1128011076"  # decimal form of !433c1544
 
         # Track network requests
         api_requests = []
@@ -245,15 +245,9 @@ class TestTracerouteURLFilters:
         assert row_count > 0, "Table should show filtered data"
 
         # Should have exactly 1 filtered API request
-        # The ! character gets URL encoded as %21
-        encoded_gateway_id = test_gateway_id.replace("!", "%21")
         filtered_requests = [
-            req
-            for req in api_requests
-            if f"gateway_id={test_gateway_id}" in req["url"]
-            or f"gateway_id={encoded_gateway_id}" in req["url"]
+            req for req in api_requests if f"gateway_id={test_gateway_id}" in req["url"]
         ]
-
         assert len(filtered_requests) == 1, (
             f"Expected exactly 1 filtered request, but found {len(filtered_requests)}"
         )

@@ -114,8 +114,15 @@ def api_packets():
         # Build filters
         filters: dict[str, Any] = {}
         gateway_id_arg = request.args.get("gateway_id")
+        node_id_for_gateway: int | None = None
         if gateway_id_arg:
-            filters["gateway_id"] = gateway_id_arg
+            try:
+                node_id_for_gateway = convert_node_id(gateway_id_arg)
+                gateway_hex = f"!{node_id_for_gateway:08x}"
+                filters["gateway_id"] = gateway_hex
+            except ValueError:
+                # Fallback to use raw string if conversion fails (legacy)
+                filters["gateway_id"] = gateway_id_arg
         from_node_str = request.args.get("from_node")
         if from_node_str:
             try:
@@ -140,6 +147,35 @@ def api_packets():
         if hop_count_str:
             try:
                 filters["hop_count"] = int(hop_count_str)
+            except ValueError:
+                pass
+
+        # ------------------------------------------------------------------
+        # Generic exclusion filters (exclude_from, exclude_to)
+        # ------------------------------------------------------------------
+        exclude_from_str = request.args.get("exclude_from", "").strip()
+        if exclude_from_str:
+            try:
+                filters["exclude_from"] = int(exclude_from_str)
+            except ValueError:
+                pass
+
+        exclude_to_str = request.args.get("exclude_to", "").strip()
+        if exclude_to_str:
+            try:
+                filters["exclude_to"] = int(exclude_to_str)
+            except ValueError:
+                pass
+
+        # Special convenience flag to exclude self-reported gateway messages
+        exclude_self_flag = request.args.get("exclude_self", "false").lower() == "true"
+        if exclude_self_flag and gateway_id_arg:
+            try:
+                if node_id_for_gateway is None:
+                    from ..utils.node_utils import convert_node_id as _cni
+
+                    node_id_for_gateway = _cni(gateway_id_arg)
+                filters["exclude_from"] = node_id_for_gateway
             except ValueError:
                 pass
 
@@ -1030,8 +1066,15 @@ def api_packets_data():
         # Build filters from query parameters
         filters: dict[str, Any] = {}
         gateway_id_arg = request.args.get("gateway_id")
+        node_id_for_gateway: int | None = None
         if gateway_id_arg:
-            filters["gateway_id"] = gateway_id_arg
+            try:
+                node_id_for_gateway = convert_node_id(gateway_id_arg)
+                gateway_hex = f"!{node_id_for_gateway:08x}"
+                filters["gateway_id"] = gateway_hex
+            except ValueError:
+                # Fallback to use raw string if conversion fails (legacy)
+                filters["gateway_id"] = gateway_id_arg
         from_node_str = request.args.get("from_node", "").strip()
         if from_node_str:
             try:
@@ -1057,6 +1100,35 @@ def api_packets_data():
         if hop_count_str:
             try:
                 filters["hop_count"] = int(hop_count_str)
+            except ValueError:
+                pass
+
+        # ------------------------------------------------------------------
+        # Generic exclusion filters (exclude_from, exclude_to)
+        # ------------------------------------------------------------------
+        exclude_from_str = request.args.get("exclude_from", "").strip()
+        if exclude_from_str:
+            try:
+                filters["exclude_from"] = int(exclude_from_str)
+            except ValueError:
+                pass
+
+        exclude_to_str = request.args.get("exclude_to", "").strip()
+        if exclude_to_str:
+            try:
+                filters["exclude_to"] = int(exclude_to_str)
+            except ValueError:
+                pass
+
+        # Special convenience flag to exclude self-reported gateway messages
+        exclude_self_flag = request.args.get("exclude_self", "false").lower() == "true"
+        if exclude_self_flag and gateway_id_arg:
+            try:
+                if node_id_for_gateway is None:
+                    from ..utils.node_utils import convert_node_id as _cni
+
+                    node_id_for_gateway = _cni(gateway_id_arg)
+                filters["exclude_from"] = node_id_for_gateway
             except ValueError:
                 pass
 

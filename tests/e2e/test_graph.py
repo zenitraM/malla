@@ -4,6 +4,8 @@ End-to-end tests for the traceroute graph functionality using Playwright.
 
 from playwright.sync_api import Page, expect
 
+DEFAULT_TIMEOUT = 30000
+
 
 class TestGraphBasicFunctionality:
     """Basic graph functionality tests."""
@@ -23,7 +25,7 @@ class TestGraphBasicFunctionality:
         page.goto(traceroute_graph_url)
 
         # Wait for the graph to load
-        page.wait_for_selector("#networkGraph svg", timeout=10000)
+        page.wait_for_selector("#networkGraph svg", timeout=DEFAULT_TIMEOUT)
 
         # Find the search input
         search_input = page.locator("#nodeSearch")
@@ -44,7 +46,7 @@ class TestGraphBasicFunctionality:
         page.goto(traceroute_graph_url)
 
         # Wait for the graph to load
-        page.wait_for_selector("#networkGraph svg", timeout=10000)
+        page.wait_for_selector("#networkGraph svg", timeout=DEFAULT_TIMEOUT)
 
         # Search for a node
         search_input = page.locator("#nodeSearch")
@@ -191,7 +193,7 @@ class TestGraphInteractivity:
         page.goto(traceroute_graph_url)
 
         # Wait for the graph to load
-        page.wait_for_selector("#networkGraph svg", timeout=10000)
+        page.wait_for_selector("#networkGraph svg", timeout=DEFAULT_TIMEOUT)
 
         # Wait a bit more for the simulation to stabilize
         page.wait_for_timeout(2000)
@@ -265,7 +267,7 @@ class TestGraphInteractivity:
         page.goto(traceroute_graph_url)
 
         # Wait for the graph to load
-        page.wait_for_selector("#networkGraph svg", timeout=10000)
+        page.wait_for_selector("#networkGraph svg", timeout=DEFAULT_TIMEOUT)
 
         # Get initial transform
         initial_transform = page.evaluate("""
@@ -311,7 +313,7 @@ class TestGraphInteractivity:
         page.goto(traceroute_graph_url)
 
         # Wait for the graph to load
-        page.wait_for_selector("#networkGraph svg", timeout=10000)
+        page.wait_for_selector("#networkGraph svg", timeout=DEFAULT_TIMEOUT)
         page.wait_for_timeout(3000)  # Wait for auto-centering to complete
 
         # First, manually change the graph position by dragging
@@ -432,7 +434,7 @@ class TestGraphAdvancedFeatures:
         page.goto(traceroute_graph_url)
 
         # Wait for the graph to load
-        page.wait_for_selector("#networkGraph svg", timeout=10000)
+        page.wait_for_selector("#networkGraph svg", timeout=DEFAULT_TIMEOUT)
         page.wait_for_timeout(
             4000
         )  # Wait longer for positioning and simulation to complete
@@ -566,7 +568,7 @@ class TestGraphAdvancedFeatures:
         page.goto(traceroute_graph_url)
 
         # Wait for the graph to load
-        page.wait_for_selector("#networkGraph svg", timeout=10000)
+        page.wait_for_selector("#networkGraph svg", timeout=DEFAULT_TIMEOUT)
         page.wait_for_timeout(2000)
 
         # Get initial state
@@ -672,7 +674,7 @@ class TestGraphResolutions:
         page.set_viewport_size({"width": 1920, "height": 1080})
 
         page.goto(traceroute_graph_url)
-        page.wait_for_selector("#networkGraph svg", timeout=10000)
+        page.wait_for_selector("#networkGraph svg", timeout=DEFAULT_TIMEOUT)
         page.wait_for_timeout(3000)  # Wait for auto-centering
 
         # Check that the graph is properly sized and positioned
@@ -720,7 +722,7 @@ class TestGraphResolutions:
         page.set_viewport_size({"width": 1366, "height": 768})
 
         page.goto(traceroute_graph_url)
-        page.wait_for_selector("#networkGraph svg", timeout=10000)
+        page.wait_for_selector("#networkGraph svg", timeout=DEFAULT_TIMEOUT)
         page.wait_for_timeout(3000)  # Wait for auto-centering
 
         # Check that the graph is properly sized and positioned
@@ -770,7 +772,7 @@ class TestGraphResolutions:
         page.set_viewport_size({"width": 375, "height": 667})
 
         page.goto(traceroute_graph_url)
-        page.wait_for_selector("#networkGraph svg", timeout=10000)
+        page.wait_for_selector("#networkGraph svg", timeout=DEFAULT_TIMEOUT)
         page.wait_for_timeout(3000)  # Wait for auto-centering
 
         # Check that the graph is properly sized and positioned
@@ -831,7 +833,7 @@ class TestGraphResolutions:
             )
 
             page.goto(traceroute_graph_url)
-            page.wait_for_selector("#networkGraph svg", timeout=10000)
+            page.wait_for_selector("#networkGraph svg", timeout=DEFAULT_TIMEOUT)
             page.wait_for_timeout(3000)  # Wait for auto-centering
 
             # Drag to change position

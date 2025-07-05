@@ -73,6 +73,15 @@ class PacketRepositoryOptimized:
                 where_conditions.append("(hop_start - hop_limit) = ?")
                 params.append(filters["hop_count"])
 
+            # Generic exclusion filters for from/to node IDs
+            if filters.get("exclude_from") is not None:
+                where_conditions.append("(from_node_id IS NULL OR from_node_id != ?)")
+                params.append(filters["exclude_from"])
+
+            if filters.get("exclude_to") is not None:
+                where_conditions.append("(to_node_id IS NULL OR to_node_id != ?)")
+                params.append(filters["exclude_to"])
+
             # Search functionality
             if search:
                 # Search in multiple text fields

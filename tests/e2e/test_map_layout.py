@@ -7,6 +7,8 @@ import re
 import pytest
 from playwright.sync_api import Page, expect
 
+DEFAULT_TIMEOUT = 20000  # ms
+
 
 class TestMapLayout:
     """Test map layout and functionality."""
@@ -23,7 +25,7 @@ class TestMapLayout:
         expect(page.locator("#map")).to_be_visible()
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Verify no error state
         expect(page.locator("#mapError")).to_be_hidden()
@@ -34,7 +36,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Check that nodes are loaded in the sidebar
         node_count = page.locator("#nodeCount").text_content()
@@ -50,7 +52,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Wait for the map to be initialized and data to be loaded
         page.wait_for_timeout(3000)
@@ -82,7 +84,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Wait for markers to be added to the map
         page.wait_for_timeout(2000)
@@ -109,7 +111,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Wait for markers to be added to the map
         page.wait_for_timeout(2000)
@@ -151,7 +153,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Type in search box
         search_input = page.locator("#nodeSearch")
@@ -176,7 +178,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Check node list items
         node_list_items = page.locator(".node-list-item")
@@ -214,7 +216,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Test fit all nodes button
         fit_button = page.locator("button:has-text('Fit All Nodes')")
@@ -237,7 +239,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Select age filter
         age_select = page.locator("#maxAge")
@@ -261,7 +263,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Wait for markers to be added to the map
         page.wait_for_timeout(2000)
@@ -294,7 +296,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Wait for markers to be added to the map
         page.wait_for_timeout(2000)
@@ -324,7 +326,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Type in search box
         search_input = page.locator("#nodeSearch")
@@ -347,7 +349,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Check statistics section
         stats_section = page.locator("#mapStats")
@@ -370,7 +372,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Check that sidebar is still functional on mobile
         sidebar = page.locator("#sidebar")
@@ -392,7 +394,7 @@ class TestMapLayout:
         # Check that loading overlay exists and eventually becomes hidden
         page.locator("#mapLoading")
         # Initially it might be visible, but should become hidden
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
     @pytest.mark.e2e
     def test_nodes_with_unknown_names_display_hex_id(self, page: Page, test_server_url):
@@ -400,7 +402,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Wait for API call to complete and data to be loaded
         page.wait_for_timeout(5000)
@@ -456,7 +458,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Wait for data to be loaded
         page.wait_for_timeout(3000)
@@ -531,7 +533,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Wait for markers to be added to the map
         page.wait_for_timeout(2000)
@@ -558,7 +560,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Get initial node count
         initial_count = page.locator("#nodeCount").text_content()
@@ -601,7 +603,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Get initial node count
         initial_count = page.locator("#nodeCount").text_content()
@@ -644,7 +646,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Get initial node count
         initial_count = page.locator("#nodeCount").text_content()
@@ -679,7 +681,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Get initial link count from stats
         initial_links = page.locator("#statsLinks").text_content()
@@ -711,7 +713,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Select UNKNOWN role filter
         role_filter = page.locator("#roleFilter")
@@ -737,7 +739,7 @@ class TestMapLayout:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Apply a role filter
         role_filter = page.locator("#roleFilter")

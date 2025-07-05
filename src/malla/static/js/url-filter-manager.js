@@ -65,10 +65,15 @@ class URLFilterManager {
             } else {
                 const field = this.form?.querySelector(`[name="${key}"]`);
                 if (field) {
-                    field.value = value;
+                    // Special handling for checkboxes
+                    if (field.type === 'checkbox') {
+                        field.checked = (value === 'true' || value === '1' || value === 'on');
+                    } else {
+                        field.value = value;
+                    }
 
-                    // Trigger change event for select fields
-                    if (field.tagName === 'SELECT') {
+                    // Trigger change event for inputs that listeners may rely on
+                    if (field.tagName === 'SELECT' || field.type === 'checkbox') {
                         field.dispatchEvent(new Event('change', { bubbles: true }));
                     }
                 }
@@ -130,18 +135,53 @@ class URLFilterManager {
      */
     async setGatewayPickerValue(fieldName, gatewayId) {
         try {
-            // For gateway pickers, we need to get the display name
-            const response = await fetch(`/api/gateways/search?q=${gatewayId}`);
+            // Normalise: convert !hex to decimal string if applicable
+            let nodeId = gatewayId;
+            if (typeof gatewayId === 'string' && gatewayId.startsWith('!')) {
+                try {
+                    nodeId = parseInt(gatewayId.substring(1), 16).toString();
+                } catch (_) {
+                    // keep original if conversion fails
+                    nodeId = gatewayId;
+                }
+            }
+
             let displayName = gatewayId;
 
-            if (response.ok) {
-                const data = await response.json();
-                if (data.gateways && data.gateways.length > 0) {
-                    const gateway = data.gateways.find(g => g.gateway_id === gatewayId);
-                    if (gateway) {
-                        displayName = gateway.display_name || gateway.gateway_id;
+            // Attempt to get node info from NodeCache first (fast, no network)
+            if (window.NodeCache && typeof window.NodeCache.getNode === 'function') {
+                try {
+                    const node = await window.NodeCache.getNode(nodeId);
+                    if (node) {
+                        displayName = node.long_name || node.short_name || `!${parseInt(node.node_id).toString(16).padStart(8, '0')}`;
                     }
-                }
+                } catch (_) { /* ignore */ }
+            }
+
+            // Fallback: call /api/node/<id>/info for more accurate name
+            if (displayName === gatewayId) {
+                try {
+                    const resp = await fetch(`/api/node/${nodeId}/info`);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        const node = data.node || data;
+                        displayName = node.long_name || node.short_name || node.hex_id || gatewayId;
+                    }
+                } catch (_) { /* ignore */ }
+            }
+
+            // Final fallback: attempt /api/gateways/search (handles non-node gateways)
+            if (displayName === gatewayId) {
+                try {
+                    const response = await fetch(`/api/gateways/search?q=${encodeURIComponent(gatewayId)}&limit=1`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.gateways && data.gateways.length) {
+                            const gw = data.gateways[0];
+                            displayName = gw.display_name || gw.name || gw.gateway_id || gatewayId;
+                        }
+                    }
+                } catch (_) { /* ignore */ }
             }
 
             // Set the picker value (try multiple selector patterns)
@@ -151,7 +191,7 @@ class URLFilterManager {
                                document.querySelector(`.gateway-picker-input[data-field="${fieldName}"]`);
 
             if (hiddenField && visibleField) {
-                hiddenField.value = gatewayId;
+                hiddenField.value = nodeId;
                 visibleField.value = displayName;
 
                 // Trigger change events for any listeners

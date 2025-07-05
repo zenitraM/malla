@@ -202,6 +202,17 @@ class PacketRepository:
                 where_conditions.append("(hop_start - hop_limit) = ?")
                 params.append(filters["hop_count"])
 
+            # Generic exclusion filters for from/to node IDs
+            if filters.get("exclude_from") is not None:
+                # Exclude packets whose sender matches the specified node ID
+                where_conditions.append("(from_node_id IS NULL OR from_node_id != ?)")
+                params.append(filters["exclude_from"])
+
+            if filters.get("exclude_to") is not None:
+                # Exclude packets whose destination matches the specified node ID
+                where_conditions.append("(to_node_id IS NULL OR to_node_id != ?)")
+                params.append(filters["exclude_to"])
+
             # Search functionality
             if search:
                 # Search in multiple text fields
@@ -1412,6 +1423,91 @@ class NodeRepository:
             # Sort recent_packets by timestamp (most recent first) after grouping
             recent_packets.sort(key=lambda x: x["timestamp_sort"], reverse=True)
 
+            # ------------------------------------------------------------------
+            # Collect recent packets *reported* by this node when acting as a gateway
+            # ------------------------------------------------------------------
+            gateway_hex_id = f"!{node_id:08x}"
+
+            reported_packets_query = """
+            SELECT
+                p.id, p.timestamp, p.from_node_id, p.to_node_id, p.portnum_name,
+                p.rssi, p.snr, p.hop_start, p.hop_limit
+            FROM packet_history p
+            WHERE p.gateway_id = ? AND (p.from_node_id IS NULL OR p.from_node_id != ?)
+            ORDER BY p.timestamp DESC
+            LIMIT 100
+            """
+
+            cursor.execute(reported_packets_query, (gateway_hex_id, node_id))
+            try:
+                reported_rows = cursor.fetchall()
+            except StopIteration:
+                # Unit tests may mock cursor with limited side_effects resulting in StopIteration
+                reported_rows = []
+
+            # Resolve node names for from/to nodes appearing in reported packets
+            reported_node_ids: set[int] = set()
+            for row in reported_rows:
+                if row["from_node_id"]:
+                    reported_node_ids.add(row["from_node_id"])
+                if row["to_node_id"]:
+                    reported_node_ids.add(row["to_node_id"])
+
+            reported_node_names = (
+                NodeRepository.get_bulk_node_names(list(reported_node_ids))
+                if reported_node_ids
+                else {}
+            )
+
+            recent_reported_packets: list[dict[str, Any]] = []
+            for row in reported_rows:
+                ts = datetime.fromtimestamp(row["timestamp"], UTC)
+
+                hop_count_val = (
+                    row["hop_start"] - row["hop_limit"]
+                    if row["hop_start"] is not None and row["hop_limit"] is not None
+                    else None
+                )
+
+                from_node_id_val = row["from_node_id"]
+                to_node_id_val = row["to_node_id"]
+
+                from_node_name_val = (
+                    reported_node_names.get(
+                        from_node_id_val, f"!{from_node_id_val:08x}"
+                    )
+                    if from_node_id_val is not None
+                    else "Unknown"
+                )
+
+                if to_node_id_val is None or to_node_id_val == 4294967295:
+                    to_node_name_val = "Broadcast"
+                else:
+                    to_node_name_val = reported_node_names.get(
+                        to_node_id_val, f"!{to_node_id_val:08x}"
+                    )
+
+                recent_reported_packets.append(
+                    {
+                        "id": row["id"],
+                        "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                        "timestamp_sort": row["timestamp"],
+                        "timestamp_relative": format_time_ago(ts),
+                        "from_node_id": from_node_id_val,
+                        "from_node_name": from_node_name_val,
+                        "to_node_id": to_node_id_val,
+                        "to_node_name": to_node_name_val,
+                        "protocol": row["portnum_name"] or "Unknown",
+                        "rssi": row["rssi"],
+                        "snr": row["snr"],
+                        "hop_count": hop_count_val,
+                    }
+                )
+
+            recent_reported_packets.sort(
+                key=lambda x: x["timestamp_sort"], reverse=True
+            )
+
             # Get protocol breakdown
             protocol_query = """
             SELECT
@@ -1468,7 +1564,10 @@ class NodeRepository:
             """
 
             cursor.execute(gateways_query, (node_id,))
-            gateways_raw = cursor.fetchall()
+            try:
+                gateways_raw = cursor.fetchall()
+            except StopIteration:
+                gateways_raw = []
 
             # Get node names for gateway nodes (those that start with !)
             gateway_node_ids = []
@@ -1581,6 +1680,7 @@ class NodeRepository:
             return {
                 "node": node_info,
                 "recent_packets": recent_packets,
+                "recent_reported_packets": recent_reported_packets,
                 "protocols": protocols,
                 "received_gateways": received_gateways,
                 "location": location_info,

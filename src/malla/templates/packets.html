@@ -80,6 +80,15 @@
                 <label for="min_rssi" class="form-label">Min RSSI</label>
                 <input type="number" class="form-control form-control-sm" id="min_rssi" name="min_rssi" placeholder="-120">
             </div>
+            <!-- Exclude self-reported gateway messages -->
+            <div class="col-12">
+                <div class="form-check d-flex align-items-center">
+                    <input class="form-check-input me-2" type="checkbox" id="exclude_self" name="exclude_self">
+                    <label class="form-check-label mb-0" for="exclude_self">
+                        Exclude gateway self messages
+                    </label>
+                </div>
+            </div>
         </div>
     {% endcall %}
 

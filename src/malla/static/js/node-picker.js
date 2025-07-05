@@ -655,14 +655,19 @@ class GatewayPicker {
     }
 
     selectGateway(gatewayId, displayName = null) {
-        // Use displayName if provided, otherwise use gatewayId
-        if (!displayName) {
-            displayName = gatewayId;
+        // Convert Meshtastic hex-style ID (e.g., !abcd1234) to decimal node ID for consistency
+        let storedId = gatewayId;
+        if (typeof gatewayId === 'string' && gatewayId.startsWith('!')) {
+            try {
+                storedId = parseInt(gatewayId.substring(1), 16).toString();
+            } catch (e) {
+                storedId = gatewayId;
+            }
         }
 
-        // Update the inputs
-        this.hiddenInput.value = gatewayId;
-        this.input.value = displayName;
+        // Update inputs: hidden input uses unified decimal ID
+        this.hiddenInput.value = storedId;
+        this.input.value = displayName || storedId;
 
         // Show clear button
         this.clearButton.style.display = 'block';
@@ -722,12 +727,39 @@ class GatewayPicker {
     }
 
     // Public method to set initial value
-    setValue(gatewayId, displayName) {
-        if (gatewayId && displayName) {
-            this.hiddenInput.value = gatewayId;
-            this.input.value = displayName;
-            this.clearButton.style.display = 'block';
+    async setValue(gatewayId, displayName) {
+        if (!gatewayId) return;
+
+        // Convert Meshtastic hex-style ID (e.g., !abcd1234) to decimal node ID for consistency
+        let storedId = gatewayId;
+        if (typeof gatewayId === 'string' && gatewayId.startsWith('!')) {
+            try {
+                storedId = parseInt(gatewayId.substring(1), 16).toString();
+            } catch (e) {
+                storedId = gatewayId;
+            }
         }
+
+        // Determine displayName if missing
+        if (!displayName) {
+            if (window.NodeCache && typeof window.NodeCache.getNode === 'function') {
+                try {
+                    const node = await window.NodeCache.getNode(storedId);
+                    if (node) {
+                        displayName = node.long_name || node.short_name || `!${parseInt(node.node_id).toString(16).padStart(8, '0')}`;
+                    }
+                } catch (_) { /* ignore */ }
+            }
+        }
+
+        // Fallback display
+        if (!displayName) {
+            displayName = gatewayId;
+        }
+
+        this.hiddenInput.value = storedId;
+        this.input.value = displayName;
+        this.clearButton.style.display = 'block';
     }
 }
 

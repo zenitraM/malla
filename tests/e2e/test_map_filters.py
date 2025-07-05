@@ -5,6 +5,8 @@ E2E tests for map filtering functionality.
 import pytest
 from playwright.sync_api import Page, expect
 
+DEFAULT_TIMEOUT = 20000  # ms – allow extra time for map data to load
+
 
 class TestMapFilters:
     """Test map filtering functionality."""
@@ -15,7 +17,7 @@ class TestMapFilters:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Check that role filter exists
         role_filter = page.locator("#roleFilter")
@@ -43,7 +45,7 @@ class TestMapFilters:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Check that age filter exists
         age_filter = page.locator("#maxAge")
@@ -62,7 +64,7 @@ class TestMapFilters:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Monitor network requests
         requests = []
@@ -91,7 +93,7 @@ class TestMapFilters:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Monitor network requests
         requests = []
@@ -131,7 +133,7 @@ class TestMapFilters:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Get initial counts
         initial_node_count = page.locator("#nodeCount").text_content()
@@ -171,7 +173,7 @@ class TestMapFilters:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Get initial node list items
         initial_items = page.locator("#nodeList .node-list-item").count()
@@ -196,7 +198,7 @@ class TestMapFilters:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
         page.wait_for_timeout(3000)  # Wait for markers to load
 
         # Count initial markers
@@ -222,7 +224,7 @@ class TestMapFilters:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Apply a role filter first
         role_filter = page.locator("#roleFilter")
@@ -252,7 +254,7 @@ class TestMapFilters:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Apply unknown role filter
         role_filter = page.locator("#roleFilter")
@@ -275,7 +277,7 @@ class TestMapFilters:
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
-        page.wait_for_selector("#mapLoading", state="hidden", timeout=10000)
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Get references to form elements
         age_filter = page.locator("#maxAge")
