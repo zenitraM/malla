@@ -163,9 +163,10 @@
             return Object.fromEntries(
                 Object.entries(obj).filter(([key, v]) => {
                     if (typeof v === 'boolean') {
-                        // Always include group_packets boolean (both true and false)
+                        // Always include important boolean filters (both true and false)
                         // For other booleans, only include if true (preserve original behavior)
-                        return key === 'group_packets' || v === true;
+                        const importantBooleans = ['group_packets', 'exclude_self'];
+                        return importantBooleans.includes(key) || v === true;
                     }
                     return v !== undefined && v !== null && v !== '';
                 })

@@ -209,14 +209,22 @@ class URLFilterManager {
     getCurrentFilters() {
         if (!this.form) return {};
 
-        const formData = new FormData(this.form);
         const filters = {};
 
-        for (let [key, value] of formData.entries()) {
-            if (value.trim()) {
-                filters[key] = value;
+        // Get all form inputs including unchecked checkboxes
+        const inputs = this.form.querySelectorAll('input, select, textarea');
+        inputs.forEach(input => {
+            const key = input.name;
+            if (!key) return;
+
+            if (input.type === 'checkbox') {
+                // Include checkbox state (true/false)
+                filters[key] = input.checked;
+            } else if (input.value && input.value.trim()) {
+                // Include non-empty text/select values
+                filters[key] = input.value;
             }
-        }
+        });
 
         // Add grouping parameter if checkbox exists
         if (this.groupingCheckbox) {
