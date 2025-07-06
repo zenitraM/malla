@@ -97,6 +97,7 @@ class DatabaseFixtures:
                 short_name TEXT,
                 hw_model TEXT,
                 role TEXT,
+                primary_channel TEXT,
                 is_licensed BOOLEAN,
                 mac_address TEXT,
                 first_seen REAL,
@@ -157,6 +158,7 @@ class DatabaseFixtures:
                 "first_seen": now - 86400,  # 24 hours ago
                 "last_updated": now - 300,  # 5 minutes ago
                 "last_seen": now - 300,
+                "primary_channel": "LongFast",
             },
             {
                 "node_id": 1128074277,  # 0x433d0c25
@@ -170,6 +172,7 @@ class DatabaseFixtures:
                 "first_seen": now - 43200,  # 12 hours ago
                 "last_updated": now - 600,  # 10 minutes ago
                 "last_seen": now - 600,
+                "primary_channel": "LongFast",
             },
             {
                 "node_id": 1128074278,  # 0x433d0c26
@@ -183,6 +186,7 @@ class DatabaseFixtures:
                 "first_seen": now - 172800,  # 48 hours ago
                 "last_updated": now - 1800,  # 30 minutes ago
                 "last_seen": now - 60,  # 1 minute ago
+                "primary_channel": "LongFast",
             },
             # Additional nodes for comprehensive testing
             {
@@ -197,6 +201,7 @@ class DatabaseFixtures:
                 "first_seen": now - 21600,  # 6 hours ago
                 "last_updated": now - 720,  # 12 minutes ago
                 "last_seen": now - 720,
+                "primary_channel": "LongFast",
             },
             {
                 "node_id": 3735928559,  # 0xdeadbeef
@@ -210,6 +215,7 @@ class DatabaseFixtures:
                 "first_seen": now - 10800,  # 3 hours ago
                 "last_updated": now - 180,  # 3 minutes ago
                 "last_seen": now - 180,
+                "primary_channel": "LongFast",
             },
             {
                 "node_id": 0xDDDDDDDD,  # Changed from 0xffffffff to avoid broadcast filtering
@@ -223,6 +229,7 @@ class DatabaseFixtures:
                 "first_seen": now - 7200,  # 2 hours ago
                 "last_updated": now - 3600,  # 1 hour ago
                 "last_seen": now - 3600,
+                "primary_channel": "LongFast",
             },
             # Node with unknown role - should display with red color
             {
@@ -237,6 +244,7 @@ class DatabaseFixtures:
                 "first_seen": now - 1800,  # 30 minutes ago
                 "last_updated": now - 120,  # 2 minutes ago
                 "last_seen": now - 120,
+                "primary_channel": "LongFast",
             },
             # Additional nodes for enhanced traceroute scenarios
             {
@@ -251,6 +259,7 @@ class DatabaseFixtures:
                 "first_seen": now - 3600,  # 1 hour ago
                 "last_updated": now - 180,  # 3 minutes ago
                 "last_seen": now - 180,
+                "primary_channel": "LongFast",
             },
             {
                 "node_id": 0x88888888,
@@ -264,6 +273,7 @@ class DatabaseFixtures:
                 "first_seen": now - 7200,  # 2 hours ago
                 "last_updated": now - 300,  # 5 minutes ago
                 "last_seen": now - 300,
+                "primary_channel": "LongFast",
             },
             {
                 "node_id": 0xCCCCCCCC,  # Changed from 0x99999999 to avoid conflict with test
@@ -277,6 +287,7 @@ class DatabaseFixtures:
                 "first_seen": now - 5400,  # 1.5 hours ago
                 "last_updated": now - 240,  # 4 minutes ago
                 "last_seen": now - 240,
+                "primary_channel": "LongFast",
             },
             {
                 "node_id": 0xAAAAAAAA,
@@ -290,6 +301,7 @@ class DatabaseFixtures:
                 "first_seen": now - 10800,  # 3 hours ago
                 "last_updated": now - 420,  # 7 minutes ago
                 "last_seen": now - 420,
+                "primary_channel": "LongFast",
             },
             {
                 "node_id": 0xBBBBBBBB,
@@ -303,6 +315,7 @@ class DatabaseFixtures:
                 "first_seen": now - 1800,  # 30 minutes ago
                 "last_updated": now - 90,  # 1.5 minutes ago
                 "last_seen": now - 90,
+                "primary_channel": "LongFast",
             },
         ]
 
@@ -325,6 +338,7 @@ class DatabaseFixtures:
                 "first_seen": now - 7200,  # 2 hours ago
                 "last_updated": now - 900,  # 15 minutes ago
                 "last_seen": now - 900,
+                "primary_channel": "LongFast",
             },
             {
                 "node_id": 0x22222222,
@@ -338,6 +352,7 @@ class DatabaseFixtures:
                 "first_seen": now - 14400,  # 4 hours ago
                 "last_updated": now - 1200,  # 20 minutes ago
                 "last_seen": now - 1200,
+                "primary_channel": "LongFast",
             },
             # Additional nodes for comprehensive testing
             {
@@ -352,6 +367,7 @@ class DatabaseFixtures:
                 "first_seen": now - 5400,  # 1.5 hours ago
                 "last_updated": now - 450,  # 7.5 minutes ago
                 "last_seen": now - 450,
+                "primary_channel": "LongFast",
             },
             {
                 "node_id": 0x44444444,
@@ -365,6 +381,7 @@ class DatabaseFixtures:
                 "first_seen": now - 9000,  # 2.5 hours ago
                 "last_updated": now - 240,  # 4 minutes ago
                 "last_seen": now - 240,
+                "primary_channel": "LongFast",
             },
             # Node with no names - should generate "Node {hex_id}" display name
             {
@@ -379,6 +396,7 @@ class DatabaseFixtures:
                 "first_seen": now - 3600,  # 1 hour ago
                 "last_updated": now - 300,  # 5 minutes ago
                 "last_seen": now - 300,
+                "primary_channel": "LongFast",
             },
         ]
 
@@ -388,8 +406,8 @@ class DatabaseFixtures:
             cursor.execute(
                 """
                 INSERT INTO node_info
-                (node_id, hex_id, long_name, short_name, hw_model, role, is_licensed, mac_address, first_seen, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (node_id, hex_id, long_name, short_name, hw_model, role, primary_channel, is_licensed, mac_address, first_seen, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     node["node_id"],
@@ -398,6 +416,7 @@ class DatabaseFixtures:
                     node["short_name"],
                     node["hw_model"],
                     node["role"],
+                    node["primary_channel"],
                     node["is_licensed"],
                     node["mac_address"],
                     node["first_seen"],
@@ -410,8 +429,8 @@ class DatabaseFixtures:
             cursor.execute(
                 """
                 INSERT INTO node_info
-                (node_id, hex_id, long_name, short_name, hw_model, role, is_licensed, mac_address, first_seen, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (node_id, hex_id, long_name, short_name, hw_model, role, primary_channel, is_licensed, mac_address, first_seen, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     node["node_id"],
@@ -420,6 +439,7 @@ class DatabaseFixtures:
                     node["short_name"],
                     node["hw_model"],
                     node["role"],
+                    node["primary_channel"],
                     node["is_licensed"],
                     node["mac_address"],
                     node["first_seen"],

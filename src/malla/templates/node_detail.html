@@ -144,6 +144,12 @@
                                     <td>{{ node.role }}</td>
                                 </tr>
                                 {% endif %}
+                                {% if node.primary_channel %}
+                                <tr>
+                                    <th>Primary Channel:</th>
+                                    <td>{{ node.primary_channel }}</td>
+                                </tr>
+                                {% endif %}
                                 {% if node.mac_address %}
                                 <tr>
                                     <th>MAC Address:</th>

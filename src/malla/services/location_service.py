@@ -263,6 +263,7 @@ class LocationService:
                 "short_name": location["short_name"],
                 "hw_model": location["hw_model"],
                 "role": location["role"],
+                "primary_channel": location.get("primary_channel"),
                 "latitude": location["latitude"],
                 "longitude": location["longitude"],
                 "altitude": location["altitude"],

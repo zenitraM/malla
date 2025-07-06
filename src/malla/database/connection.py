@@ -55,6 +55,14 @@ def get_db_connection() -> sqlite3.Connection:
         cursor.execute("PRAGMA cache_size=10000")  # 10MB cache
         cursor.execute("PRAGMA temp_store=MEMORY")
 
+        # ------------------------------------------------------------------
+        # Lightweight schema migrations – run once per connection.
+        # ------------------------------------------------------------------
+        try:
+            _ensure_schema_migrations(cursor)
+        except Exception as e:
+            logger.warning(f"Schema migration check failed: {e}")
+
         return conn
     except Exception as e:
         logger.error(f"Failed to connect to database: {e}")
@@ -102,3 +110,53 @@ def init_database() -> None:
         logger.error(f"Database initialization failed: {e}")
         # Don't raise the exception - let the app start anyway
         # The database might not exist yet or be created by another process
+
+
+# ----------------------------------------------------------------------
+# Internal helpers
+# ----------------------------------------------------------------------
+
+
+_SCHEMA_MIGRATIONS_DONE: set[str] = set()
+
+
+def _ensure_schema_migrations(cursor: sqlite3.Cursor) -> None:
+    """Run any idempotent schema updates that the application depends on.
+
+    Currently this checks that ``node_info`` has a ``primary_channel`` column
+    (added in April 2024) so queries that reference it do not fail when the
+    database was created with an older version of the schema.
+
+    The function is **safe** to run repeatedly – it will only attempt each
+    migration once per Python process and each individual migration is
+    guarded with a try/except that ignores the *duplicate column* error.
+    """
+
+    global _SCHEMA_MIGRATIONS_DONE  # pylint: disable=global-statement
+
+    # Quickly short-circuit if we've already handled migrations in this process
+    if "primary_channel" in _SCHEMA_MIGRATIONS_DONE:
+        return
+
+    try:
+        # Check whether the column already exists
+        cursor.execute("PRAGMA table_info(node_info)")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        if "primary_channel" not in columns:
+            cursor.execute("ALTER TABLE node_info ADD COLUMN primary_channel TEXT")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_node_primary_channel ON node_info(primary_channel)"
+            )
+            logging.info(
+                "Added primary_channel column to node_info table via auto-migration"
+            )
+
+        _SCHEMA_MIGRATIONS_DONE.add("primary_channel")
+    except sqlite3.OperationalError as exc:
+        # Ignore errors about duplicate columns in race situations – another
+        # process may have altered the table first.
+        if "duplicate column name" in str(exc).lower():
+            _SCHEMA_MIGRATIONS_DONE.add("primary_channel")
+        else:
+            raise

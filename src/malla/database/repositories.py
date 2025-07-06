@@ -889,6 +889,10 @@ class NodeRepository:
                 where_conditions.append("ni.role = ?")
                 params.append(filters["role"])
 
+            if filters.get("primary_channel"):
+                where_conditions.append("ni.primary_channel = ?")
+                params.append(filters["primary_channel"])
+
             # Add named_only filter
             if filters.get("named_only"):
                 where_conditions.append(
@@ -958,6 +962,7 @@ class NodeRepository:
                         ni.short_name,
                         ni.hw_model,
                         ni.role,
+                        ni.primary_channel,
                         ni.last_updated,
                         printf('!%08x', ni.node_id) as hex_id,
                         COALESCE(stats.packet_count_24h, 0) as packet_count_24h,
@@ -1004,6 +1009,7 @@ class NodeRepository:
                         ni.short_name,
                         ni.hw_model,
                         ni.role,
+                        ni.primary_channel,
                         ni.last_updated,
                         printf('!%08x', ni.node_id) as hex_id,
                         0 as packet_count_24h,
@@ -1072,6 +1078,7 @@ class NodeRepository:
                 n.short_name,
                 n.hw_model,
                 n.role,
+                n.primary_channel,
                 COUNT(*) as total_packets,
                 MAX(p.timestamp) as last_seen,
                 MIN(p.timestamp) as first_seen,
@@ -1086,7 +1093,7 @@ class NodeRepository:
             FROM packet_history p
             LEFT JOIN node_info n ON p.from_node_id = n.node_id
             WHERE p.from_node_id = ?
-            GROUP BY p.from_node_id, n.long_name, n.short_name, n.hw_model, n.role
+            GROUP BY p.from_node_id, n.long_name, n.short_name, n.hw_model, n.role, n.primary_channel
             """
 
             cursor.execute(query, (node_id,))
@@ -1111,6 +1118,7 @@ class NodeRepository:
                     "short_name": node_info_row["short_name"],
                     "hw_model": node_info_row["hw_model"],
                     "role": node_info_row["role"],
+                    "primary_channel": node_info_row.get("primary_channel"),
                     "total_packets": 0,
                     "last_seen": None,
                     "first_seen": None,
@@ -1147,6 +1155,9 @@ class NodeRepository:
                 "short_name": node_row["short_name"],
                 "hw_model": node_row["hw_model"],
                 "role": node_row["role"],
+                "primary_channel": node_row["primary_channel"]
+                if "primary_channel" in node_row.keys()
+                else None,
                 "total_packets": node_row["total_packets"],
                 "last_seen": last_seen.strftime("%Y-%m-%d %H:%M:%S UTC"),
                 "first_seen": first_seen.strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -1706,6 +1717,7 @@ class NodeRepository:
                     ni.hw_model,
                     printf('!%08x', ni.node_id) as hex_id,
                     ni.role,
+                    ni.primary_channel,
                     datetime(COALESCE(stats.last_packet, ni.last_updated), 'unixepoch') as last_packet_str,
                     COALESCE(stats.packet_count_24h, 0) as packet_count_24h,
                     COALESCE(stats.gateway_count, 0) as gateway_count_24h
@@ -2216,6 +2228,22 @@ class NodeRepository:
                 f"Error getting bidirectional direct receptions for node {node_id}, direction {direction}: {e}"
             )
             raise
+
+    @staticmethod
+    def get_unique_primary_channels() -> list[str]:
+        """Return list of unique primary channel names."""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT DISTINCT primary_channel FROM node_info WHERE primary_channel IS NOT NULL AND primary_channel != '' ORDER BY primary_channel"
+            )
+            rows = cursor.fetchall()
+            conn.close()
+            return [row[0] for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting unique primary channels: {e}")
+            return []
 
 
 class TracerouteRepository:
@@ -2849,6 +2877,7 @@ class LocationRepository:
                     ni.short_name,
                     ni.hw_model,
                     ni.role,
+                    ni.primary_channel,
                     printf('!%08x', ph.from_node_id) as hex_id
                 FROM packet_history ph
                 INNER JOIN max_timestamps mt ON ph.from_node_id = mt.from_node_id
@@ -2983,6 +3012,9 @@ class LocationRepository:
                             "short_name": row["short_name"],
                             "hw_model": row["hw_model"],
                             "role": row["role"],
+                            "primary_channel": row["primary_channel"]
+                            if "primary_channel" in row.keys()
+                            else None,
                             "latitude": latitude,
                             "longitude": longitude,
                             "altitude": altitude,

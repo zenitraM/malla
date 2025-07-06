@@ -99,6 +99,13 @@
                     </select>
                 </div>
                 <div class="mb-3">
+                    <label for="channelFilter" class="form-label">Primary Channel</label>
+                    <select class="form-select form-select-sm" id="channelFilter" name="channelFilter">
+                        <option value="">All Channels</option>
+                        <!-- Options loaded dynamically -->
+                    </select>
+                </div>
+                <div class="mb-3">
                     <label for="startDateTime" class="form-label">Start Date & Time</label>
                     <input type="datetime-local" class="form-control form-control-sm" id="startDateTime" name="startDateTime">
                 </div>
@@ -583,6 +590,33 @@ function initializeInterface() {
 
     // Move hop depth section just below the selected details container
     $('#hopDepthSection').insertAfter($('#selectedDetails'));
+
+    // --------------------------------------------------------------
+    // Dynamic loading of primary channels for filter dropdown
+    // --------------------------------------------------------------
+    async function loadPrimaryChannels() {
+        try {
+            const response = await fetch('/api/meshtastic/channels');
+            const data = await response.json();
+            if (data.channels) {
+                const select = document.getElementById('channelFilter');
+                const allOption = select.querySelector('option[value=""]');
+                select.innerHTML = '';
+                select.appendChild(allOption);
+                data.channels.forEach((ch) => {
+                    const option = document.createElement('option');
+                    option.value = ch;
+                    option.textContent = ch;
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading primary channels:', error);
+        }
+    }
+
+    // Load channels on interface init
+    loadPrimaryChannels();
 }
 
 // Initialize the map
@@ -679,6 +713,7 @@ function applyClientSideFilters() {
     // Get filter values
     const maxAge = formData.get('maxAge'); // still read to sync UI but no longer used for filtering
     const roleFilter = formData.get('roleFilter');
+    const channelFilter = formData.get('channelFilter');
     const startDateTime = formData.get('startDateTime');
     const endDateTime = formData.get('endDateTime');
     const minContacts = formData.get('minContacts');
@@ -699,6 +734,11 @@ function applyClientSideFilters() {
         } else {
             filteredNodes = filteredNodes.filter(node => node.role === roleFilter);
         }
+    }
+
+    // Apply channel filter
+    if (channelFilter) {
+        filteredNodes = filteredNodes.filter(node => node.primary_channel === channelFilter);
     }
 
     // Convert date inputs to timestamps for comparison

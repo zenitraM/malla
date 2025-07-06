@@ -40,6 +40,13 @@
                 </select>
             </div>
             <div class="col-12">
+                <label for="primary_channel" class="form-label">Primary Channel</label>
+                <select class="form-select form-select-sm" id="primary_channel" name="primary_channel">
+                    <option value="">All Channels</option>
+                    <!-- Options will be loaded dynamically -->
+                </select>
+            </div>
+            <div class="col-12">
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" id="active_only" name="active_only" value="1">
                     <label class="form-check-label" for="active_only">
@@ -105,6 +112,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load hardware models and roles dynamically
     loadHardwareModels();
     loadNodeRoles();
+    loadPrimaryChannels();
 
     // Initialize sidebar toggle functionality
     const toggleBtn = document.getElementById('toggleSidebar');
@@ -176,6 +184,30 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // Load primary channels from API
+    async function loadPrimaryChannels() {
+        try {
+            const response = await fetch('/api/meshtastic/channels');
+            const data = await response.json();
+
+            if (data.channels) {
+                const select = document.getElementById('primary_channel');
+                const allOption = select.querySelector('option[value=""]');
+                select.innerHTML = '';
+                select.appendChild(allOption);
+
+                data.channels.forEach((ch) => {
+                    const option = document.createElement('option');
+                    option.value = ch;
+                    option.textContent = ch;
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading channels:', error);
+        }
+    }
+
     // ------------------------------------------------------------------
     // Fetch ALL node data once and keep it client-side for filtering
     // ------------------------------------------------------------------
@@ -204,7 +236,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Load supporting data (hardware models, roles) AND all nodes, then start
-    Promise.all([loadHardwareModels(), loadNodeRoles(), fetchAllNodes()]).then(async () => {
+    Promise.all([loadHardwareModels(), loadNodeRoles(), loadPrimaryChannels(), fetchAllNodes()]).then(async () => {
         initializePageWithFilters();
     });
 
@@ -296,7 +328,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     return `<span class="badge bg-light text-dark">0</span>`;
                 }
             },
-
+            {
+                key: 'primary_channel',
+                title: 'Channel',
+                sortable: true,
+                render: (value) => {
+                    return value ? `<span class="badge bg-secondary">${value}</span>` : '<span class="text-muted">Unknown</span>';
+                }
+            },
             {
                 key: 'node_id',
                 title: 'Actions',
@@ -370,6 +409,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (filters.role) filtered = filtered.filter((n) => n.role === filters.role);
             // --- Hardware model filter ----------------------------------------
             if (filters.hw_model) filtered = filtered.filter((n) => n.hw_model === filters.hw_model);
+            // --- Primary channel filter --------------------------------------
+            if (filters.primary_channel) filtered = filtered.filter((n) => n.primary_channel === filters.primary_channel);
             // --- Active only ---------------------------------------------------
             if (filters.active_only === true || filters.active_only === '1') {
                 filtered = filtered.filter((n) => (n.packet_count_24h || 0) > 0);

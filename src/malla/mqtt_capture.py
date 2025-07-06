@@ -311,6 +311,7 @@ def init_database() -> None:
             short_name TEXT,
             hw_model TEXT,
             role TEXT,
+            primary_channel TEXT,
             is_licensed BOOLEAN,
             mac_address TEXT,
             first_seen REAL NOT NULL,
@@ -330,6 +331,42 @@ def init_database() -> None:
     )
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_node_hex_id ON node_info(hex_id)")
 
+    # Ensure primary_channel column exists for legacy databases
+    try:
+        cursor.execute("ALTER TABLE node_info ADD COLUMN primary_channel TEXT")
+        logging.info("Added primary_channel column to node_info table")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            logging.debug("primary_channel column already exists")
+        else:
+            logging.warning(f"Could not add primary_channel column: {e}")
+
+    # Index for faster channel filtering
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_node_primary_channel ON node_info(primary_channel)"
+    )
+
+    # Backfill primary_channel using last NODEINFO packets if missing
+    try:
+        cursor.execute(
+            """
+            UPDATE node_info
+            SET primary_channel = (
+                SELECT ph.channel_id
+                FROM packet_history ph
+                WHERE ph.from_node_id = node_info.node_id
+                  AND ph.portnum_name = 'NODEINFO_APP'
+                  AND ph.channel_id IS NOT NULL AND ph.channel_id != ''
+                ORDER BY ph.timestamp DESC
+                LIMIT 1
+            )
+            WHERE (primary_channel IS NULL OR primary_channel = '')
+        """
+        )
+        logging.info("Backfilled primary_channel values in node_info table")
+    except Exception as e:
+        logging.warning(f"Could not backfill primary_channel column: {e}")
+
     conn.commit()
     conn.close()
     logging.info(f"Database initialized: {DATABASE_FILE}")
@@ -345,7 +382,7 @@ def load_node_cache() -> None:
 
         cursor.execute("""
             SELECT node_id, hex_id, long_name, short_name, hw_model, role,
-                   is_licensed, mac_address, last_updated
+                   is_licensed, mac_address, primary_channel, last_updated
             FROM node_info
         """)
 
@@ -362,6 +399,7 @@ def load_node_cache() -> None:
                 role,
                 is_licensed,
                 mac_address,
+                primary_channel,
                 last_updated,
             ) = row
             node_cache[node_id] = {
@@ -372,6 +410,7 @@ def load_node_cache() -> None:
                 "role": role,
                 "is_licensed": bool(is_licensed),
                 "mac_address": mac_address,
+                "primary_channel": primary_channel,
                 "last_updated": last_updated,
             }
 
@@ -388,6 +427,7 @@ def update_node_cache(
     role: str | None = None,
     is_licensed: bool | None = None,
     mac_address: str | None = None,
+    primary_channel: str | None = None,
 ) -> None:
     """Update both in-memory cache and database with node information."""
     global node_cache
@@ -406,6 +446,7 @@ def update_node_cache(
             "role": role,
             "is_licensed": is_licensed,
             "mac_address": mac_address,
+            "primary_channel": primary_channel,
             "last_updated": current_time,
         }
     else:
@@ -424,6 +465,8 @@ def update_node_cache(
             node_cache[node_id]["is_licensed"] = is_licensed
         if mac_address is not None:
             node_cache[node_id]["mac_address"] = mac_address
+        if primary_channel is not None:
+            node_cache[node_id]["primary_channel"] = primary_channel
         node_cache[node_id]["last_updated"] = current_time
 
     # Update database using INSERT OR REPLACE to handle existing nodes
@@ -434,7 +477,7 @@ def update_node_cache(
 
         # Get existing values from database if node exists
         cursor.execute(
-            "SELECT hex_id, long_name, short_name, hw_model, role, is_licensed, mac_address, first_seen FROM node_info WHERE node_id = ?",
+            "SELECT hex_id, long_name, short_name, hw_model, role, is_licensed, mac_address, primary_channel, first_seen FROM node_info WHERE node_id = ?",
             (node_id,),
         )
         existing = cursor.fetchone()
@@ -449,6 +492,7 @@ def update_node_cache(
                 existing_role,
                 existing_is_licensed,
                 existing_mac_address,
+                existing_primary_channel,
                 _first_seen,
             ) = existing
             final_hex_id = hex_id if hex_id is not None else existing_hex_id
@@ -464,12 +508,17 @@ def update_node_cache(
             final_mac_address = (
                 mac_address if mac_address is not None else existing_mac_address
             )
+            final_primary_channel = (
+                primary_channel
+                if primary_channel is not None
+                else existing_primary_channel
+            )
 
             cursor.execute(
                 """
                 UPDATE node_info
                 SET hex_id = ?, long_name = ?, short_name = ?, hw_model = ?, role = ?,
-                    is_licensed = ?, mac_address = ?, last_updated = ?
+                    is_licensed = ?, mac_address = ?, primary_channel = ?, last_updated = ?
                 WHERE node_id = ?
             """,
                 (
@@ -480,6 +529,7 @@ def update_node_cache(
                     final_role,
                     final_is_licensed,
                     final_mac_address,
+                    final_primary_channel,
                     current_time,
                     node_id,
                 ),
@@ -494,8 +544,8 @@ def update_node_cache(
                 """
                 INSERT INTO node_info
                 (node_id, hex_id, long_name, short_name, hw_model, role,
-                 is_licensed, mac_address, first_seen, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 is_licensed, mac_address, primary_channel, first_seen, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     node_id,
@@ -506,6 +556,7 @@ def update_node_cache(
                     role,
                     is_licensed,
                     mac_address,
+                    primary_channel,
                     current_time,
                     current_time,
                 ),
@@ -993,6 +1044,9 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
                 role=role_str,
                 is_licensed=user.is_licensed,
                 mac_address=mac_address,
+                primary_channel=service_envelope.channel_id
+                if service_envelope
+                else None,
             )
 
             from_node_display = get_node_display_name(from_node_id_numeric)

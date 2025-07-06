@@ -1361,6 +1361,10 @@ def api_nodes_data():
         if role:
             filters["role"] = role
 
+        primary_channel = request.args.get("primary_channel", "").strip()
+        if primary_channel:
+            filters["primary_channel"] = primary_channel
+
         # Calculate offset
         offset = (page - 1) * limit
 
@@ -1398,6 +1402,7 @@ def api_nodes_data():
                     "short_name": node.get("short_name"),
                     "hw_model": node.get("hw_model", "Unknown"),
                     "role": node.get("role", "Unknown"),
+                    "primary_channel": node.get("primary_channel"),
                     "last_packet_str": node.get("last_packet_str", "Never"),
                     "last_packet_time": node.get("last_packet_time"),
                     "packet_count_24h": node.get("packet_count_24h", 0),
@@ -1706,6 +1711,18 @@ def api_traceroute_data():
     except Exception as e:
         logger.error(f"Error in API traceroute modern: {e}")
         return jsonify({"error": str(e), "data": [], "total_count": 0}), 500
+
+
+@api_bp.route("/meshtastic/channels")
+def api_channels():
+    """API endpoint for available primary channels (from node_info)."""
+    logger.info("API channels endpoint accessed")
+    try:
+        channels = NodeRepository.get_unique_primary_channels()
+        return jsonify({"channels": channels})
+    except Exception as e:
+        logger.error(f"Error in API channels: {e}")
+        return jsonify({"error": str(e), "channels": []}), 500
 
 
 def safe_jsonify(data, *args, **kwargs):
