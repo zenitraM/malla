@@ -198,6 +198,11 @@ class PacketRepository:
                 where_conditions.append("gateway_id = ?")
                 params.append(filters["gateway_id"])
 
+            # New: filter by primary_channel when provided (matches ServiceEnvelope channel_id)
+            if filters.get("primary_channel"):
+                where_conditions.append("channel_id = ?")
+                params.append(filters["primary_channel"])
+
             if filters.get("hop_count") is not None:
                 where_conditions.append("(hop_start - hop_limit) = ?")
                 params.append(filters["hop_count"])
@@ -2290,6 +2295,11 @@ class TracerouteRepository:
             if filters.get("gateway_id"):
                 where_conditions.append("gateway_id = ?")
                 params.append(filters["gateway_id"])
+
+            # New: Optional filtering by primary_channel (matches packet.channel_id field)
+            if filters.get("primary_channel"):
+                where_conditions.append("channel_id = ?")
+                params.append(filters["primary_channel"])
 
             if filters.get("processed_successfully_only"):
                 where_conditions.append("processed_successfully = 1")

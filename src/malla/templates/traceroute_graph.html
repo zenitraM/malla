@@ -76,6 +76,13 @@
                         </label>
                     </div>
                 </div>
+                <div class="mb-3">
+                    <label for="primary_channel" class="form-label">Primary Channel</label>
+                    <select class="form-select form-select-sm" id="primary_channel" name="primary_channel">
+                        <option value="">All Channels</option>
+                        <!-- Options will be loaded dynamically -->
+                    </select>
+                </div>
                 <button type="submit" class="btn btn-primary btn-sm w-100">
                     <i class="bi bi-arrow-clockwise"></i> Update Graph
                 </button>
@@ -310,6 +317,9 @@ function initializeInterface() {
         clearSearchResults();
         clearSelection();
     });
+
+    // Load primary channels into filter select
+    loadPrimaryChannels();
 }
 
 function loadGraph() {
@@ -1208,6 +1218,27 @@ window.addEventListener('resize', function() {
         }, 100);
     }
 });
+
+async function loadPrimaryChannels() {
+    try {
+        const response = await fetch('/api/meshtastic/channels');
+        const data = await response.json();
+        if (data.channels) {
+            const select = document.getElementById('primary_channel');
+            const allOption = select.querySelector('option[value=""]');
+            select.innerHTML = '';
+            select.appendChild(allOption);
+            data.channels.forEach((ch) => {
+                const option = document.createElement('option');
+                option.value = ch;
+                option.textContent = ch;
+                select.appendChild(option);
+            });
+        }
+    } catch (err) {
+        console.error('Error loading channels:', err);
+    }
+}
 </script>
 
 <!-- Re-open the container for the footer (which we're hiding anyway) -->

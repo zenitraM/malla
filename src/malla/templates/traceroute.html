@@ -81,6 +81,13 @@
                     </div>
                 </div>
             </div>
+            <div class="col-12">
+                <label for="primary_channel" class="form-label">Primary Channel</label>
+                <select class="form-select form-select-sm" id="primary_channel" name="primary_channel">
+                    <option value="">All Channels</option>
+                    <!-- Options will be loaded dynamically -->
+                </select>
+            </div>
         </div>
     {% endcall %}
 
@@ -121,6 +128,30 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize URL filter manager AFTER sidebar content is moved
     const urlManager = new URLFilterManager();
+
+    // Load primary channels for filter select
+    loadPrimaryChannels();
+
+    async function loadPrimaryChannels() {
+        try {
+            const response = await fetch('/api/meshtastic/channels');
+            const data = await response.json();
+            if (data.channels) {
+                const select = document.getElementById('primary_channel');
+                const allOption = select.querySelector('option[value=""]');
+                select.innerHTML = '';
+                select.appendChild(allOption);
+                data.channels.forEach((ch) => {
+                    const option = document.createElement('option');
+                    option.value = ch;
+                    option.textContent = ch;
+                    select.appendChild(option);
+                });
+            }
+        } catch (err) {
+            console.error('Error loading channels:', err);
+        }
+    }
 
     // Expose urlManager to global scope for debugging and testing
     window.urlManager = urlManager;

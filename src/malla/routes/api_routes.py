@@ -1029,6 +1029,9 @@ def api_traceroute_graph():
         min_snr = request.args.get("min_snr", -30.0, type=float)
         include_indirect = request.args.get("include_indirect", False, type=bool)
 
+        # Optional primary_channel filter
+        primary_channel = request.args.get("primary_channel", "").strip()
+
         # Validate parameters
         if hours < 1 or hours > 168:  # Max 7 days
             hours = 24
@@ -1036,9 +1039,17 @@ def api_traceroute_graph():
         if min_snr < -200 or min_snr > 20:
             min_snr = -200.0
 
+        # Build extra filters for service
+        extra_filters = {}
+        if primary_channel:
+            extra_filters["primary_channel"] = primary_channel
+
         # Get graph data from service
         graph_data = TracerouteService.get_network_graph_data(
-            hours=hours, min_snr=min_snr, include_indirect=include_indirect
+            hours=hours,
+            min_snr=min_snr,
+            include_indirect=include_indirect,
+            filters=extra_filters if extra_filters else None,
         )
 
         return safe_jsonify(graph_data)
@@ -1102,6 +1113,11 @@ def api_packets_data():
                 filters["hop_count"] = int(hop_count_str)
             except ValueError:
                 pass
+
+        # New: primary_channel filter (packet channel_id)
+        primary_channel = request.args.get("primary_channel", "").strip()
+        if primary_channel:
+            filters["primary_channel"] = primary_channel
 
         # ------------------------------------------------------------------
         # Generic exclusion filters (exclude_from, exclude_to)
@@ -1466,6 +1482,11 @@ def api_traceroute_data():
                 filters["route_node"] = int(route_node_str)
             except ValueError:
                 pass
+
+        # New: primary_channel filter (packet channel_id)
+        primary_channel = request.args.get("primary_channel", "").strip()
+        if primary_channel:
+            filters["primary_channel"] = primary_channel
 
         # Handle time filters
         start_time_str = request.args.get("start_time", "").strip()
