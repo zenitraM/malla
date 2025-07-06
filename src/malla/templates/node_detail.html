@@ -36,6 +36,18 @@
         border-left: 4px solid #007bff;
         margin-bottom: 0.5rem;
     }
+    .vertical-header {
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+        padding: 4px 2px;
+        white-space: nowrap;
+        text-align: left;
+    }
+    .matrix-table th, .matrix-table td {
+        padding: 2px 4px;
+        font-size: 0.75rem;
+    }
+    .matrix-table td { text-align: center; }
 </style>
 {% endblock %}
 
@@ -388,6 +400,11 @@
                             <button class="nav-link {% if not recent_packets %}active{% endif %}" id="reported-tab" data-bs-toggle="tab" data-bs-target="#reported-tab-pane" type="button" role="tab">Reported</button>
                         </li>
                         {% endif %}
+                        {% if matrix_gateways and recent_packets %}
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="matrix-tab" data-bs-toggle="tab" data-bs-target="#matrix-tab-pane" type="button" role="tab">Reception Matrix</button>
+                        </li>
+                        {% endif %}
                     </ul>
 
                     <div class="tab-content mt-3">
@@ -546,6 +563,54 @@
                                 <a href="/packets?gateway_id={{ node.node_id }}&exclude_self=true" class="btn btn-outline-primary">
                                     <i class="bi bi-box"></i> View All Packets Reported by This Node
                                 </a>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% if matrix_gateways and recent_packets %}
+                        <div class="tab-pane fade" id="matrix-tab-pane" role="tabpanel" aria-labelledby="matrix-tab">
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered table-hover matrix-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Packet</th>
+                                            {% for gw in matrix_gateways %}
+                                                <th class="vertical-header">
+                                                    {{ node_link(gw.gateway_id, gw.display_name, display_text=gw.short_name, additional_classes="text-white text-decoration-none fw-bold") }}
+                                                </th>
+                                            {% endfor %}
+                                            <th>Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for packet in recent_packets %}
+                                        {% set received_ids = packet.gateways_detailed | map(attribute='gateway_id') | list %}
+                                        {% set received_count = received_ids | length %}
+                                        <tr>
+                                            <td>
+                                                <a href="/packet/{{ packet.id }}" data-bs-toggle="tooltip" title="Sent {{ packet.timestamp_relative }}">
+                                                    <code>{% if packet.mesh_packet_id %}{{ "%08x"|format(packet.mesh_packet_id) }}{% else %}{{ "%08x"|format(packet.id) }}{% endif %}</code>
+                                                </a>
+                                            </td>
+                                            {% for gw in matrix_gateways %}
+                                                {% set gw_entry = (packet.gateways_detailed | selectattr('gateway_id', 'equalto', gw.gateway_id) | list | first) %}
+                                                {% if gw_entry %}
+                                                    {% if gw_entry.hop_count == 0 %}
+                                                        <td class="text-center">
+                                                            <span class="text-success fw-bold" data-bs-toggle="tooltip" title="{% if gw_entry.rssi is not none %}RSSI: {{ gw_entry.rssi }} dBm {% endif %}{% if gw_entry.snr is not none %}SNR: {{ gw_entry.snr }} dB{% endif %}">0</span>
+                                                        </td>
+                                                    {% else %}
+                                                        <td class="text-center">{{ gw_entry.hop_count }}</td>
+                                                    {% endif %}
+                                                {% else %}
+                                                    <td class="text-muted text-center">-</td>
+                                                {% endif %}
+                                            {% endfor %}
+                                            <td>{{ received_count }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                         {% endif %}

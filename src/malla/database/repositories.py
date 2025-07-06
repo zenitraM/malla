@@ -1224,6 +1224,7 @@ class NodeRepository:
                         "gateway_id": row["gateway_id"],
                         "rssi": row["rssi"],
                         "snr": row["snr"],
+                        "hop_count": row["hop_count"],
                     }
                     grouped_packets[mesh_id]["gateways"].append(gateway_info)
                     grouped_packets[mesh_id]["gateway_count"] += 1
@@ -1278,6 +1279,7 @@ class NodeRepository:
                                 "gateway_id": row["gateway_id"],
                                 "rssi": row["rssi"],
                                 "snr": row["snr"],
+                                "hop_count": row["hop_count"],
                             }
                         ],
                         "gateway_count": 1,
@@ -1395,6 +1397,7 @@ class NodeRepository:
                             "rssi": rssi_display,
                             "snr": snr_display,
                             "mesh_packet_id": packet["mesh_packet_id"],
+                            "gateways_detailed": packet["gateways"],
                         }
                     )
                 else:
@@ -1433,6 +1436,7 @@ class NodeRepository:
                             "rssi": gateway_info["rssi"],
                             "snr": gateway_info["snr"],
                             "mesh_packet_id": packet["mesh_packet_id"],
+                            "gateways_detailed": packet["gateways"],
                         }
                     )
 
@@ -1693,12 +1697,116 @@ class NodeRepository:
                 logger.warning(f"Failed to get location for node {node_id}: {e}")
                 location_info = None
 
+            # --------------------------------------------------------------
+            # Build gateway statistics for reception matrix (average hops & RSSI)
+            # --------------------------------------------------------------
+
+            gateway_stats: dict[str, dict[str, Any]] = {}
+
+            for pkt in recent_packets:
+                hop_val = pkt.get("hop_count")
+                for gw in pkt.get("gateways_detailed", []):
+                    gw_id = gw.get("gateway_id")
+                    if not gw_id:
+                        continue
+
+                    stats = gateway_stats.setdefault(
+                        gw_id,
+                        {
+                            "hop_total": 0,
+                            "hop_samples": 0,
+                            "rssi_samples": [],
+                        },
+                    )
+
+                    # Accumulate hop counts if available
+                    if hop_val is not None:
+                        stats["hop_total"] += hop_val
+                        stats["hop_samples"] += 1
+
+                    # Only consider RSSI for direct (0-hop) receptions
+                    if hop_val == 0 and gw.get("rssi") is not None:
+                        stats["rssi_samples"].append(gw["rssi"])
+
+            # Resolve display names for gateways (may be node IDs)
+            matrix_gateways: list[dict[str, Any]] = []
+
+            # Prepare short name mapping for gateway nodes (max 8 char ids) for column headers
+            gateway_node_short_names: dict[int, str] = {}
+
+            if gateway_node_ids:
+                try:
+                    from ..utils.node_utils import get_bulk_node_short_names
+
+                    gateway_node_short_names = get_bulk_node_short_names(
+                        list(set(gateway_node_ids))
+                    )
+                except Exception:
+                    gateway_node_short_names = {}
+
+            for gw_id, stats in gateway_stats.items():
+                avg_hops = (
+                    stats["hop_total"] / stats["hop_samples"]
+                    if stats["hop_samples"] > 0
+                    else None
+                )
+
+                avg_rssi = (
+                    sum(stats["rssi_samples"]) / len(stats["rssi_samples"])
+                    if stats["rssi_samples"]
+                    else None
+                )
+
+                display_name = gw_id
+                if isinstance(gw_id, str) and gw_id.startswith("!"):
+                    try:
+                        gw_node_int = int(gw_id[1:], 16)
+                        display_name = node_names.get(gw_node_int, gw_id)
+                    except ValueError:
+                        display_name = gw_id
+
+                # Determine 4-char short name: use node short_name if node, else last4 of ID
+                short_name_val = None
+                if isinstance(gw_id, str) and gw_id.startswith("!"):
+                    try:
+                        gw_int = int(gw_id[1:], 16)
+                        short_name_val = gateway_node_short_names.get(
+                            gw_int, f"{gw_int:08x}"[-4:]
+                        )
+                    except ValueError:
+                        pass
+
+                if not short_name_val:
+                    # Non-node gateway or fallback
+                    short_name_val = gw_id[-4:] if len(gw_id) > 4 else gw_id
+
+                matrix_gateways.append(
+                    {
+                        "gateway_id": gw_id,
+                        "display_name": display_name,
+                        "short_name": short_name_val,
+                        "avg_hops": avg_hops,
+                        "avg_rssi": avg_rssi,
+                    }
+                )
+
+            # Sort gateways by average hops (ascending, treating None as large), then by average RSSI (descending)
+            def _gateway_sort_key(gw: dict[str, Any]):
+                hops_sort = gw["avg_hops"] if gw["avg_hops"] is not None else 1e9
+                rssi_sort = (
+                    -gw["avg_rssi"] if gw["avg_rssi"] is not None else 1e9
+                )  # Negative because higher (less negative) RSSI is better
+                return (hops_sort, rssi_sort)
+
+            matrix_gateways.sort(key=_gateway_sort_key)
+
             return {
                 "node": node_info,
                 "recent_packets": recent_packets,
                 "recent_reported_packets": recent_reported_packets,
                 "protocols": protocols,
                 "received_gateways": received_gateways,
+                "matrix_gateways": matrix_gateways,
                 "location": location_info,
             }
 
