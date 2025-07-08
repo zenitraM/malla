@@ -589,7 +589,7 @@
                                         <tr>
                                             <td>
                                                 <a href="/packet/{{ packet.id }}" data-bs-toggle="tooltip" title="Sent {{ packet.timestamp_relative }}">
-                                                    <code>{% if packet.mesh_packet_id %}{{ "%08x"|format(packet.mesh_packet_id) }}{% else %}{{ "%08x"|format(packet.id) }}{% endif %}</code>
+                                                    <code>{% if packet.mesh_packet_id %}{{ "%08x"|format(packet.mesh_packet_id|int) }}{% else %}{{ "%08x"|format(packet.id|int) }}{% endif %}</code>
                                                 </a>
                                             </td>
                                             {% for gw in matrix_gateways %}
