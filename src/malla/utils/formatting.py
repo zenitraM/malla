@@ -4,8 +4,49 @@ Formatting utility functions for Meshtastic Mesh Health Web UI
 
 import logging
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+
+
+def get_configured_timezone() -> ZoneInfo:
+    """Get the configured timezone from app config."""
+    # Import here to avoid circular imports
+    from ..config import get_config
+    
+    config = get_config()
+    try:
+        return ZoneInfo(config.timezone)
+    except Exception as e:
+        logger.warning(f"Invalid timezone '{config.timezone}': {e}. Using UTC.")
+        return ZoneInfo("UTC")
+
+
+def format_datetime_in_timezone(dt: datetime | None, tz: ZoneInfo | None = None) -> str:
+    """Format a datetime in the configured timezone."""
+    if not dt:
+        return "Never"
+    
+    if tz is None:
+        tz = get_configured_timezone()
+    
+    # Ensure we have a timezone-aware datetime
+    if dt.tzinfo is None:
+        # Assume naive datetime is UTC
+        dt = dt.replace(tzinfo=UTC)
+    
+    # Convert to configured timezone
+    dt_local = dt.astimezone(tz)
+    
+    # Format as ISO-like string with timezone abbreviation
+    return dt_local.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def get_current_time_in_timezone() -> str:
+    """Get current time formatted in the configured timezone."""
+    tz = get_configured_timezone()
+    current_time = datetime.now(tz)
+    return current_time.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 def format_time_ago(dt: datetime | None) -> str:
@@ -16,9 +57,10 @@ def format_time_ago(dt: datetime | None) -> str:
     # Ensure we're comparing timestamps in the same timezone
     # If dt is naive (no timezone), assume it's UTC
     if dt.tzinfo is None:
-        now = datetime.now(UTC)
-    else:
-        now = datetime.now(dt.tzinfo)
+        dt = dt.replace(tzinfo=UTC)
+        
+    # Get current time in UTC for consistent comparison
+    now = datetime.now(UTC)
 
     diff = now - dt
 

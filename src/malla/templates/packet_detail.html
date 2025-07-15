@@ -181,7 +181,7 @@
                                 </tr>
                                 <tr>
                                     <th>Timestamp:</th>
-                                    <td>{{ packet.timestamp_str }} UTC</td>
+                                    <td>{{ packet.timestamp | format_datetime_tz if packet.timestamp else packet.timestamp_str }}</td>
                                 </tr>
                                 <tr>
                                     <th>From Node:</th>

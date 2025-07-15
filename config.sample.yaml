@@ -30,6 +30,10 @@ debug: false
 # Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 # log_level: "INFO"
 
+# Timezone for displaying dates and times in the UI
+# Use standard timezone names like "UTC", "America/New_York", "Europe/Madrid", etc.
+# timezone: "UTC"
+
 # ---------------------------------------------------------------------------
 # MQTT capture settings (used by malla-capture)
 # ---------------------------------------------------------------------------

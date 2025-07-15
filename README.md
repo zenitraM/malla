@@ -290,6 +290,7 @@ The following keys are recognised:
 | `host`          | str    | `"0.0.0.0"`                              | Interface to bind the web server to.          | `MALLA_HOST` |
 | `port`          | int    | `5008`                                   | TCP port for the web server.                  | `MALLA_PORT` |
 | `debug`         | bool   | `false`                                  | Run Flask in debug mode (unsafe for prod!).   | `MALLA_DEBUG` |
+| `timezone`      | str    | `"UTC"`                                  | Timezone for displaying dates and times in the UI (e.g., "America/New_York", "Europe/Madrid").  | `MALLA_TIMEZONE` |
 | `mqtt_broker_address` | str | `"127.0.0.1"`                      | MQTT broker hostname or IP address.           | `MALLA_MQTT_BROKER_ADDRESS` |
 | `mqtt_port`     | int    | `1883`                                   | MQTT broker port.                              | `MALLA_MQTT_PORT` |
 | `mqtt_username` | str    | `""`                                     | MQTT broker username (optional).               | `MALLA_MQTT_USERNAME` |
