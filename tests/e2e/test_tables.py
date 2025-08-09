@@ -425,10 +425,14 @@ class TestTables:
             "All Roles",
             "Client",
             "Client Mute",
+            "Lost And Found",
+            "Repeater",
             "Router",
             "Router Client",
             "Router Late",
+            "Sensor",
             "TAK",
+            "TAK Tracker",
             "Tracker",
         ]
 

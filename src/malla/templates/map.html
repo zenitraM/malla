@@ -91,6 +91,7 @@
                         <option value="">All Roles</option>
                         <option value="CLIENT">Client</option>
                         <option value="ROUTER">Router</option>
+                        <option value="ROUTER_LATE">Router Late</option>
                         <option value="REPEATER">Repeater</option>
                         <option value="CLIENT_MUTE">Client Mute</option>
                         <option value="ROUTER_CLIENT">Router Client</option>
@@ -169,6 +170,7 @@
         {% set map_legend_items = [
             {"type": "span", "class": "role-color-indicator", "style": "background-color: #007bff;", "content": "", "text": "Client"},
             {"type": "span", "class": "role-color-indicator", "style": "background-color: #28a745;", "content": "", "text": "Router"},
+            {"type": "span", "class": "role-color-indicator", "style": "background-color: #28a745;", "content": "", "text": "Router Late"},
             {"type": "span", "class": "role-color-indicator", "style": "background-color: #ffc107;", "content": "", "text": "Repeater"},
             {"type": "span", "class": "role-color-indicator", "style": "background-color: #6c757d;", "content": "", "text": "Client Mute"},
             {"type": "span", "class": "role-color-indicator", "style": "background-color: #17a2b8;", "content": "", "text": "Router Client"},
@@ -1228,6 +1230,7 @@ function getRoleColor(role) {
         case 'CLIENT': return '#007bff'; // Blue
         case 'CLIENT_MUTE': return '#6c757d'; // Gray
         case 'ROUTER': return '#28a745'; // Green
+        case 'ROUTER_LATE': return '#28a745'; // Green (same as ROUTER)
         case 'REPEATER': return '#ffc107'; // Yellow
         case 'ROUTER_CLIENT': return '#17a2b8'; // Teal
         case 'SENSOR': return '#e83e8c'; // Pink
@@ -1241,6 +1244,7 @@ function formatRole(role) {
         case 'CLIENT': return 'C';
         case 'CLIENT_MUTE': return 'CM';
         case 'ROUTER': return 'R';
+        case 'ROUTER_LATE': return 'RL';
         case 'REPEATER': return 'RP';
         case 'ROUTER_CLIENT': return 'RC';
         case 'SENSOR': return 'S';
