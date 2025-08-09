@@ -198,14 +198,92 @@ def api_packets():
 
 @api_bp.route("/nodes")
 def api_nodes():
-    """API endpoint for node data."""
+    """API endpoint for node data (with optional search)."""
     logger.info("API nodes endpoint accessed")
     try:
         limit = request.args.get("limit", 100, type=int)
         page = request.args.get("page", 1, type=int)
+        search = request.args.get("search", "").strip()
         offset = (page - 1) * limit
 
-        data = NodeRepository.get_nodes(limit=limit, offset=offset)
+        # Create broadcast node entry for special handling
+        broadcast_node = {
+            "node_id": 4294967295,
+            "long_name": "Broadcast",
+            "short_name": "Broadcast", 
+            "hw_model": "Special",
+            "role": "Broadcast",
+            "primary_channel": None,
+            "last_updated": None,
+            "hex_id": "!ffffffff",
+            "packet_count_24h": 0,
+            "gateway_packet_count_24h": 0,
+            "last_packet_time": None,
+            "last_packet_str": None,
+        }
+
+        # Check if query matches broadcast node
+        def matches_broadcast(q):
+            if not q:
+                return False
+            q_lower = q.lower()
+            return (
+                "broadcast" in q_lower
+                or "ffffffff" in q_lower
+                or "!ffffffff" in q_lower
+                or str(4294967295) in q
+            )
+
+        # Check if database tables exist before calling NodeRepository
+        db_ready = False
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='node_info'")
+            db_ready = cursor.fetchone() is not None
+            conn.close()
+        except Exception:
+            db_ready = False
+
+        # Get nodes from repository
+        if db_ready:
+            try:
+                # For search mode, leave room for broadcast if it matches
+                search_limit = limit - (1 if search and matches_broadcast(search) else 0)
+                # For non-search mode, leave room for broadcast
+                non_search_limit = limit - 1 if not search else limit
+                actual_limit = search_limit if search else non_search_limit
+                
+                data = NodeRepository.get_nodes(
+                    limit=max(1, actual_limit), 
+                    offset=offset,
+                    search=search or None
+                )
+            except Exception as db_error:
+                # If database call fails, return limited results
+                logger.info(f"Database call failed, returning limited results: {db_error}")
+                data = {"nodes": [], "total_count": 0}
+        else:
+            # Database not ready, return empty results
+            data = {"nodes": [], "total_count": 0}
+
+        # Add broadcast node when appropriate
+        nodes = data["nodes"]
+        total_count = data["total_count"]
+        
+        if search:
+            # For search mode, add broadcast if query matches
+            if matches_broadcast(search):
+                nodes = [broadcast_node] + nodes
+                total_count += 1
+        else:
+            # For non-search mode, add broadcast at the top for easy access
+            nodes = [broadcast_node] + nodes
+            total_count += 1
+
+        # Update data with modified results
+        data["nodes"] = nodes
+        data["total_count"] = total_count
 
         # Add pagination info that the test expects
         data["page"] = page

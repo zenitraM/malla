@@ -2,7 +2,8 @@
 Tests for broadcast node functionality in node search API.
 
 This module tests that the broadcast node (4294967295 / !ffffffff) appears 
-as a selectable option in node search results.
+as a selectable option in node search results for both /api/nodes/search
+and /api/nodes endpoints.
 """
 
 import pytest
@@ -42,6 +43,60 @@ class TestNodeSearchBroadcast:
                 assert broadcast_node['long_name'] == "Broadcast"
                 assert broadcast_node['short_name'] == "Broadcast"
                 assert broadcast_node['role'] == "Broadcast"
+
+    def test_api_nodes_no_search_includes_broadcast(self):
+        """Test that /api/nodes endpoint includes broadcast node when no search is provided."""
+        app = create_app()
+        
+        with app.test_client() as client:
+            with patch('src.malla.routes.api_routes.get_db_connection') as mock_conn:
+                # Mock database connection to return no tables (simulating fresh database)
+                mock_cursor = MagicMock()
+                mock_cursor.fetchone.return_value = None  # No node_info table
+                mock_conn.return_value.cursor.return_value = mock_cursor
+                
+                response = client.get('/api/nodes')
+                
+                assert response.status_code == 200
+                data = response.get_json()
+                
+                assert data['total_count'] == 1
+                assert len(data['nodes']) == 1
+                assert data['page'] == 1
+                assert data['per_page'] == 100
+                
+                # Check broadcast node properties
+                broadcast_node = data['nodes'][0]
+                assert broadcast_node['node_id'] == 4294967295
+                assert broadcast_node['hex_id'] == "!ffffffff"
+                assert broadcast_node['long_name'] == "Broadcast"
+                assert broadcast_node['short_name'] == "Broadcast"
+                assert broadcast_node['role'] == "Broadcast"
+
+    def test_api_nodes_search_includes_broadcast(self):
+        """Test that /api/nodes endpoint includes broadcast node when search matches."""
+        app = create_app()
+        
+        with app.test_client() as client:
+            with patch('src.malla.routes.api_routes.get_db_connection') as mock_conn:
+                # Mock database connection to return no tables (simulating fresh database)
+                mock_cursor = MagicMock()
+                mock_cursor.fetchone.return_value = None  # No node_info table
+                mock_conn.return_value.cursor.return_value = mock_cursor
+                
+                response = client.get('/api/nodes?search=broadcast')
+                
+                assert response.status_code == 200
+                data = response.get_json()
+                
+                assert data['total_count'] == 1
+                assert len(data['nodes']) == 1
+                
+                # Check broadcast node properties
+                broadcast_node = data['nodes'][0]
+                assert broadcast_node['node_id'] == 4294967295
+                assert broadcast_node['hex_id'] == "!ffffffff"
+                assert broadcast_node['long_name'] == "Broadcast"
 
     @patch('src.malla.routes.api_routes.NodeRepository.get_nodes')
     def test_node_search_no_query_with_real_nodes(self, mock_get_nodes):
@@ -119,6 +174,38 @@ class TestNodeSearchBroadcast:
                     assert len(data['nodes']) == 1, f"Wrong nodes length for query: {query}"
                     assert data['query'] == query, f"Wrong query echo for: {query}"
                     assert data['is_popular'] is False, f"Wrong is_popular for: {query}"
+                    
+                    # Check broadcast node properties
+                    broadcast_node = data['nodes'][0]
+                    assert broadcast_node['node_id'] == 4294967295, f"Wrong node_id for query: {query}"
+                    assert broadcast_node['hex_id'] == "!ffffffff", f"Wrong hex_id for query: {query}"
+
+    def test_api_nodes_broadcast_query_variations(self):
+        """Test that /api/nodes endpoint handles various broadcast-related search queries."""
+        app = create_app()
+        
+        test_queries = [
+            "broadcast",
+            "ffffffff", 
+            "!ffffffff",
+            "4294967295"
+        ]
+        
+        with app.test_client() as client:
+            for query in test_queries:
+                with patch('src.malla.routes.api_routes.get_db_connection') as mock_conn:
+                    # Mock database connection to return no tables
+                    mock_cursor = MagicMock()
+                    mock_cursor.fetchone.return_value = None
+                    mock_conn.return_value.cursor.return_value = mock_cursor
+                    
+                    response = client.get(f'/api/nodes?search={query}')
+                    
+                    assert response.status_code == 200, f"Failed for query: {query}"
+                    data = response.get_json()
+                    
+                    assert data['total_count'] == 1, f"Wrong count for query: {query}"
+                    assert len(data['nodes']) == 1, f"Wrong nodes length for query: {query}"
                     
                     # Check broadcast node properties
                     broadcast_node = data['nodes'][0]
