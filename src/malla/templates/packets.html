@@ -50,6 +50,24 @@
                 ) }}
             </div>
             <div class="col-12">
+                {{ node_picker(
+                    field_name="exclude_from",
+                    label="Exclude From Node",
+                    selected_value="",
+                    selected_display="",
+                    placeholder="No exclusions"
+                ) }}
+            </div>
+            <div class="col-12">
+                {{ node_picker(
+                    field_name="exclude_to",
+                    label="Exclude To Node",
+                    selected_value="",
+                    selected_display="",
+                    placeholder="No exclusions"
+                ) }}
+            </div>
+            <div class="col-12">
                 {{ gateway_picker(
                     field_name="gateway_id",
                     label="Gateway (Receiver)",

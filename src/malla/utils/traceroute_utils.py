@@ -104,7 +104,9 @@ def parse_traceroute_payload_manual(raw_payload: bytes) -> RouteData:
                     int(node_id) for node_id in route_nodes_raw if node_id is not None
                 ],
                 # Convert SNR from scaled integer to actual dB (divide by 4)
-                snr_towards=[float(snr) / 4.0 for snr in snr_towards_raw if snr is not None],
+                snr_towards=[
+                    float(snr) / 4.0 for snr in snr_towards_raw if snr is not None
+                ],
                 route_back=[
                     int(node_id) for node_id in route_back_raw if node_id is not None
                 ],

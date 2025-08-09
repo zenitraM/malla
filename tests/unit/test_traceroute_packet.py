@@ -642,7 +642,10 @@ class TestTraceroutePacketEdgeCases:
             # Simulate raw protobuf values that would be scaled integers
             # In Meshtastic, SNR values are often stored as integers that need /4 conversion
             mock_route_discovery.route = [0x11111111]
-            mock_route_discovery.snr_towards = [-20.0, -32.0]  # These should become -5.0, -8.0
+            mock_route_discovery.snr_towards = [
+                -20.0,
+                -32.0,
+            ]  # These should become -5.0, -8.0
             mock_route_discovery.route_back = [0x22222222]
             mock_route_discovery.snr_back = [-28.0]  # This should become -7.0
 

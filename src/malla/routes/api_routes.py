@@ -210,7 +210,7 @@ def api_nodes():
         broadcast_node = {
             "node_id": 4294967295,
             "long_name": "Broadcast",
-            "short_name": "Broadcast", 
+            "short_name": "Broadcast",
             "hw_model": "Special",
             "role": "Broadcast",
             "primary_channel": None,
@@ -239,7 +239,9 @@ def api_nodes():
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='node_info'")
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='node_info'"
+            )
             db_ready = cursor.fetchone() is not None
             conn.close()
         except Exception:
@@ -249,19 +251,21 @@ def api_nodes():
         if db_ready:
             try:
                 # For search mode, leave room for broadcast if it matches
-                search_limit = limit - (1 if search and matches_broadcast(search) else 0)
+                search_limit = limit - (
+                    1 if search and matches_broadcast(search) else 0
+                )
                 # For non-search mode, leave room for broadcast
                 non_search_limit = limit - 1 if not search else limit
                 actual_limit = search_limit if search else non_search_limit
-                
+
                 data = NodeRepository.get_nodes(
-                    limit=max(1, actual_limit), 
-                    offset=offset,
-                    search=search or None
+                    limit=max(1, actual_limit), offset=offset, search=search or None
                 )
             except Exception as db_error:
                 # If database call fails, return limited results
-                logger.info(f"Database call failed, returning limited results: {db_error}")
+                logger.info(
+                    f"Database call failed, returning limited results: {db_error}"
+                )
                 data = {"nodes": [], "total_count": 0}
         else:
             # Database not ready, return empty results
@@ -270,7 +274,7 @@ def api_nodes():
         # Add broadcast node when appropriate
         nodes = data["nodes"]
         total_count = data["total_count"]
-        
+
         if search:
             # For search mode, add broadcast if query matches
             if matches_broadcast(search):
@@ -310,7 +314,7 @@ def api_nodes_search():
         broadcast_node = {
             "node_id": 4294967295,
             "long_name": "Broadcast",
-            "short_name": "Broadcast", 
+            "short_name": "Broadcast",
             "hw_model": "Special",
             "role": "Broadcast",
             "primary_channel": None,
@@ -339,7 +343,9 @@ def api_nodes_search():
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='node_info'")
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='node_info'"
+            )
             db_ready = cursor.fetchone() is not None
             conn.close()
         except Exception:
@@ -360,7 +366,9 @@ def api_nodes_search():
                     total_count = result["total_count"] + 1
                 except Exception as db_error:
                     # If database call fails, just return broadcast node
-                    logger.info(f"Database call failed, returning just broadcast node: {db_error}")
+                    logger.info(
+                        f"Database call failed, returning just broadcast node: {db_error}"
+                    )
                     nodes = [broadcast_node]
                     total_count = 1
             else:
@@ -381,7 +389,10 @@ def api_nodes_search():
         if db_ready:
             try:
                 result = NodeRepository.get_nodes(
-                    limit=limit - (1 if matches_broadcast(query) else 0),  # Leave room for broadcast if it matches
+                    limit=limit
+                    - (
+                        1 if matches_broadcast(query) else 0
+                    ),  # Leave room for broadcast if it matches
                     offset=0,
                     search=query,
                     order_by="packet_count_24h",  # Order by activity
@@ -391,7 +402,9 @@ def api_nodes_search():
                 total_count = result["total_count"]
             except Exception as db_error:
                 # If database call fails, start with empty list
-                logger.info(f"Database search failed, returning limited results: {db_error}")
+                logger.info(
+                    f"Database search failed, returning limited results: {db_error}"
+                )
                 nodes = []
                 total_count = 0
         else:
