@@ -6,7 +6,6 @@ using fixture data to ensure filters work correctly.
 """
 
 import pytest
-import requests
 
 
 class TestExcludeFiltersAPI:
@@ -60,7 +59,9 @@ class TestExcludeFiltersAPI:
             f"got {filtered_total_count} (original: {total_count}, excluded: {packets_from_excluded_count})"
         )
 
-        print(f"✅ Exclude from filter working: {filtered_total_count} total packets, {len(filtered_packets)} returned")
+        print(
+            f"✅ Exclude from filter working: {filtered_total_count} total packets, {len(filtered_packets)} returned"
+        )
 
     @pytest.mark.integration
     def test_exclude_to_filter_api(self, client, test_server_url):
@@ -82,7 +83,9 @@ class TestExcludeFiltersAPI:
         packets_to_excluded_count = len(packets_to_excluded_node)
 
         print(f"Total packets: {total_packets} (total_count: {total_count})")
-        print(f"Packets to node {exclude_node_id} (broadcast): {packets_to_excluded_count}")
+        print(
+            f"Packets to node {exclude_node_id} (broadcast): {packets_to_excluded_count}"
+        )
 
         # Skip test if no packets to this node
         if packets_to_excluded_count == 0:
@@ -110,7 +113,9 @@ class TestExcludeFiltersAPI:
             f"got {filtered_total_count} (original: {total_count}, excluded: {packets_to_excluded_count})"
         )
 
-        print(f"✅ Exclude to filter working: {filtered_total_count} total packets, {len(filtered_packets)} returned")
+        print(
+            f"✅ Exclude to filter working: {filtered_total_count} total packets, {len(filtered_packets)} returned"
+        )
 
     @pytest.mark.integration
     def test_exclude_broadcast_packets_api(self, client, test_server_url):
@@ -118,7 +123,9 @@ class TestExcludeFiltersAPI:
         broadcast_node_id = 4294967295
 
         # Get packets excluding broadcast destinations
-        response = client.get(f"/api/packets/data?exclude_to={broadcast_node_id}&limit=200")
+        response = client.get(
+            f"/api/packets/data?exclude_to={broadcast_node_id}&limit=200"
+        )
         assert response.status_code == 200
         data = response.get_json()
 
@@ -128,18 +135,19 @@ class TestExcludeFiltersAPI:
                 f"Found broadcast packet {packet['id']} in exclude_to=broadcast results"
             )
 
-        print(f"✅ Broadcast exclusion working: {len(data['data'])} non-broadcast packets displayed, {data['total_count']} total")
+        print(
+            f"✅ Broadcast exclusion working: {len(data['data'])} non-broadcast packets displayed, {data['total_count']} total"
+        )
 
     @pytest.mark.integration
     def test_combined_exclude_filters_api(self, client, test_server_url):
         """Test using both exclude_from and exclude_to filters together."""
         exclude_from_node = 1128074276  # Test Gateway Alpha
-        exclude_to_node = 4294967295    # Broadcast
+        exclude_to_node = 4294967295  # Broadcast
 
-        # Get all packets first
+        # Get all packets first for count verification
         response_all = client.get("/api/packets/data?limit=200")
         assert response_all.status_code == 200
-        all_data = response_all.get_json()
 
         # Get packets with both exclusions
         response_filtered = client.get(
@@ -158,7 +166,9 @@ class TestExcludeFiltersAPI:
                 f"Found packet {packet['id']} to excluded node {exclude_to_node}"
             )
 
-        print(f"✅ Combined exclude filters working: {len(filtered_packets)} packets displayed, {filtered_data['total_count']} total")
+        print(
+            f"✅ Combined exclude filters working: {len(filtered_packets)} packets displayed, {filtered_data['total_count']} total"
+        )
 
     @pytest.mark.integration
     def test_exclude_filters_with_other_filters_api(self, client, test_server_url):
@@ -182,7 +192,9 @@ class TestExcludeFiltersAPI:
                 f"Found packet {packet['id']} with wrong portnum: {packet['portnum_name']}"
             )
 
-        print(f"✅ Exclude + portnum filters working: {len(data['data'])} packets displayed, {data['total_count']} total")
+        print(
+            f"✅ Exclude + portnum filters working: {len(data['data'])} packets displayed, {data['total_count']} total"
+        )
 
     @pytest.mark.integration
     def test_exclude_nonexistent_node_api(self, client, test_server_url):
@@ -190,14 +202,20 @@ class TestExcludeFiltersAPI:
         nonexistent_node = 999999999
 
         # This should work without errors and return all packets
-        response = client.get(f"/api/packets/data?exclude_from={nonexistent_node}&limit=200")
+        response = client.get(
+            f"/api/packets/data?exclude_from={nonexistent_node}&limit=200"
+        )
         assert response.status_code == 200
         data = response.get_json()
 
         # Should have packets (since nothing was actually excluded)
-        assert len(data["data"]) > 0, "Should have packets when excluding non-existent node"
+        assert len(data["data"]) > 0, (
+            "Should have packets when excluding non-existent node"
+        )
 
-        print(f"✅ Non-existent node exclusion handled gracefully: {len(data['data'])} packets displayed, {data['total_count']} total")
+        print(
+            f"✅ Non-existent node exclusion handled gracefully: {len(data['data'])} packets displayed, {data['total_count']} total"
+        )
 
     @pytest.mark.integration
     def test_exclude_filters_boundary_conditions_api(self, client, test_server_url):
@@ -206,10 +224,14 @@ class TestExcludeFiltersAPI:
         response = client.get("/api/packets/data?exclude_from=&exclude_to=&limit=200")
         assert response.status_code == 200
         data = response.get_json()
-        assert len(data["data"]) > 0, "Empty exclude filters should not exclude anything"
+        assert len(data["data"]) > 0, (
+            "Empty exclude filters should not exclude anything"
+        )
 
         # Test with invalid node IDs (should be handled gracefully)
-        response = client.get("/api/packets/data?exclude_from=invalid&exclude_to=999999999999&limit=200")
+        response = client.get(
+            "/api/packets/data?exclude_from=invalid&exclude_to=999999999999&limit=200"
+        )
         assert response.status_code == 200  # Should not crash
 
         print("✅ Boundary conditions handled correctly")
@@ -234,13 +256,17 @@ class TestExcludeFiltersAPI:
         assert response_with_filter.status_code == 200
 
         # Filter should not be significantly slower (allow up to 3x slower)
-        performance_ratio = with_filter_time / no_filter_time if no_filter_time > 0 else 1
+        performance_ratio = (
+            with_filter_time / no_filter_time if no_filter_time > 0 else 1
+        )
         assert performance_ratio < 3.0, (
             f"Exclude filters too slow: {with_filter_time:.3f}s vs {no_filter_time:.3f}s "
             f"(ratio: {performance_ratio:.2f})"
         )
 
-        print(f"✅ Performance acceptable: {no_filter_time:.3f}s -> {with_filter_time:.3f}s")
+        print(
+            f"✅ Performance acceptable: {no_filter_time:.3f}s -> {with_filter_time:.3f}s"
+        )
 
     @pytest.mark.integration
     def test_exclude_filters_total_count_consistency_api(self, client, test_server_url):
@@ -253,7 +279,9 @@ class TestExcludeFiltersAPI:
         total_without_filter = response_all.get_json()["total_count"]
 
         # Get total count with exclude filter
-        response_filtered = client.get(f"/api/packets/data?exclude_from={exclude_from_node}&limit=1")
+        response_filtered = client.get(
+            f"/api/packets/data?exclude_from={exclude_from_node}&limit=1"
+        )
         assert response_filtered.status_code == 200
         total_with_filter = response_filtered.get_json()["total_count"]
 
@@ -264,12 +292,16 @@ class TestExcludeFiltersAPI:
         )
 
         # If there are packets from the excluded node, total should be different
-        response_check = client.get("/api/packets/data?from_node={exclude_from_node}&limit=1")
+        response_check = client.get(
+            "/api/packets/data?from_node={exclude_from_node}&limit=1"
+        )
         packets_from_excluded = response_check.get_json()["total_count"]
 
         if packets_from_excluded > 0:
             assert total_with_filter < total_without_filter, (
-                f"Total count should be reduced when excluding node that has packets"
+                "Total count should be reduced when excluding node that has packets"
             )
 
-        print(f"✅ Total count consistency: {total_without_filter} -> {total_with_filter}")
+        print(
+            f"✅ Total count consistency: {total_without_filter} -> {total_with_filter}"
+        )

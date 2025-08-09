@@ -34,6 +34,8 @@ Run the applications:
 
 - ALWAYS run through at least one complete end-to-end scenario after making changes
 - Always run `make format` and `make lint` before you are done or the CI (.github/workflows/ci.yml) will fail
+- ALWAYS run comprehensive CI checks before considering work finished: `make check` (takes 3 minutes)
+- MUST fix all linting errors before committing: formatting issues can be auto-fixed with `make format`
 
 **Complete validation scenario:**
 1. Start web UI: `uv run malla-web` (should start without errors)
@@ -149,9 +151,12 @@ docker-compose up --build -d
 ## Development Workflow
 
 1. Make code changes
-2. Run tests: `make check` (NEVER CANCEL, takes 3 minutes)
-3. Test manually: `uv run malla-web` and verify functionality
-4. Format code: `make format`
-5. Commit changes
+2. Format code: `make format` (auto-fixes formatting issues)
+3. Run linting: `make lint` (must pass before committing)
+4. Run comprehensive tests: `make check` (NEVER CANCEL, takes 3 minutes)
+5. Test manually: `uv run malla-web` and verify functionality
+6. Commit changes only after all CI checks pass
+
+**Critical: Always run `make check` before considering work finished. This matches the CI pipeline and ensures all tests pass.**
 
 The codebase is well-structured with comprehensive testing. Always validate changes by running the full test suite and manually testing core functionality.

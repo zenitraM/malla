@@ -12,7 +12,9 @@ from playwright.sync_api import Page, expect
 class TestExcludeFiltersURLHandling:
     """Test exclude filter URL parameter handling end-to-end."""
 
-    def test_exclude_from_url_parameter_restoration(self, page: Page, test_server_url: str):
+    def test_exclude_from_url_parameter_restoration(
+        self, page: Page, test_server_url: str
+    ):
         """Test that exclude_from URL parameter is properly restored on page load."""
         exclude_from_id = "1128074276"  # Test Gateway Alpha
 
@@ -38,7 +40,9 @@ class TestExcludeFiltersURLHandling:
 
         print("✅ Exclude from URL parameter restoration working correctly")
 
-    def test_exclude_to_url_parameter_restoration(self, page: Page, test_server_url: str):
+    def test_exclude_to_url_parameter_restoration(
+        self, page: Page, test_server_url: str
+    ):
         """Test that exclude_to URL parameter is properly restored on page load."""
         exclude_to_id = "4294967295"  # Broadcast
 
@@ -70,7 +74,9 @@ class TestExcludeFiltersURLHandling:
         exclude_to_id = "4294967295"
 
         # Navigate with both exclude parameters in URL
-        page.goto(f"{test_server_url}/packets?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}")
+        page.goto(
+            f"{test_server_url}/packets?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}"
+        )
         page.wait_for_selector("#packetsTable", timeout=10000)
         page.wait_for_timeout(3000)
 
@@ -92,13 +98,17 @@ class TestExcludeFiltersURLHandling:
 
         print("✅ Combined exclude URL parameters working correctly")
 
-    def test_exclude_filters_with_other_url_parameters(self, page: Page, test_server_url: str):
+    def test_exclude_filters_with_other_url_parameters(
+        self, page: Page, test_server_url: str
+    ):
         """Test exclude filters work with other URL parameters."""
         exclude_from_id = "1128074276"
         portnum = "TEXT_MESSAGE_APP"
 
         # Navigate with exclude and portnum parameters
-        page.goto(f"{test_server_url}/packets?exclude_from={exclude_from_id}&portnum={portnum}")
+        page.goto(
+            f"{test_server_url}/packets?exclude_from={exclude_from_id}&portnum={portnum}"
+        )
         page.wait_for_selector("#packetsTable", timeout=10000)
         page.wait_for_timeout(3000)
 
@@ -116,7 +126,9 @@ class TestExcludeFiltersURLHandling:
 
         print("✅ Exclude filters with other URL parameters working correctly")
 
-    def test_exclude_filters_url_vs_api_consistency(self, page: Page, test_server_url: str):
+    def test_exclude_filters_url_vs_api_consistency(
+        self, page: Page, test_server_url: str
+    ):
         """Test that URL parameters produce same results as direct API calls."""
         exclude_from_id = "1128074276"
         exclude_to_id = "4294967295"
@@ -130,10 +142,14 @@ class TestExcludeFiltersURLHandling:
         api_packet_count = len(api_data["data"])
         api_total_count = api_data["total_count"]
 
-        print(f"API results: {api_packet_count} packets displayed, {api_total_count} total")
+        print(
+            f"API results: {api_packet_count} packets displayed, {api_total_count} total"
+        )
 
         # Navigate with URL parameters
-        page.goto(f"{test_server_url}/packets?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}")
+        page.goto(
+            f"{test_server_url}/packets?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}"
+        )
         page.wait_for_selector("#packetsTable", timeout=10000)
         page.wait_for_timeout(3000)
 
@@ -180,9 +196,9 @@ class TestExcludeFiltersURLHandling:
         # Verify more packets are shown after clearing
         cleared_rows = page.locator("#packetsTable tbody tr")
         cleared_count = cleared_rows.count()
-        
+
         print(f"Filtered count: {filtered_count}, Cleared count: {cleared_count}")
-        
+
         # Should have same or more packets after clearing filters
         assert cleared_count >= filtered_count, (
             f"Expected same or more packets after clearing filters, "
@@ -191,10 +207,14 @@ class TestExcludeFiltersURLHandling:
 
         print("✅ Clear exclude filters via URL navigation working correctly")
 
-    def test_exclude_filters_invalid_url_parameters(self, page: Page, test_server_url: str):
+    def test_exclude_filters_invalid_url_parameters(
+        self, page: Page, test_server_url: str
+    ):
         """Test that invalid exclude parameters are handled gracefully."""
         # Test with invalid node IDs
-        page.goto(f"{test_server_url}/packets?exclude_from=invalid&exclude_to=999999999999")
+        page.goto(
+            f"{test_server_url}/packets?exclude_from=invalid&exclude_to=999999999999"
+        )
         page.wait_for_selector("#packetsTable", timeout=10000)
         page.wait_for_timeout(2000)
 
@@ -206,17 +226,19 @@ class TestExcludeFiltersURLHandling:
         # Invalid parameters should be ignored (fields should be empty)
         exclude_from_input = page.locator('input[name="exclude_from"]')
         exclude_to_input = page.locator('input[name="exclude_to"]')
-        
+
         # The inputs should either be empty or contain the original invalid values
         # (depending on implementation - both are acceptable)
         from_value = exclude_from_input.input_value()
         to_value = exclude_to_input.input_value()
-        
+
         print(f"Invalid parameter handling - from: '{from_value}', to: '{to_value}'")
 
         print("✅ Invalid exclude URL parameters handled gracefully")
 
-    def test_exclude_filters_broadcast_url_parameter(self, page: Page, test_server_url: str):
+    def test_exclude_filters_broadcast_url_parameter(
+        self, page: Page, test_server_url: str
+    ):
         """Test that broadcast node can be excluded via URL parameter."""
         broadcast_id = "4294967295"
 

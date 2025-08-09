@@ -31,13 +31,15 @@ class TestExcludeFiltersE2E:
         # Open the exclude_from node picker dropdown
         exclude_from_field = page.locator("#exclude_from")
         expect(exclude_from_field).to_be_visible()
-        
+
         # Click to open the dropdown
         exclude_from_field.click()
         page.wait_for_timeout(500)
 
         # Search for the node to exclude
-        search_input = page.locator("#exclude_from").locator("..").locator("input[type='text']")
+        search_input = (
+            page.locator("#exclude_from").locator("..").locator("input[type='text']")
+        )
         search_input.fill("Test Gateway Alpha")
         page.wait_for_timeout(1000)
 
@@ -104,13 +106,15 @@ class TestExcludeFiltersE2E:
         # Open the exclude_to node picker dropdown
         exclude_to_field = page.locator("#exclude_to")
         expect(exclude_to_field).to_be_visible()
-        
+
         # Click to open the dropdown
         exclude_to_field.click()
         page.wait_for_timeout(500)
 
         # Search for broadcast
-        search_input = page.locator("#exclude_to").locator("..").locator("input[type='text']")
+        search_input = (
+            page.locator("#exclude_to").locator("..").locator("input[type='text']")
+        )
         search_input.fill("Broadcast")
         page.wait_for_timeout(1000)
 
@@ -172,17 +176,19 @@ class TestExcludeFiltersE2E:
 
         # Set up both exclude filters
         exclude_from_id = "1128074276"  # Test Gateway Alpha
-        exclude_to_id = "4294967295"    # Broadcast
+        exclude_to_id = "4294967295"  # Broadcast
 
         # Set exclude_from filter
         exclude_from_field = page.locator("#exclude_from")
         exclude_from_field.click()
         page.wait_for_timeout(500)
-        
-        search_input_from = page.locator("#exclude_from").locator("..").locator("input[type='text']")
+
+        search_input_from = (
+            page.locator("#exclude_from").locator("..").locator("input[type='text']")
+        )
         search_input_from.fill("Test Gateway Alpha")
         page.wait_for_timeout(1000)
-        
+
         dropdown_option_from = page.locator("text=Test Gateway Alpha").first
         dropdown_option_from.click()
         page.wait_for_timeout(500)
@@ -191,11 +197,13 @@ class TestExcludeFiltersE2E:
         exclude_to_field = page.locator("#exclude_to")
         exclude_to_field.click()
         page.wait_for_timeout(500)
-        
-        search_input_to = page.locator("#exclude_to").locator("..").locator("input[type='text']")
+
+        search_input_to = (
+            page.locator("#exclude_to").locator("..").locator("input[type='text']")
+        )
         search_input_to.fill("Broadcast")
         page.wait_for_timeout(1000)
-        
+
         dropdown_option_to = page.locator("text=Broadcast").first
         dropdown_option_to.click()
         page.wait_for_timeout(500)
@@ -233,13 +241,17 @@ class TestExcludeFiltersE2E:
 
         print("✅ Combined exclude filters UI working correctly")
 
-    def test_exclude_filters_url_parameter_restoration(self, page: Page, test_server_url: str):
+    def test_exclude_filters_url_parameter_restoration(
+        self, page: Page, test_server_url: str
+    ):
         """Test that exclude filter URL parameters are properly restored on page load."""
         exclude_from_id = "1128074276"
         exclude_to_id = "4294967295"
 
         # Navigate with exclude parameters in URL
-        page.goto(f"{test_server_url}/packets?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}")
+        page.goto(
+            f"{test_server_url}/packets?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}"
+        )
         page.wait_for_selector("#packetsTable", timeout=10000)
         page.wait_for_timeout(3000)  # Give time for URL parameters to be processed
 
@@ -252,7 +264,7 @@ class TestExcludeFiltersE2E:
         # Verify the display elements show the selected nodes
         exclude_from_display = page.locator("#exclude_from")
         exclude_to_display = page.locator("#exclude_to")
-        
+
         # The display should show node names, not just IDs
         expect(exclude_from_display).to_contain_text("Test Gateway Alpha")
         expect(exclude_to_display).to_contain_text("Broadcast")
@@ -267,11 +279,11 @@ class TestExcludeFiltersE2E:
         for i in range(min(3, row_count)):
             row = rows.nth(i)
             from_cell = row.locator("td").nth(1)  # From column
-            to_cell = row.locator("td").nth(2)    # To column
-            
+            to_cell = row.locator("td").nth(2)  # To column
+
             from_text = from_cell.inner_text()
             to_text = to_cell.inner_text()
-            
+
             assert "Test Gateway Alpha" not in from_text, (
                 f"Found excluded from node in row {i}: {from_text}"
             )
@@ -281,7 +293,9 @@ class TestExcludeFiltersE2E:
 
         print("✅ Exclude filter URL parameter restoration working correctly")
 
-    def test_exclude_filters_clear_functionality(self, page: Page, test_server_url: str):
+    def test_exclude_filters_clear_functionality(
+        self, page: Page, test_server_url: str
+    ):
         """Test that exclude filters can be cleared properly."""
         # Navigate to packets page
         page.goto(f"{test_server_url}/packets")
@@ -292,11 +306,13 @@ class TestExcludeFiltersE2E:
         exclude_from_field = page.locator("#exclude_from")
         exclude_from_field.click()
         page.wait_for_timeout(500)
-        
-        search_input = page.locator("#exclude_from").locator("..").locator("input[type='text']")
+
+        search_input = (
+            page.locator("#exclude_from").locator("..").locator("input[type='text']")
+        )
         search_input.fill("Test Gateway Alpha")
         page.wait_for_timeout(1000)
-        
+
         dropdown_option = page.locator("text=Test Gateway Alpha").first
         dropdown_option.click()
         page.wait_for_timeout(500)
@@ -343,7 +359,9 @@ class TestExcludeFiltersE2E:
 
         print("✅ Exclude filter clear functionality working correctly")
 
-    def test_exclude_filters_with_broadcast_selection(self, page: Page, test_server_url: str):
+    def test_exclude_filters_with_broadcast_selection(
+        self, page: Page, test_server_url: str
+    ):
         """Test selecting broadcast node specifically in exclude filters."""
         # Navigate to packets page
         page.goto(f"{test_server_url}/packets")
@@ -357,9 +375,13 @@ class TestExcludeFiltersE2E:
 
         # Search for broadcast using different patterns
         search_patterns = ["broadcast", "Broadcast", "4294967295", "ffffffff"]
-        
+
         for pattern in search_patterns:
-            search_input = page.locator("#exclude_from").locator("..").locator("input[type='text']")
+            search_input = (
+                page.locator("#exclude_from")
+                .locator("..")
+                .locator("input[type='text']")
+            )
             search_input.clear()
             search_input.fill(pattern)
             page.wait_for_timeout(1000)
@@ -375,7 +397,7 @@ class TestExcludeFiltersE2E:
             search_input.clear()
             search_input.fill("Broadcast")
             page.wait_for_timeout(1000)
-            
+
             broadcast_option = page.locator("text=Broadcast").first
             expect(broadcast_option).to_be_visible()
             broadcast_option.click()
@@ -399,7 +421,9 @@ class TestExcludeFiltersE2E:
 
         print("✅ Broadcast node selection in exclude filters working correctly")
 
-    def test_exclude_filters_api_consistency_e2e(self, page: Page, test_server_url: str):
+    def test_exclude_filters_api_consistency_e2e(
+        self, page: Page, test_server_url: str
+    ):
         """Test that UI filtering matches direct API calls for exclude filters."""
         exclude_from_id = "1128074276"
         exclude_to_id = "4294967295"
@@ -416,7 +440,9 @@ class TestExcludeFiltersE2E:
         print(f"API results: {api_packet_count} packets, {api_total_count} total")
 
         # Navigate with exclude parameters
-        page.goto(f"{test_server_url}/packets?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}")
+        page.goto(
+            f"{test_server_url}/packets?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}"
+        )
         page.wait_for_selector("#packetsTable", timeout=10000)
         page.wait_for_timeout(3000)
 
@@ -437,7 +463,8 @@ class TestExcludeFiltersE2E:
             stats_text = stats_total.inner_text()
             # Extract number from stats display
             import re
-            stats_match = re.search(r'(\d+)', stats_text)
+
+            stats_match = re.search(r"(\d+)", stats_text)
             if stats_match:
                 ui_total_count = int(stats_match.group(1))
                 assert ui_total_count == api_total_count, (
@@ -459,15 +486,21 @@ class TestExcludeFiltersE2E:
 
         # Measure page load time with exclude filters
         start_time = time.time()
-        page.goto(f"{test_server_url}/packets?exclude_from=1128074276&exclude_to=4294967295")
+        page.goto(
+            f"{test_server_url}/packets?exclude_from=1128074276&exclude_to=4294967295"
+        )
         page.wait_for_selector("#packetsTable", timeout=10000)
         page.wait_for_timeout(1000)
         with_filter_time = time.time() - start_time
 
-        print(f"Load times - No filter: {no_filter_time:.2f}s, With filters: {with_filter_time:.2f}s")
+        print(
+            f"Load times - No filter: {no_filter_time:.2f}s, With filters: {with_filter_time:.2f}s"
+        )
 
         # Performance should be reasonable (allow up to 2x slower for safety)
-        performance_ratio = with_filter_time / no_filter_time if no_filter_time > 0 else 1
+        performance_ratio = (
+            with_filter_time / no_filter_time if no_filter_time > 0 else 1
+        )
         assert performance_ratio < 2.0, (
             f"Exclude filters make UI too slow: {performance_ratio:.2f}x slower"
         )
