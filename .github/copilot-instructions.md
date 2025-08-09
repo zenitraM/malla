@@ -33,10 +33,13 @@ Run the applications:
 ## Validation
 
 - **CRITICAL**: ALL TESTS MUST PASS - Do not break existing tests under any circumstances
+- **MANDATORY**: ABSOLUTELY POSITIVELY RUN ALL OF THE TEST SUITE to verify your CHANGES ALL THE TIME
 - **MANDATORY**: Always run `make check` before considering work finished - this runs the full CI pipeline (takes 3 minutes)
 - **REQUIRED**: Run `make format` and `make lint` before committing or CI will fail
 - **NON-NEGOTIABLE**: Fix all linting errors before committing - formatting issues can be auto-fixed with `make format`
-- Test failures indicate broken functionality that must be debugged and fixed, not ignored
+- **NON-NEGOTIABLE**: YOU SHALL NOT BREAK THE TESTS - Test failures indicate broken functionality that must be debugged and fixed, not ignored
+- **FAILURE**: Discovering test failures only when they run on CI is a failure worth -100 points
+- **MANDATORY**: If there's something missing for you to run tests, dig until you've found them and update your own configuration if needed
 
 **Complete validation workflow (MANDATORY before finishing):**
 1. Format code: `make format` (auto-fixes formatting issues)
