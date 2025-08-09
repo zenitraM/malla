@@ -89,6 +89,15 @@
                     </label>
                 </div>
             </div>
+            <!-- Exclude broadcast packets -->
+            <div class="col-12">
+                <div class="form-check d-flex align-items-center">
+                    <input class="form-check-input me-2" type="checkbox" id="exclude_broadcast" name="exclude_broadcast">
+                    <label class="form-check-label mb-0" for="exclude_broadcast">
+                        Exclude broadcast packets (!ffffffff)
+                    </label>
+                </div>
+            </div>
             <div class="col-12">
                 <label for="primary_channel" class="form-label">Primary Channel</label>
                 <select class="form-select form-select-sm" id="primary_channel" name="primary_channel">

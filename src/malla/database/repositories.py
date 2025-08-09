@@ -218,6 +218,10 @@ class PacketRepository:
                 where_conditions.append("(to_node_id IS NULL OR to_node_id != ?)")
                 params.append(filters["exclude_to"])
 
+            # Exclude broadcast packets (to_node_id == 4294967295)
+            if filters.get("exclude_broadcast"):
+                where_conditions.append("(to_node_id IS NULL OR to_node_id != 4294967295)")
+
             # Search functionality
             if search:
                 # Search in multiple text fields

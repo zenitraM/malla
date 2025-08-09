@@ -179,6 +179,11 @@ def api_packets():
             except ValueError:
                 pass
 
+        # Filter to exclude broadcast packets (to_node_id == 4294967295)
+        exclude_broadcast_flag = request.args.get("exclude_broadcast", "false").lower() == "true"
+        if exclude_broadcast_flag:
+            filters["exclude_broadcast"] = True
+
         data = PacketRepository.get_packets(limit=limit, offset=offset, filters=filters)
 
         # Remove raw_payload from packets to avoid JSON serialization issues
