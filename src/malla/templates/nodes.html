@@ -80,6 +80,7 @@
             <div class="legend-item">
                 <span class="badge bg-primary me-2">Client</span>
                 <span class="badge bg-success me-2">Router</span>
+                <span class="badge bg-success me-2">Router Late</span>
                 <span class="badge bg-warning me-2">Repeater</span>
             </div>
             <div class="legend-item mt-2">
@@ -290,6 +291,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         let badgeClass = 'bg-secondary';
                         if (value === 'CLIENT') badgeClass = 'bg-primary';
                         else if (value === 'ROUTER') badgeClass = 'bg-success';
+                        else if (value === 'ROUTER_LATE') badgeClass = 'bg-success';
                         else if (value === 'REPEATER') badgeClass = 'bg-warning';
                         else if (value === 'CLIENT_MUTE') badgeClass = 'bg-secondary';
                         else if (value === 'ROUTER_CLIENT') badgeClass = 'bg-info';
