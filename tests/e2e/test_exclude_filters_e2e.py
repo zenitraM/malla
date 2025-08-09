@@ -43,8 +43,9 @@ class TestExcludeFiltersE2E:
         search_input.fill("Test Gateway Alpha")
         page.wait_for_timeout(1000)
 
-        # Select the node from dropdown results
-        dropdown_option = page.locator(f"text={exclude_node_display}").first
+        # Find the specific dropdown for exclude_from field and select the node
+        exclude_from_container = page.locator("#exclude_from").locator("..")
+        dropdown_option = exclude_from_container.locator(f"text={exclude_node_display}").first
         expect(dropdown_option).to_be_visible()
         dropdown_option.click()
         page.wait_for_timeout(500)
@@ -52,11 +53,29 @@ class TestExcludeFiltersE2E:
         # Verify the field was populated
         hidden_input = page.locator('input[name="exclude_from"]')
         expect(hidden_input).to_have_value(exclude_node_id)
+        
+        # Debug: Check form state before applying
+        form_debug = page.evaluate("""() => {
+            return {
+                excludeFromValue: document.querySelector('input[name="exclude_from"]')?.value || 'NOT FOUND',
+                excludeFromVisible: document.querySelector('#exclude_from')?.value || 'NOT FOUND',
+                formExists: !!document.querySelector('#filtersForm'),
+            };
+        }""")
+        print(f"Form state before apply: {form_debug}")
 
         # Apply filters
         apply_button = page.locator("#applyFilters")
         apply_button.click()
         page.wait_for_timeout(3000)
+        
+        # Debug: Check URL after applying
+        current_url = page.url
+        print(f"URL after applying filters: {current_url}")
+        
+        # Debug: Check if exclude parameter is in URL
+        has_exclude_param = "exclude_from=" in current_url
+        print(f"URL contains exclude_from parameter: {has_exclude_param}")
 
         # Verify results - should have fewer packets
         filtered_rows = page.locator("#packetsTable tbody tr")
@@ -118,8 +137,9 @@ class TestExcludeFiltersE2E:
         search_input.fill("Broadcast")
         page.wait_for_timeout(1000)
 
-        # Select broadcast from dropdown results
-        dropdown_option = page.locator(f"text={exclude_node_display}").first
+        # Find the specific dropdown for exclude_to field and select broadcast
+        exclude_to_container = page.locator("#exclude_to").locator("..")
+        dropdown_option = exclude_to_container.locator(f"text={exclude_node_display}").first
         expect(dropdown_option).to_be_visible()
         dropdown_option.click()
         page.wait_for_timeout(500)
@@ -189,7 +209,8 @@ class TestExcludeFiltersE2E:
         search_input_from.fill("Test Gateway Alpha")
         page.wait_for_timeout(1000)
 
-        dropdown_option_from = page.locator("text=Test Gateway Alpha").first
+        exclude_from_container = page.locator("#exclude_from").locator("..")
+        dropdown_option_from = exclude_from_container.locator("text=Test Gateway Alpha").first
         dropdown_option_from.click()
         page.wait_for_timeout(500)
 
@@ -204,7 +225,8 @@ class TestExcludeFiltersE2E:
         search_input_to.fill("Broadcast")
         page.wait_for_timeout(1000)
 
-        dropdown_option_to = page.locator("text=Broadcast").first
+        exclude_to_container = page.locator("#exclude_to").locator("..")
+        dropdown_option_to = exclude_to_container.locator("text=Broadcast").first
         dropdown_option_to.click()
         page.wait_for_timeout(500)
 
@@ -313,7 +335,8 @@ class TestExcludeFiltersE2E:
         search_input.fill("Test Gateway Alpha")
         page.wait_for_timeout(1000)
 
-        dropdown_option = page.locator("text=Test Gateway Alpha").first
+        exclude_from_container = page.locator("#exclude_from").locator("..")
+        dropdown_option = exclude_from_container.locator("text=Test Gateway Alpha").first
         dropdown_option.click()
         page.wait_for_timeout(500)
 
@@ -386,8 +409,9 @@ class TestExcludeFiltersE2E:
             search_input.fill(pattern)
             page.wait_for_timeout(1000)
 
-            # Check if broadcast option appears
-            broadcast_option = page.locator("text=Broadcast").first
+            # Check if broadcast option appears in the specific dropdown
+            exclude_from_container = page.locator("#exclude_from").locator("..")
+            broadcast_option = exclude_from_container.locator("text=Broadcast").first
             if broadcast_option.is_visible():
                 print(f"✅ Broadcast found with search pattern: {pattern}")
                 broadcast_option.click()
@@ -398,7 +422,8 @@ class TestExcludeFiltersE2E:
             search_input.fill("Broadcast")
             page.wait_for_timeout(1000)
 
-            broadcast_option = page.locator("text=Broadcast").first
+            exclude_from_container = page.locator("#exclude_from").locator("..")
+            broadcast_option = exclude_from_container.locator("text=Broadcast").first
             expect(broadcast_option).to_be_visible()
             broadcast_option.click()
 
