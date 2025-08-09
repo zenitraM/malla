@@ -545,7 +545,7 @@ class PacketRepository:
                     else:
                         # Partial page - this is the total
                         total_count = offset + len(packets)
-                        
+
                     # Ensure total_count shows reduction when filters are applied
                     # This is primarily for UI feedback rather than exact pagination
                     total_count = max(len(packets), total_count - 1)  # Ensure it's at least reduced by 1

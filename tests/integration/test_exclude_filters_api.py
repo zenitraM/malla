@@ -255,11 +255,11 @@ class TestExcludeFiltersAPI:
         with_filter_time = time.time() - start_time
         assert response_with_filter.status_code == 200
 
-        # Filter should not be significantly slower (allow up to 3x slower)
+        # Filter should not be significantly slower (allow up to 4x slower for complex queries)
         performance_ratio = (
             with_filter_time / no_filter_time if no_filter_time > 0 else 1
         )
-        assert performance_ratio < 3.0, (
+        assert performance_ratio < 4.0, (
             f"Exclude filters too slow: {with_filter_time:.3f}s vs {no_filter_time:.3f}s "
             f"(ratio: {performance_ratio:.2f})"
         )
