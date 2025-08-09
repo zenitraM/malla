@@ -1,0 +1,475 @@
+"""
+End-to-end tests for exclude filter UI functionality.
+
+Tests the complete user workflow for exclude_from and exclude_to filters
+using the browser to verify UI interactions and results.
+"""
+
+import requests
+from playwright.sync_api import Page, expect
+
+
+class TestExcludeFiltersE2E:
+    """Test exclude filter functionality through the browser UI."""
+
+    def test_exclude_from_filter_ui_workflow(self, page: Page, test_server_url: str):
+        """Test complete workflow for exclude_from filter through UI."""
+        # Navigate to packets page
+        page.goto(f"{test_server_url}/packets")
+        page.wait_for_selector("#packetsTable", timeout=10000)
+        page.wait_for_timeout(2000)
+
+        # Get initial packet count
+        initial_rows = page.locator("#packetsTable tbody tr")
+        initial_count = initial_rows.count()
+        print(f"Initial packet count: {initial_count}")
+
+        # Use a known node ID from fixture data
+        exclude_node_id = "1128074276"  # Test Gateway Alpha
+        exclude_node_display = "Test Gateway Alpha"
+
+        # Open the exclude_from node picker dropdown
+        exclude_from_field = page.locator("#exclude_from")
+        expect(exclude_from_field).to_be_visible()
+        
+        # Click to open the dropdown
+        exclude_from_field.click()
+        page.wait_for_timeout(500)
+
+        # Search for the node to exclude
+        search_input = page.locator("#exclude_from").locator("..").locator("input[type='text']")
+        search_input.fill("Test Gateway Alpha")
+        page.wait_for_timeout(1000)
+
+        # Select the node from dropdown results
+        dropdown_option = page.locator(f"text={exclude_node_display}").first
+        expect(dropdown_option).to_be_visible()
+        dropdown_option.click()
+        page.wait_for_timeout(500)
+
+        # Verify the field was populated
+        hidden_input = page.locator('input[name="exclude_from"]')
+        expect(hidden_input).to_have_value(exclude_node_id)
+
+        # Apply filters
+        apply_button = page.locator("#applyFilters")
+        apply_button.click()
+        page.wait_for_timeout(3000)
+
+        # Verify results - should have fewer packets
+        filtered_rows = page.locator("#packetsTable tbody tr")
+        filtered_count = filtered_rows.count()
+        print(f"Filtered packet count: {filtered_count}")
+
+        # Should have fewer packets after excluding
+        assert filtered_count < initial_count, (
+            f"Expected fewer packets after exclude_from filter, "
+            f"got {filtered_count} vs initial {initial_count}"
+        )
+
+        # Verify URL contains the exclude parameter
+        current_url = page.url
+        assert f"exclude_from={exclude_node_id}" in current_url, (
+            f"URL should contain exclude_from parameter: {current_url}"
+        )
+
+        # Verify no packets in the table are from the excluded node
+        # Check first few visible rows
+        for i in range(min(3, filtered_count)):
+            row = filtered_rows.nth(i)
+            from_cell = row.locator("td").nth(1)  # From column
+            from_text = from_cell.inner_text()
+            assert exclude_node_display not in from_text, (
+                f"Found excluded node '{exclude_node_display}' in row {i}: {from_text}"
+            )
+
+        print("✅ Exclude from filter UI workflow working correctly")
+
+    def test_exclude_to_filter_ui_workflow(self, page: Page, test_server_url: str):
+        """Test complete workflow for exclude_to filter through UI."""
+        # Navigate to packets page
+        page.goto(f"{test_server_url}/packets")
+        page.wait_for_selector("#packetsTable", timeout=10000)
+        page.wait_for_timeout(2000)
+
+        # Get initial packet count
+        initial_rows = page.locator("#packetsTable tbody tr")
+        initial_count = initial_rows.count()
+        print(f"Initial packet count: {initial_count}")
+
+        # Use broadcast node (common in test data)
+        exclude_node_id = "4294967295"  # Broadcast
+        exclude_node_display = "Broadcast"
+
+        # Open the exclude_to node picker dropdown
+        exclude_to_field = page.locator("#exclude_to")
+        expect(exclude_to_field).to_be_visible()
+        
+        # Click to open the dropdown
+        exclude_to_field.click()
+        page.wait_for_timeout(500)
+
+        # Search for broadcast
+        search_input = page.locator("#exclude_to").locator("..").locator("input[type='text']")
+        search_input.fill("Broadcast")
+        page.wait_for_timeout(1000)
+
+        # Select broadcast from dropdown results
+        dropdown_option = page.locator(f"text={exclude_node_display}").first
+        expect(dropdown_option).to_be_visible()
+        dropdown_option.click()
+        page.wait_for_timeout(500)
+
+        # Verify the field was populated
+        hidden_input = page.locator('input[name="exclude_to"]')
+        expect(hidden_input).to_have_value(exclude_node_id)
+
+        # Apply filters
+        apply_button = page.locator("#applyFilters")
+        apply_button.click()
+        page.wait_for_timeout(3000)
+
+        # Verify results - should have fewer packets
+        filtered_rows = page.locator("#packetsTable tbody tr")
+        filtered_count = filtered_rows.count()
+        print(f"Filtered packet count after excluding broadcast: {filtered_count}")
+
+        # Should have fewer packets after excluding broadcast
+        assert filtered_count < initial_count, (
+            f"Expected fewer packets after exclude_to broadcast filter, "
+            f"got {filtered_count} vs initial {initial_count}"
+        )
+
+        # Verify URL contains the exclude parameter
+        current_url = page.url
+        assert f"exclude_to={exclude_node_id}" in current_url, (
+            f"URL should contain exclude_to parameter: {current_url}"
+        )
+
+        # Verify no packets in the table go to broadcast
+        # Check first few visible rows
+        for i in range(min(3, filtered_count)):
+            row = filtered_rows.nth(i)
+            to_cell = row.locator("td").nth(2)  # To column
+            to_text = to_cell.inner_text()
+            assert "Broadcast" not in to_text, (
+                f"Found broadcast destination in row {i}: {to_text}"
+            )
+
+        print("✅ Exclude to filter UI workflow working correctly")
+
+    def test_combined_exclude_filters_ui(self, page: Page, test_server_url: str):
+        """Test using both exclude_from and exclude_to filters together in UI."""
+        # Navigate to packets page
+        page.goto(f"{test_server_url}/packets")
+        page.wait_for_selector("#packetsTable", timeout=10000)
+        page.wait_for_timeout(2000)
+
+        # Get initial packet count
+        initial_rows = page.locator("#packetsTable tbody tr")
+        initial_count = initial_rows.count()
+        print(f"Initial packet count: {initial_count}")
+
+        # Set up both exclude filters
+        exclude_from_id = "1128074276"  # Test Gateway Alpha
+        exclude_to_id = "4294967295"    # Broadcast
+
+        # Set exclude_from filter
+        exclude_from_field = page.locator("#exclude_from")
+        exclude_from_field.click()
+        page.wait_for_timeout(500)
+        
+        search_input_from = page.locator("#exclude_from").locator("..").locator("input[type='text']")
+        search_input_from.fill("Test Gateway Alpha")
+        page.wait_for_timeout(1000)
+        
+        dropdown_option_from = page.locator("text=Test Gateway Alpha").first
+        dropdown_option_from.click()
+        page.wait_for_timeout(500)
+
+        # Set exclude_to filter
+        exclude_to_field = page.locator("#exclude_to")
+        exclude_to_field.click()
+        page.wait_for_timeout(500)
+        
+        search_input_to = page.locator("#exclude_to").locator("..").locator("input[type='text']")
+        search_input_to.fill("Broadcast")
+        page.wait_for_timeout(1000)
+        
+        dropdown_option_to = page.locator("text=Broadcast").first
+        dropdown_option_to.click()
+        page.wait_for_timeout(500)
+
+        # Verify both fields are populated
+        exclude_from_input = page.locator('input[name="exclude_from"]')
+        exclude_to_input = page.locator('input[name="exclude_to"]')
+        expect(exclude_from_input).to_have_value(exclude_from_id)
+        expect(exclude_to_input).to_have_value(exclude_to_id)
+
+        # Apply filters
+        apply_button = page.locator("#applyFilters")
+        apply_button.click()
+        page.wait_for_timeout(3000)
+
+        # Verify results
+        filtered_rows = page.locator("#packetsTable tbody tr")
+        filtered_count = filtered_rows.count()
+        print(f"Filtered packet count with both exclusions: {filtered_count}")
+
+        # Should have significantly fewer packets with both exclusions
+        assert filtered_count < initial_count, (
+            f"Expected fewer packets with combined exclude filters, "
+            f"got {filtered_count} vs initial {initial_count}"
+        )
+
+        # Verify URL contains both exclude parameters
+        current_url = page.url
+        assert f"exclude_from={exclude_from_id}" in current_url, (
+            f"URL should contain exclude_from parameter: {current_url}"
+        )
+        assert f"exclude_to={exclude_to_id}" in current_url, (
+            f"URL should contain exclude_to parameter: {current_url}"
+        )
+
+        print("✅ Combined exclude filters UI working correctly")
+
+    def test_exclude_filters_url_parameter_restoration(self, page: Page, test_server_url: str):
+        """Test that exclude filter URL parameters are properly restored on page load."""
+        exclude_from_id = "1128074276"
+        exclude_to_id = "4294967295"
+
+        # Navigate with exclude parameters in URL
+        page.goto(f"{test_server_url}/packets?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}")
+        page.wait_for_selector("#packetsTable", timeout=10000)
+        page.wait_for_timeout(3000)  # Give time for URL parameters to be processed
+
+        # Verify the exclude fields were populated from URL
+        exclude_from_input = page.locator('input[name="exclude_from"]')
+        exclude_to_input = page.locator('input[name="exclude_to"]')
+        expect(exclude_from_input).to_have_value(exclude_from_id)
+        expect(exclude_to_input).to_have_value(exclude_to_id)
+
+        # Verify the display elements show the selected nodes
+        exclude_from_display = page.locator("#exclude_from")
+        exclude_to_display = page.locator("#exclude_to")
+        
+        # The display should show node names, not just IDs
+        expect(exclude_from_display).to_contain_text("Test Gateway Alpha")
+        expect(exclude_to_display).to_contain_text("Broadcast")
+
+        # Verify the filtering was actually applied by checking results
+        rows = page.locator("#packetsTable tbody tr")
+        row_count = rows.count()
+        print(f"Packets after URL parameter restoration: {row_count}")
+
+        # Verify data is actually filtered (not just UI state restored)
+        # Check first few rows to ensure exclusions are applied
+        for i in range(min(3, row_count)):
+            row = rows.nth(i)
+            from_cell = row.locator("td").nth(1)  # From column
+            to_cell = row.locator("td").nth(2)    # To column
+            
+            from_text = from_cell.inner_text()
+            to_text = to_cell.inner_text()
+            
+            assert "Test Gateway Alpha" not in from_text, (
+                f"Found excluded from node in row {i}: {from_text}"
+            )
+            assert "Broadcast" not in to_text, (
+                f"Found excluded to node in row {i}: {to_text}"
+            )
+
+        print("✅ Exclude filter URL parameter restoration working correctly")
+
+    def test_exclude_filters_clear_functionality(self, page: Page, test_server_url: str):
+        """Test that exclude filters can be cleared properly."""
+        # Navigate to packets page
+        page.goto(f"{test_server_url}/packets")
+        page.wait_for_selector("#packetsTable", timeout=10000)
+        page.wait_for_timeout(2000)
+
+        # Set exclude_from filter first
+        exclude_from_field = page.locator("#exclude_from")
+        exclude_from_field.click()
+        page.wait_for_timeout(500)
+        
+        search_input = page.locator("#exclude_from").locator("..").locator("input[type='text']")
+        search_input.fill("Test Gateway Alpha")
+        page.wait_for_timeout(1000)
+        
+        dropdown_option = page.locator("text=Test Gateway Alpha").first
+        dropdown_option.click()
+        page.wait_for_timeout(500)
+
+        # Apply filters
+        apply_button = page.locator("#applyFilters")
+        apply_button.click()
+        page.wait_for_timeout(2000)
+
+        # Verify filter is applied
+        exclude_from_input = page.locator('input[name="exclude_from"]')
+        expect(exclude_from_input).to_have_value("1128074276")
+
+        # Get filtered count
+        filtered_rows = page.locator("#packetsTable tbody tr")
+        filtered_count = filtered_rows.count()
+
+        # Clear filters
+        clear_button = page.locator("#clearFilters")
+        clear_button.click()
+        page.wait_for_timeout(3000)
+
+        # Verify fields are cleared
+        expect(exclude_from_input).to_have_value("")
+        exclude_to_input = page.locator('input[name="exclude_to"]')
+        expect(exclude_to_input).to_have_value("")
+
+        # Verify more packets are shown after clearing
+        cleared_rows = page.locator("#packetsTable tbody tr")
+        cleared_count = cleared_rows.count()
+        assert cleared_count >= filtered_count, (
+            f"Expected same or more packets after clearing filters, "
+            f"got {cleared_count} vs filtered {filtered_count}"
+        )
+
+        # Verify URL no longer contains exclude parameters
+        current_url = page.url
+        assert "exclude_from=" not in current_url, (
+            f"URL should not contain exclude_from after clearing: {current_url}"
+        )
+        assert "exclude_to=" not in current_url, (
+            f"URL should not contain exclude_to after clearing: {current_url}"
+        )
+
+        print("✅ Exclude filter clear functionality working correctly")
+
+    def test_exclude_filters_with_broadcast_selection(self, page: Page, test_server_url: str):
+        """Test selecting broadcast node specifically in exclude filters."""
+        # Navigate to packets page
+        page.goto(f"{test_server_url}/packets")
+        page.wait_for_selector("#packetsTable", timeout=10000)
+        page.wait_for_timeout(2000)
+
+        # Test excluding from broadcast (packets sent by broadcast node)
+        exclude_from_field = page.locator("#exclude_from")
+        exclude_from_field.click()
+        page.wait_for_timeout(500)
+
+        # Search for broadcast using different patterns
+        search_patterns = ["broadcast", "Broadcast", "4294967295", "ffffffff"]
+        
+        for pattern in search_patterns:
+            search_input = page.locator("#exclude_from").locator("..").locator("input[type='text']")
+            search_input.clear()
+            search_input.fill(pattern)
+            page.wait_for_timeout(1000)
+
+            # Check if broadcast option appears
+            broadcast_option = page.locator("text=Broadcast").first
+            if broadcast_option.is_visible():
+                print(f"✅ Broadcast found with search pattern: {pattern}")
+                broadcast_option.click()
+                break
+        else:
+            # If no pattern worked, try the direct approach
+            search_input.clear()
+            search_input.fill("Broadcast")
+            page.wait_for_timeout(1000)
+            
+            broadcast_option = page.locator("text=Broadcast").first
+            expect(broadcast_option).to_be_visible()
+            broadcast_option.click()
+
+        page.wait_for_timeout(500)
+
+        # Verify broadcast is selected
+        exclude_from_input = page.locator('input[name="exclude_from"]')
+        expect(exclude_from_input).to_have_value("4294967295")
+
+        # Apply filters
+        apply_button = page.locator("#applyFilters")
+        apply_button.click()
+        page.wait_for_timeout(3000)
+
+        # Verify URL contains broadcast exclusion
+        current_url = page.url
+        assert "exclude_from=4294967295" in current_url, (
+            f"URL should contain broadcast exclude_from: {current_url}"
+        )
+
+        print("✅ Broadcast node selection in exclude filters working correctly")
+
+    def test_exclude_filters_api_consistency_e2e(self, page: Page, test_server_url: str):
+        """Test that UI filtering matches direct API calls for exclude filters."""
+        exclude_from_id = "1128074276"
+        exclude_to_id = "4294967295"
+
+        # Get direct API results for comparison
+        api_response = requests.get(
+            f"{test_server_url}/api/packets/data?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}&limit=25"
+        )
+        assert api_response.status_code == 200
+        api_data = api_response.json()
+        api_packet_count = len(api_data["data"])
+        api_total_count = api_data["total_count"]
+
+        print(f"API results: {api_packet_count} packets, {api_total_count} total")
+
+        # Navigate with exclude parameters
+        page.goto(f"{test_server_url}/packets?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}")
+        page.wait_for_selector("#packetsTable", timeout=10000)
+        page.wait_for_timeout(3000)
+
+        # Get UI results
+        ui_rows = page.locator("#packetsTable tbody tr")
+        ui_packet_count = ui_rows.count()
+
+        print(f"UI results: {ui_packet_count} packets displayed")
+
+        # UI should match API results
+        assert ui_packet_count == api_packet_count, (
+            f"UI packet count ({ui_packet_count}) should match API count ({api_packet_count})"
+        )
+
+        # Verify table stats show correct total
+        stats_total = page.locator("#statsTotal")
+        if stats_total.is_visible():
+            stats_text = stats_total.inner_text()
+            # Extract number from stats display
+            import re
+            stats_match = re.search(r'(\d+)', stats_text)
+            if stats_match:
+                ui_total_count = int(stats_match.group(1))
+                assert ui_total_count == api_total_count, (
+                    f"UI total count ({ui_total_count}) should match API total ({api_total_count})"
+                )
+
+        print("✅ UI and API results are consistent for exclude filters")
+
+    def test_exclude_filters_performance_e2e(self, page: Page, test_server_url: str):
+        """Test that exclude filters don't significantly slow down the UI."""
+        import time
+
+        # Measure page load time without filters
+        start_time = time.time()
+        page.goto(f"{test_server_url}/packets")
+        page.wait_for_selector("#packetsTable", timeout=10000)
+        page.wait_for_timeout(1000)
+        no_filter_time = time.time() - start_time
+
+        # Measure page load time with exclude filters
+        start_time = time.time()
+        page.goto(f"{test_server_url}/packets?exclude_from=1128074276&exclude_to=4294967295")
+        page.wait_for_selector("#packetsTable", timeout=10000)
+        page.wait_for_timeout(1000)
+        with_filter_time = time.time() - start_time
+
+        print(f"Load times - No filter: {no_filter_time:.2f}s, With filters: {with_filter_time:.2f}s")
+
+        # Performance should be reasonable (allow up to 2x slower for safety)
+        performance_ratio = with_filter_time / no_filter_time if no_filter_time > 0 else 1
+        assert performance_ratio < 2.0, (
+            f"Exclude filters make UI too slow: {performance_ratio:.2f}x slower"
+        )
+
+        print("✅ Exclude filter performance is acceptable")
