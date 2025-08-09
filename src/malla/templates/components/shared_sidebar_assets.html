@@ -424,6 +424,7 @@ function getRoleColor(role) {
         case 'CLIENT': return '#007bff'; // Blue
         case 'CLIENT_MUTE': return '#6c757d'; // Gray
         case 'ROUTER': return '#28a745'; // Green
+        case 'ROUTER_LATE': return '#28a745'; // Green (same as ROUTER)
         case 'REPEATER': return '#ffc107'; // Yellow
         case 'ROUTER_CLIENT': return '#17a2b8'; // Teal
         case 'SENSOR': return '#e83e8c'; // Pink
@@ -437,6 +438,7 @@ function formatRole(role) {
         case 'CLIENT': return 'C';
         case 'CLIENT_MUTE': return 'CM';
         case 'ROUTER': return 'R';
+        case 'ROUTER_LATE': return 'RL';
         case 'REPEATER': return 'RP';
         case 'ROUTER_CLIENT': return 'RC';
         case 'SENSOR': return 'S';
