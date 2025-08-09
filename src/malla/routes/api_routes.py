@@ -206,34 +206,6 @@ def api_nodes():
         search = request.args.get("search", "").strip()
         offset = (page - 1) * limit
 
-        # Create broadcast node entry for special handling
-        broadcast_node = {
-            "node_id": 4294967295,
-            "long_name": "Broadcast",
-            "short_name": "Broadcast",
-            "hw_model": "Special",
-            "role": "Broadcast",
-            "primary_channel": None,
-            "last_updated": None,
-            "hex_id": "!ffffffff",
-            "packet_count_24h": 0,
-            "gateway_packet_count_24h": 0,
-            "last_packet_time": None,
-            "last_packet_str": None,
-        }
-
-        # Check if query matches broadcast node
-        def matches_broadcast(q):
-            if not q:
-                return False
-            q_lower = q.lower()
-            return (
-                "broadcast" in q_lower
-                or "ffffffff" in q_lower
-                or "!ffffffff" in q_lower
-                or str(4294967295) in q
-            )
-
         # Check if database tables exist before calling NodeRepository
         db_ready = False
         try:
@@ -250,16 +222,8 @@ def api_nodes():
         # Get nodes from repository
         if db_ready:
             try:
-                # For search mode, leave room for broadcast if it matches
-                search_limit = limit - (
-                    1 if search and matches_broadcast(search) else 0
-                )
-                # For non-search mode, leave room for broadcast
-                non_search_limit = limit - 1 if not search else limit
-                actual_limit = search_limit if search else non_search_limit
-
                 data = NodeRepository.get_nodes(
-                    limit=max(1, actual_limit), offset=offset, search=search or None
+                    limit=limit, offset=offset, search=search or None
                 )
             except Exception as db_error:
                 # If database call fails, return limited results
@@ -270,22 +234,6 @@ def api_nodes():
         else:
             # Database not ready, return empty results
             data = {"nodes": [], "total_count": 0}
-
-        # Add broadcast node when appropriate
-        nodes = data["nodes"]
-        total_count = data["total_count"]
-
-        if search:
-            # For search mode, add broadcast if query matches
-            if matches_broadcast(search):
-                nodes = [broadcast_node] + nodes
-        else:
-            # For non-search mode, add broadcast at the top for easy access
-            nodes = [broadcast_node] + nodes
-
-        # Update data with modified results
-        data["nodes"] = nodes
-        data["total_count"] = total_count
 
         # Add pagination info that the test expects
         data["page"] = page
@@ -308,34 +256,6 @@ def api_nodes_search():
         # Limit the search limit to prevent abuse
         limit = min(limit, 100)
 
-        # Create broadcast node entry for special handling
-        broadcast_node = {
-            "node_id": 4294967295,
-            "long_name": "Broadcast",
-            "short_name": "Broadcast",
-            "hw_model": "Special",
-            "role": "Broadcast",
-            "primary_channel": None,
-            "last_updated": None,
-            "hex_id": "!ffffffff",
-            "packet_count_24h": 0,
-            "gateway_packet_count_24h": 0,
-            "last_packet_time": None,
-            "last_packet_str": None,
-        }
-
-        # Check if query matches broadcast node
-        def matches_broadcast(q):
-            if not q:
-                return False
-            q_lower = q.lower()
-            return (
-                "broadcast" in q_lower
-                or "ffffffff" in q_lower
-                or "!ffffffff" in q_lower
-                or str(4294967295) in q
-            )
-
         # Check if database tables exist before calling NodeRepository
         db_ready = False
         try:
@@ -349,29 +269,28 @@ def api_nodes_search():
         except Exception:
             db_ready = False
 
-        # If no query, return most popular nodes (by packet count) + broadcast
+        # If no query, return most popular nodes (by packet count)
         if not query:
             if db_ready:
                 try:
                     result = NodeRepository.get_nodes(
-                        limit=limit - 1,  # Leave room for broadcast node
+                        limit=limit,
                         offset=0,
                         order_by="packet_count_24h",  # Order by activity
                         order_dir="desc",
                     )
-                    # Add broadcast node at the top for easy access
-                    nodes = [broadcast_node] + result["nodes"]
+                    nodes = result["nodes"]
                     total_count = result["total_count"]
                 except Exception as db_error:
-                    # If database call fails, just return broadcast node
+                    # If database call fails, return empty results
                     logger.info(
-                        f"Database call failed, returning just broadcast node: {db_error}"
+                        f"Database call failed, returning empty results: {db_error}"
                     )
-                    nodes = [broadcast_node]
+                    nodes = []
                     total_count = 0
             else:
-                # Database not ready, just return broadcast node
-                nodes = [broadcast_node]
+                # Database not ready, return empty results
+                nodes = []
                 total_count = 0
 
             return jsonify(
@@ -387,10 +306,7 @@ def api_nodes_search():
         if db_ready:
             try:
                 result = NodeRepository.get_nodes(
-                    limit=limit
-                    - (
-                        1 if matches_broadcast(query) else 0
-                    ),  # Leave room for broadcast if it matches
+                    limit=limit,
                     offset=0,
                     search=query,
                     order_by="packet_count_24h",  # Order by activity
@@ -409,10 +325,6 @@ def api_nodes_search():
             # Database not ready, start with empty list
             nodes = []
             total_count = 0
-
-        # Add broadcast node if query matches
-        if matches_broadcast(query):
-            nodes = [broadcast_node] + nodes
 
         return jsonify(
             {
