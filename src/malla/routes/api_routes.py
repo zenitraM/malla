@@ -279,11 +279,9 @@ def api_nodes():
             # For search mode, add broadcast if query matches
             if matches_broadcast(search):
                 nodes = [broadcast_node] + nodes
-                total_count += 1
         else:
             # For non-search mode, add broadcast at the top for easy access
             nodes = [broadcast_node] + nodes
-            total_count += 1
 
         # Update data with modified results
         data["nodes"] = nodes
@@ -363,18 +361,18 @@ def api_nodes_search():
                     )
                     # Add broadcast node at the top for easy access
                     nodes = [broadcast_node] + result["nodes"]
-                    total_count = result["total_count"] + 1
+                    total_count = result["total_count"]
                 except Exception as db_error:
                     # If database call fails, just return broadcast node
                     logger.info(
                         f"Database call failed, returning just broadcast node: {db_error}"
                     )
                     nodes = [broadcast_node]
-                    total_count = 1
+                    total_count = 0
             else:
                 # Database not ready, just return broadcast node
                 nodes = [broadcast_node]
-                total_count = 1
+                total_count = 0
 
             return jsonify(
                 {
@@ -415,7 +413,6 @@ def api_nodes_search():
         # Add broadcast node if query matches
         if matches_broadcast(query):
             nodes = [broadcast_node] + nodes
-            total_count += 1
 
         return jsonify(
             {
@@ -772,6 +769,27 @@ def api_node_info(node_id):
         from ..utils.node_utils import convert_node_id
 
         node_id_int = convert_node_id(node_id)
+
+        # Handle broadcast node specially
+        if node_id_int == 4294967295:
+            broadcast_node_info = {
+                "node_id": 4294967295,
+                "hex_id": "!ffffffff",
+                "long_name": "Broadcast",
+                "short_name": "Broadcast",
+                "hw_model": "Special",
+                "role": "Broadcast",
+                "primary_channel": None,
+                "last_updated": None,
+                "is_licensed": False,
+                "mac_address": None,
+                "first_seen": None,
+                "last_seen": None,
+                "packet_count_24h": 0,
+                "gateway_count_24h": 0,
+                "last_packet_str": None,
+            }
+            return jsonify({"node": broadcast_node_info})
 
         # Get basic node info using repository pattern
         from ..database.repositories import NodeRepository

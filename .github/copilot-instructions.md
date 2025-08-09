@@ -32,24 +32,27 @@ Run the applications:
 
 ## Validation
 
-- ALWAYS run through at least one complete end-to-end scenario after making changes
-- Always run `make format` and `make lint` before you are done or the CI (.github/workflows/ci.yml) will fail
-- ALWAYS run comprehensive CI checks before considering work finished: `make check` (takes 3 minutes)
-- MUST fix all linting errors before committing: formatting issues can be auto-fixed with `make format`
+- **CRITICAL**: ALL TESTS MUST PASS - Do not break existing tests under any circumstances
+- **MANDATORY**: Always run `make check` before considering work finished - this runs the full CI pipeline (takes 3 minutes)
+- **REQUIRED**: Run `make format` and `make lint` before committing or CI will fail
+- **NON-NEGOTIABLE**: Fix all linting errors before committing - formatting issues can be auto-fixed with `make format`
+- Test failures indicate broken functionality that must be debugged and fixed, not ignored
 
-**Complete validation scenario:**
-1. Start web UI: `uv run malla-web` (should start without errors)
-2. Verify dashboard loads: `curl -s -w "%{http_code}" http://localhost:5008/` (should return 200)
-3. Test API endpoint: `curl -s http://localhost:5008/api/stats` (should return JSON)
-4. Run test suite: `make check` (should pass all tests)
-5. Test MQTT capture initialization: `timeout 3s uv run malla-capture` (should initialize database, fail on MQTT connection as expected)
+**Complete validation workflow (MANDATORY before finishing):**
+1. Format code: `make format` (auto-fixes formatting issues)
+2. Lint code: `make lint` (must pass completely)
+3. Run comprehensive CI checks: `make check` (ALL tests must pass - 430+ tests including 44 unit, 168 integration)
+4. Manual validation: Start web UI `uv run malla-web` and verify basic functionality
+5. Only commit changes after ALL validation passes
 
 **Critical validation points:**
 - Web UI starts and serves HTTP 200 on port 5008
 - API endpoints return valid JSON responses
 - Database gets created automatically
-- Test suite passes completely (430+ tests)
-- Playwright browsers need system dependencies. If e2e tests fail with missing library errors, this is expected in sandboxed environments.
+- **ALL unit tests pass (44 tests)**
+- **ALL integration tests pass (168 tests)**
+- E2E tests may fail in sandboxed environments due to missing browser dependencies (expected)
+- ANY test regression indicates broken functionality that MUST be fixed
 
 ## Critical Timeouts and "NEVER CANCEL" Warnings
 
@@ -151,12 +154,18 @@ docker-compose up --build -d
 ## Development Workflow
 
 1. Make code changes
-2. Format code: `make format` (auto-fixes formatting issues)
-3. Run linting: `make lint` (must pass before committing)
-4. Run comprehensive tests: `make check` (NEVER CANCEL, takes 3 minutes)
-5. Test manually: `uv run malla-web` and verify functionality
-6. Commit changes only after all CI checks pass
+2. **MANDATORY**: Format code: `make format` (auto-fixes formatting issues)
+3. **MANDATORY**: Run linting: `make lint` (must pass completely before committing)
+4. **MANDATORY**: Run comprehensive tests: `make check` (ALL TESTS MUST PASS - takes 3 minutes, NEVER CANCEL)
+5. Manual testing: `uv run malla-web` and verify functionality works as expected
+6. Commit changes ONLY after all CI checks pass and all tests pass
 
-**Critical: Always run `make check` before considering work finished. This matches the CI pipeline and ensures all tests pass.**
+**CRITICAL: Never commit code that breaks existing tests. Test failures indicate broken functionality that must be debugged and fixed. The test suite exists to prevent regressions - respect it.**
+
+**Test counts for validation:**
+- Unit tests: 44 tests (must all pass)
+- Integration tests: 168 tests (must all pass) 
+- E2E tests: Expected to fail in sandboxed environments due to missing browser dependencies
+- Total passing tests: 212+ tests required for successful validation
 
 The codebase is well-structured with comprehensive testing. Always validate changes by running the full test suite and manually testing core functionality.
