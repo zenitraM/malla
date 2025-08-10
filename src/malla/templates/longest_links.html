@@ -263,6 +263,166 @@
 <script>
     let currentData = null;
 
+    // Generate terrain profile image URL for HeyWhatsThat.com
+    function getTerrainProfileImage(node1, node2) {
+        // line colour between nodes
+        const lineColour = "0000FF"; // blue
+
+        // node 1 (left side of image)
+        const node1MarkerColour = "0000FF"; // blue
+        const node1Latitude = node1.latitude;
+        const node1Longitude = node1.longitude;
+        const node1ElevationMSL = node1.altitude || ""; // Use altitude if available
+
+        // node 2 (right side of image)
+        const node2MarkerColour = "0000FF"; // blue
+        const node2Latitude = node2.latitude;
+        const node2Longitude = node2.longitude;
+        const node2ElevationMSL = node2.altitude || ""; // Use altitude if available
+
+        // Determine source attribution - use configured website domain or default
+        const websiteDomain = "{{ APP_CONFIG.website_domain or 'github.com/zenitraM/malla' }}";
+
+        // generate terrain profile image url
+        return "https://heywhatsthat.com/bin/profile-0904.cgi?" + new URLSearchParams({
+            src: websiteDomain,
+            axes: 1, // include grid lines and a scale
+            metric: 1, // show metric units
+            curvature: 0, // don't include the curvature of the earth in the graphic
+            width: 500,
+            height: 200,
+            pt0: `${node1Latitude},${node1Longitude},${lineColour},${node1ElevationMSL},${node1MarkerColour}`,
+            pt1: `${node2Latitude},${node2Longitude},${lineColour},${node2ElevationMSL},${node2MarkerColour}`,
+        }).toString();
+    }
+
+    // Show terrain profile in a modal
+    function showTerrainProfile(fromNodeId, toNodeId, fromNodeName, toNodeName) {
+        // Check if we can get node location data from current data
+        let fromNode = null;
+        let toNode = null;
+
+        // Search in current data first
+        if (currentData && currentData.direct_links) {
+            const link = currentData.direct_links.find(l => 
+                (l.from_node_id == fromNodeId && l.to_node_id == toNodeId) ||
+                (l.from_node_id == toNodeId && l.to_node_id == fromNodeId)
+            );
+            if (link) {
+                // Try to get location data from the link if available
+                fromNode = {
+                    latitude: link.from_latitude,
+                    longitude: link.from_longitude,
+                    altitude: link.from_altitude,
+                    display_name: fromNodeName
+                };
+                toNode = {
+                    latitude: link.to_latitude,
+                    longitude: link.to_longitude,
+                    altitude: link.to_altitude,
+                    display_name: toNodeName
+                };
+            }
+        }
+
+        // If we don't have location data, fetch from API
+        if (!fromNode || !toNode || !fromNode.latitude || !toNode.latitude) {
+            fetch(`/api/nodes/${fromNodeId}/location`)
+                .then(response => response.json())
+                .then(fromData => {
+                    if (fromData.latitude && fromData.longitude) {
+                        fromNode = {
+                            latitude: fromData.latitude,
+                            longitude: fromData.longitude,
+                            altitude: fromData.altitude,
+                            display_name: fromNodeName
+                        };
+                        return fetch(`/api/nodes/${toNodeId}/location`);
+                    } else {
+                        throw new Error('From node location not available');
+                    }
+                })
+                .then(response => response.json())
+                .then(toData => {
+                    if (toData.latitude && toData.longitude) {
+                        toNode = {
+                            latitude: toData.latitude,
+                            longitude: toData.longitude,
+                            altitude: toData.altitude,
+                            display_name: toNodeName
+                        };
+                        displayTerrainModal(fromNode, toNode);
+                    } else {
+                        throw new Error('To node location not available');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching node locations:', error);
+                    alert('Cannot display terrain profile: Node location data not available');
+                });
+        } else {
+            displayTerrainModal(fromNode, toNode);
+        }
+    }
+
+    // Display terrain profile in a modal
+    function displayTerrainModal(fromNode, toNode) {
+        const terrainImageUrl = getTerrainProfileImage(fromNode, toNode);
+        
+        // Create modal HTML
+        const modalHtml = `
+            <div class="modal fade" id="terrainModal" tabindex="-1" aria-labelledby="terrainModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="terrainModalLabel">
+                                <i class="bi bi-mountain"></i> Terrain Profile: ${fromNode.display_name} ↔ ${toNode.display_name}
+                            </h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="text-muted small mb-3">
+                                Terrain images from <a href="http://www.heywhatsthat.com" target="_blank">HeyWhatsThat.com</a>
+                            </div>
+                            <div class="text-center">
+                                <a href="${terrainImageUrl}" target="_blank">
+                                    <img src="${terrainImageUrl}" 
+                                         style="width: 100%; height: auto; border: 1px solid #dee2e6; border-radius: 0.375rem;" 
+                                         alt="Terrain profile between ${fromNode.display_name} and ${toNode.display_name}"
+                                         onerror="this.parentElement.innerHTML='<div class=\\'text-muted\\'>Terrain profile could not be loaded</div>'">
+                                </a>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            <a href="${terrainImageUrl}" target="_blank" class="btn btn-primary">
+                                <i class="bi bi-box-arrow-up-right"></i> Open Full Size
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Remove existing modal if present
+        const existingModal = document.getElementById('terrainModal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+        
+        // Add modal to body
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('terrainModal'));
+        modal.show();
+        
+        // Clean up modal when hidden
+        document.getElementById('terrainModal').addEventListener('hidden.bs.modal', function() {
+            this.remove();
+        });
+    }
+
     // Load data on page load
     document.addEventListener('DOMContentLoaded', function() {
         loadLongestLinks();
@@ -382,12 +542,17 @@
                     <td class="text-center">${link.traceroute_count}</td>
                     <td>
                         <a href="${link.packet_url}" class="btn btn-sm btn-outline-primary" title="View packet details">
-                            <i class="fas fa-eye"></i> Packet ${link.packet_id}
+                            <i class="bi bi-eye"></i> Packet ${link.packet_id}
                         </a>
                         <a href="/traceroute-hops?from_node=${link.from_node_id}&to_node=${link.to_node_id}" 
                            class="btn btn-sm btn-outline-info ms-1" title="Analyze this link">
-                            <i class="fas fa-route"></i> Analyze
+                            <i class="bi bi-diagram-3"></i> Analyze
                         </a>
+                        <button class="btn btn-sm btn-outline-success ms-1" 
+                                onclick="showTerrainProfile(${link.from_node_id}, ${link.to_node_id}, '${link.from_node_name.replace(/'/g, "\\'")}', '${link.to_node_name.replace(/'/g, "\\'")}')"
+                                title="View terrain profile">
+                            <i class="bi bi-mountain"></i> Terrain
+                        </button>
                     </td>
                 </tr>
             `;
@@ -449,12 +614,17 @@
                     <td><small class="text-muted route-preview">${routeDisplay}</small></td>
                     <td>
                         <a href="${link.packet_url}" class="btn btn-sm btn-outline-primary" title="View packet details">
-                            <i class="fas fa-eye"></i> Packet ${link.packet_id}
+                            <i class="bi bi-eye"></i> Packet ${link.packet_id}
                         </a>
                         <a href="/traceroute-hops?from_node=${link.from_node_id}&to_node=${link.to_node_id}" 
                            class="btn btn-sm btn-outline-info ms-1" title="Analyze this path">
-                            <i class="fas fa-route"></i> Analyze
+                            <i class="bi bi-diagram-3"></i> Analyze
                         </a>
+                        <button class="btn btn-sm btn-outline-success ms-1" 
+                                onclick="showTerrainProfile(${link.from_node_id}, ${link.to_node_id}, '${link.from_node_name.replace(/'/g, "\\'")}', '${link.to_node_name.replace(/'/g, "\\'")}')"
+                                title="View terrain profile">
+                            <i class="bi bi-mountain"></i> Terrain
+                        </button>
                     </td>
                 </tr>
             `;
