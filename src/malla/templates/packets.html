@@ -37,7 +37,8 @@
                     label="From Node",
                     selected_value="",
                     selected_display="",
-                    placeholder="All nodes"
+                    placeholder="All nodes",
+                    include_broadcast=true
                 ) }}
             </div>
             <div class="col-12">
@@ -46,7 +47,28 @@
                     label="To Node",
                     selected_value="",
                     selected_display="",
-                    placeholder="All destination nodes"
+                    placeholder="All destination nodes",
+                    include_broadcast=true
+                ) }}
+            </div>
+            <div class="col-12">
+                {{ node_picker(
+                    field_name="exclude_from",
+                    label="Exclude From Node",
+                    selected_value="",
+                    selected_display="",
+                    placeholder="No exclusions",
+                    include_broadcast=true
+                ) }}
+            </div>
+            <div class="col-12">
+                {{ node_picker(
+                    field_name="exclude_to",
+                    label="Exclude To Node",
+                    selected_value="",
+                    selected_display="",
+                    placeholder="No exclusions",
+                    include_broadcast=true
                 ) }}
             </div>
             <div class="col-12">

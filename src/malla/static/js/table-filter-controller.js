@@ -98,7 +98,7 @@
                     cleaned.group_packets = this.groupingCheckbox.checked;
                 }
 
-                this.lastAppliedJson = JSON.stringify(cleaned);
+                this.lastAppliedJson = this._stableJsonStringify(cleaned);
 
                 // Apply filters once manually
                 this.table.setFilters(cleaned);
@@ -107,18 +107,19 @@
                 // Now activate reactive mode
                 this.subscriberActive = true;
             } else {
-                // No filters: load once with proper initial state, then activate reactive mode.
-                const initialFilters = {};
-                if (this.groupingCheckbox) {
-                    initialFilters.group_packets = this.groupingCheckbox.checked;
-                }
+                // No filters: load once with proper initial state (including all form fields), then activate reactive mode.
+                // Capture all current form state to avoid triggering additional API calls when form fields bind
+                const initialFilters = this._getCurrentFormState();
+                
+                // Sync initial state to filter store to avoid state inconsistencies
+                this._syncFormToStore();
 
                 if (this.table.options.deferInitialLoad) {
-                    // Use setFilters to ensure grouping state is included from the start
+                    // Use setFilters to ensure all initial state is included from the start
                     this.table.setFilters(initialFilters);
                 }
 
-                this.lastAppliedJson = JSON.stringify(initialFilters);
+                this.lastAppliedJson = this._stableJsonStringify(initialFilters);
                 this.subscriberActive = true;
             }
         }
@@ -201,7 +202,7 @@
                         cleaned.group_packets = this.groupingCheckbox.checked;
                     }
 
-                    const cleanedJson = JSON.stringify(cleaned);
+                    const cleanedJson = this._stableJsonStringify(cleaned);
                     if (cleanedJson === this.lastAppliedJson) return;
 
                     this.table.setFilters(cleaned);
@@ -227,6 +228,42 @@
                     this.filterStore.state[key] = input.value;
                 }
             });
+        }
+
+        _getCurrentFormState() {
+            const state = {};
+            
+            // Include grouping checkbox state
+            if (this.groupingCheckbox) {
+                state.group_packets = this.groupingCheckbox.checked;
+            }
+            
+            // Include all form field states
+            if (this.form) {
+                const inputs = this.form.querySelectorAll('input, select');
+                inputs.forEach((input) => {
+                    const key = input.name;
+                    if (!key) return;
+
+                    if (input.type === 'checkbox') {
+                        state[key] = input.checked;
+                    } else {
+                        state[key] = input.value;
+                    }
+                });
+            }
+            
+            return this._cleanFilters(state);
+        }
+
+        _stableJsonStringify(obj) {
+            // Sort keys to ensure consistent JSON string regardless of key order
+            const sortedKeys = Object.keys(obj).sort();
+            const sortedObj = {};
+            sortedKeys.forEach(key => {
+                sortedObj[key] = obj[key];
+            });
+            return JSON.stringify(sortedObj);
         }
     }
 

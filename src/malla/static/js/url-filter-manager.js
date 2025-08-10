@@ -81,7 +81,7 @@ class URLFilterManager {
         });
 
         // Handle special picker fields
-        const nodePickerFields = ['from_node', 'to_node', 'route_node'];
+        const nodePickerFields = ['from_node', 'to_node', 'route_node', 'exclude_from', 'exclude_to'];
         for (const fieldName of nodePickerFields) {
             const nodeId = urlParams[fieldName];
             if (nodeId) {
@@ -103,27 +103,34 @@ class URLFilterManager {
      */
     async setNodePickerValue(fieldName, nodeId) {
         try {
-            // Fetch node info to get display name
-            const response = await fetch(`/api/node/${nodeId}/info`);
-            if (response.ok) {
-                const data = await response.json();
-                const node = data.node || data;
-                const displayName = node.long_name || node.short_name || node.hex_id || `Node ${nodeId}`;
+            let displayName = `Node ${nodeId}`; // Default fallback
 
-                // Set the picker value (try multiple selector patterns)
-                const hiddenField = document.querySelector(`input[name="${fieldName}"]`);
-                const visibleField = document.querySelector(`#${fieldName}`) ||
-                                   document.querySelector(`input[data-field="${fieldName}"]`) ||
-                                   document.querySelector(`.node-picker-input[data-field="${fieldName}"]`);
-
-                if (hiddenField && visibleField) {
-                    hiddenField.value = nodeId;
-                    visibleField.value = displayName;
-
-                    // Trigger change events for any listeners
-                    hiddenField.dispatchEvent(new Event('change', { bubbles: true }));
-                    visibleField.dispatchEvent(new Event('change', { bubbles: true }));
+            // Try to fetch node info to get display name
+            try {
+                const response = await fetch(`/api/node/${nodeId}/info`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const node = data.node || data;
+                    displayName = node.long_name || node.short_name || node.hex_id || `Node ${nodeId}`;
                 }
+                // If response is not ok, we'll use the fallback display name
+            } catch (fetchError) {
+                console.warn(`Could not fetch node info for ${nodeId}, using fallback display name`);
+            }
+
+            // Set the picker value (try multiple selector patterns)
+            const hiddenField = document.querySelector(`input[name="${fieldName}"]`);
+            const visibleField = document.querySelector(`#${fieldName}`) ||
+                               document.querySelector(`input[data-field="${fieldName}"]`) ||
+                               document.querySelector(`.node-picker-input[data-field="${fieldName}"]`);
+
+            if (hiddenField && visibleField) {
+                hiddenField.value = nodeId;
+                visibleField.value = displayName;
+
+                // Trigger change events for any listeners
+                hiddenField.dispatchEvent(new Event('change', { bubbles: true }));
+                visibleField.dispatchEvent(new Event('change', { bubbles: true }));
             }
         } catch (error) {
             console.error(`Error setting node picker value for ${fieldName}:`, error);
@@ -252,7 +259,7 @@ class URLFilterManager {
             input.value = '';
         });
 
-        const hiddenInputs = document.querySelectorAll('input[name="from_node"], input[name="to_node"], input[name="route_node"], input[name="gateway_id"]');
+        const hiddenInputs = document.querySelectorAll('input[name="from_node"], input[name="to_node"], input[name="route_node"], input[name="gateway_id"], input[name="exclude_from"], input[name="exclude_to"]');
         hiddenInputs.forEach(input => {
             input.value = '';
         });

@@ -245,7 +245,7 @@
     {% endif %}
 {% endmacro %}
 
-{% macro node_picker(field_name, field_id=None, label="Node", selected_value="", selected_display="", placeholder="All nodes", required=false, additional_classes="") %}
+{% macro node_picker(field_name, field_id=None, label="Node", selected_value="", selected_display="", placeholder="All nodes", required=false, additional_classes="", include_broadcast=false) %}
     {# 
     Macro for creating a searchable node picker component
     
@@ -258,10 +258,11 @@
         placeholder: Placeholder text for the search input
         required: Whether the field is required
         additional_classes: Additional CSS classes to apply
+        include_broadcast: Whether to include broadcast option for from/to/exclude fields
     #}
     {% set input_id = field_id or field_name %}
     
-    <div class="node-picker-container {{ additional_classes }}">
+    <div class="node-picker-container {{ additional_classes }}" data-include-broadcast="{{ 'true' if include_broadcast else 'false' }}">
         <label for="{{ input_id }}" class="form-label">{{ label }}</label>
         <div class="position-relative">
             <!-- Hidden input to store the actual node ID -->

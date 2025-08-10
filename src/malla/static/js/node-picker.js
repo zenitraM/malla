@@ -14,6 +14,9 @@ class NodePicker {
         this.noResultsElement = container.querySelector('.node-picker-no-results');
         this.resultsContainer = container.querySelector('.node-picker-results');
 
+        // Check if this picker should include broadcast option
+        this.includeBroadcast = container.dataset.includeBroadcast === 'true';
+
         this.searchTimeout = null;
         this.currentFocus = -1;
         this.nodes = [];
@@ -158,6 +161,36 @@ class NodePicker {
                 // Client-side search
                 this.nodes = await window.NodeCache.search(query, 20);
                 this.isPopular = false;
+            }
+
+            // Add broadcast node if this picker includes it
+            if (this.includeBroadcast) {
+                const broadcastNode = {
+                    node_id: 4294967295,
+                    long_name: "Broadcast",
+                    short_name: "Broadcast",
+                    hw_model: "Special",
+                    role: "Broadcast",
+                    hex_id: "!ffffffff",
+                    packet_count_24h: 0
+                };
+
+                if (!query) {
+                    // Add broadcast at the top for easy access when no query
+                    this.nodes = [broadcastNode, ...this.nodes];
+                } else {
+                    // Check if query matches broadcast node
+                    const queryLower = query.toLowerCase();
+                    const matchesBroadcast = 
+                        "broadcast".includes(queryLower) ||
+                        "ffffffff".includes(queryLower) ||
+                        "!ffffffff".includes(queryLower) ||
+                        "4294967295".includes(query);
+                    
+                    if (matchesBroadcast) {
+                        this.nodes = [broadcastNode, ...this.nodes];
+                    }
+                }
             }
 
             this.renderResults();

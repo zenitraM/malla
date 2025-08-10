@@ -198,14 +198,42 @@ def api_packets():
 
 @api_bp.route("/nodes")
 def api_nodes():
-    """API endpoint for node data."""
+    """API endpoint for node data (with optional search)."""
     logger.info("API nodes endpoint accessed")
     try:
         limit = request.args.get("limit", 100, type=int)
         page = request.args.get("page", 1, type=int)
+        search = request.args.get("search", "").strip()
         offset = (page - 1) * limit
 
-        data = NodeRepository.get_nodes(limit=limit, offset=offset)
+        # Check if database tables exist before calling NodeRepository
+        db_ready = False
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='node_info'"
+            )
+            db_ready = cursor.fetchone() is not None
+            conn.close()
+        except Exception:
+            db_ready = False
+
+        # Get nodes from repository
+        if db_ready:
+            try:
+                data = NodeRepository.get_nodes(
+                    limit=limit, offset=offset, search=search or None
+                )
+            except Exception as db_error:
+                # If database call fails, return limited results
+                logger.info(
+                    f"Database call failed, returning limited results: {db_error}"
+                )
+                data = {"nodes": [], "total_count": 0}
+        else:
+            # Database not ready, return empty results
+            data = {"nodes": [], "total_count": 0}
 
         # Add pagination info that the test expects
         data["page"] = page
@@ -228,37 +256,80 @@ def api_nodes_search():
         # Limit the search limit to prevent abuse
         limit = min(limit, 100)
 
+        # Check if database tables exist before calling NodeRepository
+        db_ready = False
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='node_info'"
+            )
+            db_ready = cursor.fetchone() is not None
+            conn.close()
+        except Exception:
+            db_ready = False
+
         # If no query, return most popular nodes (by packet count)
         if not query:
-            result = NodeRepository.get_nodes(
-                limit=limit,
-                offset=0,
-                order_by="packet_count_24h",  # Order by activity
-                order_dir="desc",
-            )
+            if db_ready:
+                try:
+                    result = NodeRepository.get_nodes(
+                        limit=limit,
+                        offset=0,
+                        order_by="packet_count_24h",  # Order by activity
+                        order_dir="desc",
+                    )
+                    nodes = result["nodes"]
+                    total_count = result["total_count"]
+                except Exception as db_error:
+                    # If database call fails, return empty results
+                    logger.info(
+                        f"Database call failed, returning empty results: {db_error}"
+                    )
+                    nodes = []
+                    total_count = 0
+            else:
+                # Database not ready, return empty results
+                nodes = []
+                total_count = 0
 
             return jsonify(
                 {
-                    "nodes": result["nodes"],
-                    "total_count": result["total_count"],
+                    "nodes": nodes,
+                    "total_count": total_count,
                     "query": "",
                     "is_popular": True,
                 }
             )
 
         # Use the existing NodeRepository with search functionality
-        result = NodeRepository.get_nodes(
-            limit=limit,
-            offset=0,
-            search=query,
-            order_by="packet_count_24h",  # Order by activity
-            order_dir="desc",
-        )
+        if db_ready:
+            try:
+                result = NodeRepository.get_nodes(
+                    limit=limit,
+                    offset=0,
+                    search=query,
+                    order_by="packet_count_24h",  # Order by activity
+                    order_dir="desc",
+                )
+                nodes = result["nodes"]
+                total_count = result["total_count"]
+            except Exception as db_error:
+                # If database call fails, start with empty list
+                logger.info(
+                    f"Database search failed, returning limited results: {db_error}"
+                )
+                nodes = []
+                total_count = 0
+        else:
+            # Database not ready, start with empty list
+            nodes = []
+            total_count = 0
 
         return jsonify(
             {
-                "nodes": result["nodes"],
-                "total_count": result["total_count"],
+                "nodes": nodes,
+                "total_count": total_count,
                 "query": query,
                 "is_popular": False,
             }
@@ -610,6 +681,27 @@ def api_node_info(node_id):
         from ..utils.node_utils import convert_node_id
 
         node_id_int = convert_node_id(node_id)
+
+        # Handle broadcast node specially
+        if node_id_int == 4294967295:
+            broadcast_node_info = {
+                "node_id": 4294967295,
+                "hex_id": "!ffffffff",
+                "long_name": "Broadcast",
+                "short_name": "Broadcast",
+                "hw_model": "Special",
+                "role": "Broadcast",
+                "primary_channel": None,
+                "last_updated": None,
+                "is_licensed": False,
+                "mac_address": None,
+                "first_seen": None,
+                "last_seen": None,
+                "packet_count_24h": 0,
+                "gateway_count_24h": 0,
+                "last_packet_str": None,
+            }
+            return jsonify({"node": broadcast_node_info})
 
         # Get basic node info using repository pattern
         from ..database.repositories import NodeRepository
