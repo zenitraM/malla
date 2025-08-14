@@ -29,7 +29,7 @@ classifiers = [
     "Topic :: System :: Monitoring",
     "Topic :: System :: Networking :: Monitoring",
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "flask>=3.0.0",
     "gunicorn>=22.0.0",
