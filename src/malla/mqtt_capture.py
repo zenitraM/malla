@@ -1234,9 +1234,7 @@ def main() -> None:
     load_node_cache()
 
     # Initialize MQTT Client
-    mqtt_client = mqtt.Client(
-        CallbackAPIVersion.VERSION2, client_id="meshtastic_sqlite_capture"
-    )
+    mqtt_client = mqtt.Client(CallbackAPIVersion.VERSION2)
 
     if MQTT_USERNAME:
         mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
