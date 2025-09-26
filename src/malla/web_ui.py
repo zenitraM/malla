@@ -133,6 +133,12 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
         """Template filter for relative time formatting."""
         return format_time_ago(dt)
 
+    @app.template_filter("format_datetime_tz")
+    def format_datetime_tz_filter(dt):
+        """Template filter for datetime formatting in configured timezone."""
+        from .utils.formatting import format_datetime_in_timezone
+        return format_datetime_in_timezone(dt)
+
     @app.template_filter("safe_json")
     def safe_json_filter(obj, indent=None):
         """
@@ -209,11 +215,14 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
     @app.context_processor
     def inject_config():
         """Inject selected config values into all templates."""
+        from .utils.formatting import get_current_time_in_timezone, get_configured_timezone
 
         return {
             "APP_NAME": cfg.name,
             "APP_CONFIG": cfg,
             "DATABASE_FILE": cfg.database_file,
+            "CURRENT_TIME_TZ": get_current_time_in_timezone(),
+            "CONFIGURED_TIMEZONE": get_configured_timezone().key,
         }
 
     # Initialize database
