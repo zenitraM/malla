@@ -196,10 +196,13 @@ exclude = [
 ignore = [
 ]
 
+[tool.uv.sources]
+meshtastic = { git = "https://github.com/meshtastic/python" }
+
 [dependency-groups]
 dev = [
     "basedpyright>=1.29.4",
-    "playwright>=1.52.0",
+    "playwright==1.54.0",
     "pytest-asyncio>=1.0.0",
     "pytest-playwright>=0.7.0",
     "ruff>=0.11.13",

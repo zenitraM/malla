@@ -12,6 +12,8 @@ ENV MALLA_PORT=5008
 # Install the project into `/app`
 WORKDIR /app
 
+RUN apt update && apt install -y git
+
 # Copy dependency files and metadata files (required for package build)
 # Install the project's dependencies using the lockfile and settings
 RUN --mount=type=cache,target=/root/.cache/uv \
