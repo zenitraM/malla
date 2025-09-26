@@ -5,7 +5,6 @@ This module creates a test database with known fixture data that can be used
 for integration testing of the API endpoints and services.
 """
 
-import json
 import logging
 import sqlite3
 import time
@@ -619,25 +618,47 @@ class DatabaseFixtures:
                 raw_payload = b"\x0a\x09!12345678\x12\x0bTest Node\x1a\x04TN01"
                 payload_length = len(raw_payload)
         elif portnum == 70:  # TRACEROUTE_APP
-            # Create traceroute payload - for testing, use JSON encoding
-            if payload_data:
-                traceroute_data = {
-                    "route_nodes": payload_data.get("route_nodes", []),
-                    "snr_towards": payload_data.get("snr_towards", []),
-                    "route_back": payload_data.get("route_back", []),
-                    "snr_back": payload_data.get("snr_back", []),
-                }
-            else:
-                traceroute_data = {
-                    "route_nodes": [],
-                    "snr_towards": [-5.0],
-                    "route_back": [],
-                    "snr_back": [],
-                }
+            # Create traceroute payload using proper protobuf encoding
+            try:
+                from meshtastic import mesh_pb2
 
-            # For testing, encode as JSON (in real implementation this would be protobuf)
-            raw_payload = json.dumps(traceroute_data).encode()
-            payload_length = len(raw_payload)
+                route_discovery = mesh_pb2.RouteDiscovery()
+
+                if payload_data:
+                    # Add route nodes
+                    route_nodes = payload_data.get("route_nodes", [])
+                    if route_nodes:
+                        route_discovery.route.extend(route_nodes)
+
+                    # Add SNR towards (scaled by 4 as per Meshtastic protocol)
+                    snr_towards = payload_data.get("snr_towards", [])
+                    if snr_towards:
+                        scaled_snr = [int(snr * 4.0) for snr in snr_towards]
+                        route_discovery.snr_towards.extend(scaled_snr)
+
+                    # Add route back
+                    route_back = payload_data.get("route_back", [])
+                    if route_back:
+                        route_discovery.route_back.extend(route_back)
+
+                    # Add SNR back (scaled by 4 as per Meshtastic protocol)
+                    snr_back = payload_data.get("snr_back", [])
+                    if snr_back:
+                        scaled_snr_back = [int(snr * 4.0) for snr in snr_back]
+                        route_discovery.snr_back.extend(scaled_snr_back)
+                else:
+                    # Default test case - single SNR value
+                    route_discovery.snr_towards.extend([int(-5.0 * 4)])
+
+                raw_payload = route_discovery.SerializeToString()
+                payload_length = len(raw_payload)
+            except ImportError:
+                # Fallback if protobuf not available - create minimal valid protobuf data
+                # Field 2 (snr_towards) with single float value -5.0 (scaled to -20)
+                raw_payload = (
+                    b"\x15\xec\xff\xff\xff"  # Wire type 5 (fixed32), field 2, value -20
+                )
+                payload_length = len(raw_payload)
         elif portnum == 71:  # NEIGHBORINFO_APP
             # Create protobuf neighborinfo payload
             try:
