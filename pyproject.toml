@@ -196,6 +196,9 @@ exclude = [
 ignore = [
 ]
 
+[tool.uv.sources]
+meshtastic = { git = "https://github.com/meshtastic/python" }
+
 [dependency-groups]
 dev = [
     "basedpyright>=1.29.4",
