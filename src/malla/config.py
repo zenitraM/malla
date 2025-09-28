@@ -23,6 +23,7 @@ class AppConfig:
     # Core UI settings
     name: str = "Malla"
     home_markdown: str = ""
+    website_domain: str = ""  # Domain name for heywhatsthat attribution
 
     # Flask/server settings
     secret_key: str = "dev-secret-key-change-in-production"

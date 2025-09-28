@@ -6,6 +6,10 @@
 # Display name shown in the navigation bar and browser title
 name: "Malla"
 
+# Optional website domain for heywhatsthat attribution (e.g., "my-mesh.example.com")
+# If not set, will default to "github.com/zenitraM/malla"
+# website_domain: "my-mesh.example.com"
+
 # Markdown content rendered on the dashboard homepage
 home_markdown: |
   # Welcome to Malla
