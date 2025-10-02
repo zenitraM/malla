@@ -83,7 +83,6 @@ class DashboardRepository:
                 WHERE portnum_name IS NOT NULL AND timestamp > ?{gateway_filter}
                 GROUP BY portnum_name
                 ORDER BY count DESC
-                LIMIT 10
             """,
                 [twenty_four_hours_ago] + gateway_params,
             )
