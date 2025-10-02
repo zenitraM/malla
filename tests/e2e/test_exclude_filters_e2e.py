@@ -45,7 +45,9 @@ class TestExcludeFiltersE2E:
 
         # Find the specific dropdown for exclude_from field and select the node
         exclude_from_container = page.locator("#exclude_from").locator("..")
-        dropdown_option = exclude_from_container.locator(f"text={exclude_node_display}").first
+        dropdown_option = exclude_from_container.locator(
+            f"text={exclude_node_display}"
+        ).first
         expect(dropdown_option).to_be_visible()
         dropdown_option.click()
         page.wait_for_timeout(500)
@@ -135,7 +137,9 @@ class TestExcludeFiltersE2E:
 
         # Find the specific dropdown for exclude_to field and select broadcast
         exclude_to_container = page.locator("#exclude_to").locator("..")
-        dropdown_option = exclude_to_container.locator(f"text={exclude_node_display}").first
+        dropdown_option = exclude_to_container.locator(
+            f"text={exclude_node_display}"
+        ).first
         expect(dropdown_option).to_be_visible()
         dropdown_option.click()
         page.wait_for_timeout(500)
@@ -200,7 +204,9 @@ class TestExcludeFiltersE2E:
         page.wait_for_timeout(1000)
 
         exclude_from_container = page.locator("#exclude_from").locator("..")
-        dropdown_option_from = exclude_from_container.locator("text=Test Gateway Alpha").first
+        dropdown_option_from = exclude_from_container.locator(
+            "text=Test Gateway Alpha"
+        ).first
         dropdown_option_from.click()
         page.wait_for_timeout(500)
 
@@ -335,7 +341,9 @@ class TestExcludeFiltersE2E:
         page.wait_for_timeout(1000)
 
         exclude_from_container = page.locator("#exclude_from").locator("..")
-        dropdown_option = exclude_from_container.locator("text=Test Gateway Alpha").first
+        dropdown_option = exclude_from_container.locator(
+            "text=Test Gateway Alpha"
+        ).first
         dropdown_option.click()
         page.wait_for_timeout(500)
 
@@ -478,7 +486,9 @@ class TestExcludeFiltersE2E:
 
         # UI should have same or similar packet count as API results
         # Note: Total counts may differ due to pagination vs grouped query differences
-        print(f"UI packet count: {ui_packet_count}, API packet count: {api_packet_count}")
+        print(
+            f"UI packet count: {ui_packet_count}, API packet count: {api_packet_count}"
+        )
 
         # The key test: both should show the same packets (exclude filters applied)
         # We don't require exact count match due to pagination and grouping differences
