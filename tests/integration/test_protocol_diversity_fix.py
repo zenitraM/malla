@@ -26,6 +26,7 @@ class TestProtocolDiversityFix:
 
         # Create connection directly using sqlite3
         import sqlite3
+
         conn = sqlite3.connect(temp_db.name)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -84,21 +85,24 @@ class TestProtocolDiversityFix:
 
         # Insert packets for each protocol type
         for idx, protocol in enumerate(protocol_types):
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO packet_history
                 (timestamp, from_node_id, to_node_id, portnum, portnum_name,
                  gateway_id, channel_id, processed_successfully)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                current_time - (idx * 60),  # Recent timestamps
-                f"!{1000 + idx:08x}",
-                f"!{2000 + idx:08x}",
-                idx,
-                protocol,
-                "!gateway01",
-                0,
-                1
-            ))
+            """,
+                (
+                    current_time - (idx * 60),  # Recent timestamps
+                    f"!{1000 + idx:08x}",
+                    f"!{2000 + idx:08x}",
+                    idx,
+                    protocol,
+                    "!gateway01",
+                    0,
+                    1,
+                ),
+            )
 
         conn.commit()
         conn.close()
@@ -107,6 +111,7 @@ class TestProtocolDiversityFix:
 
         # Cleanup
         import os
+
         os.unlink(temp_db.name)
 
     @pytest.mark.integration
