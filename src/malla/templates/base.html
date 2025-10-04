@@ -188,6 +188,16 @@
                         </ul>
                     </li>
                 </ul>
+
+                <!-- Dark Mode Toggle -->
+                <div class="navbar-nav">
+                    <button id="theme-toggle" class="btn btn-outline-light btn-sm" type="button"
+                            data-bs-toggle="tooltip" data-bs-placement="bottom"
+                            title="Toggle theme mode"
+                            aria-label="Toggle theme mode">
+                        <i class="bi bi-circle-half"></i>
+                    </button>
+                </div>
             </div>
         </div>
     </nav>
@@ -216,6 +226,8 @@
     <script src="{{ url_for('static', filename='js/url-filter-manager.js') }}"></script>
     <!-- NodeCache utility (shared across pages) -->
     <script src="{{ url_for('static', filename='js/node-cache.js') }}"></script>
+    <!-- Dark Mode Toggle -->
+    <script src="{{ url_for('static', filename='js/dark-mode-toggle.js') }}"></script>
 
     <!-- Node tooltip functionality -->
     <script>
@@ -361,6 +373,12 @@
         // Initialize tooltips when page loads
         document.addEventListener('DOMContentLoaded', function() {
             initializeNodeTooltips();
+
+            // Initialize theme toggle tooltip
+            const themeToggle = document.getElementById('theme-toggle');
+            if (themeToggle) {
+                new bootstrap.Tooltip(themeToggle);
+            }
         });
 
         // Re-initialize tooltips when new content is loaded dynamically

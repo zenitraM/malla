@@ -24,10 +24,6 @@
         font-size: 0.75rem;
         font-weight: bold;
     }
-    .signal-excellent { background-color: #d4edda; color: #155724; }
-    .signal-good { background-color: #fff3cd; color: #856404; }
-    .signal-fair { background-color: #f8d7da; color: #721c24; }
-    .signal-poor { background-color: #f5c6cb; color: #721c24; }
     .hop-badge {
         background-color: #e9ecef;
         color: #495057;
@@ -1075,8 +1071,16 @@ async function loadTracerouteMap(routeNodes) {
         ], 10);
 
         // Add tile layer
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
+        // Add theme-appropriate tile layer
+        const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+        const tileUrl = isDark
+            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+            : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+
+        L.tileLayer(tileUrl, {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20
         }).addTo(map);
 
         // Add markers and route line
@@ -1189,8 +1193,16 @@ function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocations) {
         ], 10);
 
         // Add tile layer
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
+        // Add theme-appropriate tile layer
+        const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+        const tileUrl = isDark
+            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+            : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+
+        L.tileLayer(tileUrl, {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20
         }).addTo(map);
 
         // Add markers for each gateway
@@ -1240,7 +1252,7 @@ function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocations) {
             if (gateway.hop_count !== null && gateway.hop_count !== undefined) {
                 const hopLabel = L.divIcon({
                     className: 'hop-label',
-                    html: `<div style="background: rgba(255,255,255,0.8); border: 1px solid #ccc; border-radius: 3px; padding: 2px 4px; font-size: 10px; font-weight: bold;">${gateway.hop_count}</div>`,
+                    html: `<div class="map-hop-count-label">${gateway.hop_count}</div>`,
                     iconSize: [20, 15],
                     iconAnchor: [10, -5]
                 });

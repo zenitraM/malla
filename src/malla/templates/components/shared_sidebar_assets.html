@@ -420,15 +420,18 @@ function formatAge(ageHours) {
 }
 
 function getRoleColor(role) {
+    // Get CSS custom property values from the document
+    const computedStyle = getComputedStyle(document.documentElement);
+
     switch (role) {
-        case 'CLIENT': return '#007bff'; // Blue
-        case 'CLIENT_MUTE': return '#6c757d'; // Gray
-        case 'ROUTER': return '#28a745'; // Green
-        case 'ROUTER_LATE': return '#28a745'; // Green (same as ROUTER)
-        case 'REPEATER': return '#ffc107'; // Yellow
-        case 'ROUTER_CLIENT': return '#17a2b8'; // Teal
-        case 'SENSOR': return '#e83e8c'; // Pink
-        default: return '#dc3545'; // Red for unknown/null roles
+        case 'CLIENT': return computedStyle.getPropertyValue('--bs-primary').trim(); // Blue
+        case 'CLIENT_MUTE': return computedStyle.getPropertyValue('--bs-secondary').trim(); // Gray
+        case 'ROUTER': return computedStyle.getPropertyValue('--bs-success').trim(); // Green
+        case 'ROUTER_LATE': return computedStyle.getPropertyValue('--bs-success').trim(); // Green (same as ROUTER)
+        case 'REPEATER': return computedStyle.getPropertyValue('--bs-warning').trim(); // Yellow
+        case 'ROUTER_CLIENT': return computedStyle.getPropertyValue('--bs-info').trim(); // Teal
+        case 'SENSOR': return computedStyle.getPropertyValue('--bs-sensor').trim(); // Pink
+        default: return computedStyle.getPropertyValue('--bs-danger').trim(); // Red for unknown/null roles
     }
 }
 
