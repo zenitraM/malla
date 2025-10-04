@@ -398,11 +398,103 @@
 <script>
 // Load analytics data asynchronously to improve initial page load time
 let analyticsData = null;
+let chartInstances = {}; // Store chart instances for theme updates
+
+// Get theme-aware colors for charts
+function getChartColors() {
+    const computedStyle = getComputedStyle(document.documentElement);
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+
+    return {
+        // Text colors
+        textColor: computedStyle.getPropertyValue('--bs-body-color').trim(),
+        mutedTextColor: computedStyle.getPropertyValue('--bs-secondary-color').trim(),
+
+        // Grid and border colors
+        gridColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+        borderColor: computedStyle.getPropertyValue('--bs-border-color').trim(),
+
+        // Chart colors (theme-aware)
+        primary: computedStyle.getPropertyValue('--bs-primary').trim(),
+        success: computedStyle.getPropertyValue('--bs-success').trim(),
+        info: computedStyle.getPropertyValue('--bs-info').trim(),
+        warning: computedStyle.getPropertyValue('--bs-warning').trim(),
+        danger: computedStyle.getPropertyValue('--bs-danger').trim(),
+        secondary: computedStyle.getPropertyValue('--bs-secondary').trim(),
+
+        // Background colors with transparency
+        primaryBg: isDark ? 'rgba(13, 110, 253, 0.2)' : 'rgba(13, 110, 253, 0.1)',
+        successBg: isDark ? 'rgba(25, 135, 84, 0.2)' : 'rgba(25, 135, 84, 0.1)',
+        infoBg: isDark ? 'rgba(13, 202, 240, 0.2)' : 'rgba(13, 202, 240, 0.1)',
+        warningBg: isDark ? 'rgba(255, 193, 7, 0.2)' : 'rgba(255, 193, 7, 0.1)',
+        dangerBg: isDark ? 'rgba(220, 53, 69, 0.2)' : 'rgba(220, 53, 69, 0.1)',
+    };
+}
+
+// Get default chart options with theme support
+function getDefaultChartOptions() {
+    const colors = getChartColors();
+
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                labels: {
+                    color: colors.textColor
+                }
+            }
+        },
+        scales: {
+            x: {
+                ticks: {
+                    color: colors.mutedTextColor
+                },
+                grid: {
+                    color: colors.gridColor
+                }
+            },
+            y: {
+                ticks: {
+                    color: colors.mutedTextColor
+                },
+                grid: {
+                    color: colors.gridColor
+                },
+                beginAtZero: true
+            }
+        }
+    };
+}
+
+// Update all charts when theme changes
+function updateChartsForTheme() {
+    if (analyticsData) {
+        // Destroy existing charts
+        Object.values(chartInstances).forEach(chart => {
+            if (chart) chart.destroy();
+        });
+        chartInstances = {};
+
+        // Recreate charts with new theme
+        createTimeSeriesChart(analyticsData.temporal_patterns);
+        createNodeActivityChart(analyticsData.node_statistics);
+        createGatewayActivityChart(analyticsData.gateway_distribution);
+        createSignalDistributionChart(analyticsData.signal_quality);
+        createHopDistributionChart(analyticsData.temporal_patterns);
+        createPacketTypesChart(analyticsData.packet_types);
+    }
+}
 
 // Initialize dashboard when page loads
 document.addEventListener('DOMContentLoaded', function () {
     // Load analytics data asynchronously
     loadAnalyticsData();
+
+    // Listen for theme changes and update charts
+    window.addEventListener('themeChanged', function(event) {
+        updateChartsForTheme();
+    });
 });
 
 async function loadAnalyticsData() {
@@ -463,27 +555,22 @@ function createTimeSeriesChart(temporalData) {
         data.push(item.total_packets);
     });
 
-    new Chart(ctx, {
+    const colors = getChartColors();
+    const options = getDefaultChartOptions();
+
+    chartInstances.timeSeriesChart = new Chart(ctx, {
         type: 'line',
         data: {
             labels: labels,
             datasets: [{
                 label: 'Messages per Hour',
                 data: data,
-                borderColor: 'rgb(75, 192, 192)',
-                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                borderColor: colors.info,
+                backgroundColor: colors.infoBg,
                 tension: 0.1
             }]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: {
-                    beginAtZero: true
-                }
-            }
-        }
+        options: options
     });
 }
 
@@ -495,8 +582,9 @@ function createNodeActivityChart(nodeData) {
     if (!ctx) return;
 
     const activityDist = nodeData.activity_distribution;
+    const colors = getChartColors();
 
-    new Chart(ctx, {
+    chartInstances.nodeActivityChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
             labels: ['Very Active (>100)', 'Moderately Active (10-100)', 'Lightly Active (1-10)', 'Inactive'],
@@ -507,7 +595,7 @@ function createNodeActivityChart(nodeData) {
                     activityDist.lightly_active || 0,
                     activityDist.inactive || 0
                 ],
-                backgroundColor: ['#28a745', '#17a2b8', '#ffc107', '#dc3545']
+                backgroundColor: [colors.success, colors.info, colors.warning, colors.danger]
             }]
         },
         options: {
@@ -515,7 +603,10 @@ function createNodeActivityChart(nodeData) {
             maintainAspectRatio: false,
             plugins: {
                 legend: {
-                    position: 'bottom'
+                    position: 'bottom',
+                    labels: {
+                        color: colors.textColor
+                    }
                 }
             }
         }
@@ -533,41 +624,33 @@ function createGatewayActivityChart(gatewayData) {
     const topGateways = gatewayData.slice(0, 10);
     const labels = topGateways.map(g => g.gateway_id || 'Unknown');
     const data = topGateways.map(g => g.total_packets || 0);
-    const colors = [
-        '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
-        '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF',
-        '#8BC34A', '#FF5722'
-    ];
 
-    new Chart(ctx, {
+    const colors = getChartColors();
+    const options = getDefaultChartOptions();
+
+    // Generate gradient colors for bars
+    const barColors = data.map((_, index) => {
+        const opacity = 0.8 - (index * 0.05); // Gradually decrease opacity
+        return `rgba(13, 110, 253, ${Math.max(opacity, 0.3)})`;
+    });
+
+    // Customize options for bar chart
+    options.plugins.legend.display = false;
+    options.scales.x.ticks.maxRotation = 45;
+
+    chartInstances.gatewayActivityChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: labels,
             datasets: [{
                 label: 'Messages Received',
                 data: data,
-                backgroundColor: colors.slice(0, data.length)
+                backgroundColor: barColors,
+                borderColor: colors.primary,
+                borderWidth: 1
             }]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: {
-                    beginAtZero: true
-                },
-                x: {
-                    ticks: {
-                        maxRotation: 45
-                    }
-                }
-            },
-            plugins: {
-                legend: {
-                    display: false
-                }
-            }
-        }
+        options: options
     });
 }
 
@@ -579,26 +662,20 @@ function createSignalDistributionChart(signalData) {
     if (!ctx) return;
 
     const rssiDist = signalData.rssi_distribution;
+    const colors = getChartColors();
+    const options = getDefaultChartOptions();
 
-    new Chart(ctx, {
+    chartInstances.signalDistributionChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: ['Excellent (>-70dBm)', 'Good (-70 to -80dBm)', 'Fair (-80 to -90dBm)', 'Poor (<-90dBm)'],
             datasets: [{
                 label: 'Signal Quality Distribution',
                 data: [rssiDist.excellent || 0, rssiDist.good || 0, rssiDist.fair || 0, rssiDist.poor || 0],
-                backgroundColor: ['#28a745', '#ffc107', '#17a2b8', '#dc3545']
+                backgroundColor: [colors.success, colors.warning, colors.info, colors.danger]
             }]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: {
-                    beginAtZero: true
-                }
-            }
-        }
+        options: options
     });
 }
 
@@ -608,15 +685,17 @@ function createHopDistributionChart(temporalData) {
     const ctx = document.getElementById('hopDistributionChart');
     if (!ctx) return;
 
+    const colors = getChartColors();
+
     // For now, create a chart showing message routing efficiency
     // This could be enhanced with actual hop count data from the API
-    new Chart(ctx, {
+    chartInstances.hopDistributionChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
             labels: ['Direct Messages', 'Routed Messages', 'Multi-hop Messages'],
             datasets: [{
                 data: [60, 30, 10], // Placeholder data - could be enhanced with real hop analysis
-                backgroundColor: ['#28a745', '#ffc107', '#dc3545']
+                backgroundColor: [colors.success, colors.warning, colors.danger]
             }]
         },
         options: {
@@ -624,7 +703,10 @@ function createHopDistributionChart(temporalData) {
             maintainAspectRatio: false,
             plugins: {
                 legend: {
-                    position: 'bottom'
+                    position: 'bottom',
+                    labels: {
+                        color: colors.textColor
+                    }
                 }
             }
         }
@@ -640,18 +722,21 @@ function createPacketTypesChart(packetTypes) {
 
     const labels = packetTypes.map(pt => pt.portnum_name || 'Unknown');
     const data = packetTypes.map(pt => pt.count);
-    const colors = [
-        '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
-        '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF'
+    const colors = getChartColors();
+
+    // Generate a variety of colors for different packet types
+    const themeColors = [
+        colors.primary, colors.success, colors.info, colors.warning,
+        colors.danger, colors.secondary, colors.primary, colors.success
     ];
 
-    new Chart(ctx, {
+    chartInstances.packetTypesChart = new Chart(ctx, {
         type: 'pie',
         data: {
             labels: labels,
             datasets: [{
                 data: data,
-                backgroundColor: colors.slice(0, data.length)
+                backgroundColor: themeColors.slice(0, data.length)
             }]
         },
         options: {
@@ -659,7 +744,10 @@ function createPacketTypesChart(packetTypes) {
             maintainAspectRatio: false,
             plugins: {
                 legend: {
-                    position: 'bottom'
+                    position: 'bottom',
+                    labels: {
+                        color: colors.textColor
+                    }
                 }
             }
         }
