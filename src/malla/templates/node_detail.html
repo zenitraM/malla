@@ -24,10 +24,6 @@
         font-size: 0.75rem;
         font-weight: bold;
     }
-    .signal-excellent { background-color: #d4edda; color: #155724; }
-    .signal-good { background-color: #fff3cd; color: #856404; }
-    .signal-fair { background-color: #f8d7da; color: #721c24; }
-    .signal-poor { background-color: #f5c6cb; color: #721c24; }
     .protocol-badge {
         font-size: 0.75rem;
         padding: 4px 8px;
@@ -307,8 +303,8 @@
                                 <small class="text-muted">
                                     <i class="bi bi-info-circle"></i>
                                     Map shows historical GPS coordinates reported by this node.
-                                    Recent locations are shown in <span style="color: #28a745;">green</span>,
-                                    older locations in <span style="color: #dc3545;">red</span>.
+                                    Recent locations are shown in <span class="text-success">green</span>,
+                                    older locations in <span class="text-danger">red</span>.
                                     Click markers for details.
                                 </small>
                             </div>
@@ -775,8 +771,16 @@ function loadCurrentLocationMap() {
     ], 15);
 
     // Add OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    // Add theme-appropriate tile layer
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    const tileUrl = isDark
+        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+        : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+
+    L.tileLayer(tileUrl, {
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 20
     }).addTo(currentMap);
 
     // Add marker for current location
@@ -831,8 +835,16 @@ async function loadLocationHistoryMap() {
         ], 13);
 
         // Add OpenStreetMap tiles
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        // Add theme-appropriate tile layer
+        const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+        const tileUrl = isDark
+            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+            : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+
+        L.tileLayer(tileUrl, {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20
         }).addTo(map);
 
         // Calculate age-based colors and add markers

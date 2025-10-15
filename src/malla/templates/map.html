@@ -434,6 +434,23 @@ let linkData = [];
 let firstDisplay = true; // prevent recenter after initial load
 let currentHopDepth = 1; // max hop depth to display around selected node
 
+// Update map theme based on current theme setting
+function updateMapTheme() {
+    if (!map || !lightTileLayer || !darkTileLayer) return;
+
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    const newTileLayer = isDark ? darkTileLayer : lightTileLayer;
+
+    // Remove current tile layer if it exists
+    if (currentTileLayer) {
+        map.removeLayer(currentTileLayer);
+    }
+
+    // Add new tile layer
+    newTileLayer.addTo(map);
+    currentTileLayer = newTileLayer;
+}
+
 // Initialize the page
 document.addEventListener('DOMContentLoaded', function() {
     // Wait for jQuery to be available
@@ -441,6 +458,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (typeof $ !== 'undefined') {
             initializeInterface();
             initMap();
+
+            // Listen for theme changes
+            window.addEventListener('themeChanged', function(event) {
+                updateMapTheme();
+            });
         } else {
             setTimeout(waitForJQuery, 50);
         }
@@ -621,17 +643,29 @@ function initializeInterface() {
     loadPrimaryChannels();
 }
 
+// Map tile layers for different themes
+let lightTileLayer, darkTileLayer, currentTileLayer;
+
 // Initialize the map
 function initMap() {
     // Create map centered on a default location (will be updated when data loads)
     map = L.map('map').setView([40.0, -95.0], 4);
 
-    // Add Carto Positron tiles
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    // Create light and dark tile layers
+    lightTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
         subdomains: 'abcd',
         maxZoom: 20
-    }).addTo(map);
+    });
+
+    darkTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 20
+    });
+
+    // Add appropriate tile layer based on current theme
+    updateMapTheme();
 
     // Initialize marker cluster group
     markerClusterGroup = L.markerClusterGroup({
@@ -1226,15 +1260,18 @@ function formatAge(ageHours) {
 }
 
 function getRoleColor(role) {
+    // Get CSS custom property values from the document
+    const computedStyle = getComputedStyle(document.documentElement);
+
     switch (role) {
-        case 'CLIENT': return '#007bff'; // Blue
-        case 'CLIENT_MUTE': return '#6c757d'; // Gray
-        case 'ROUTER': return '#28a745'; // Green
-        case 'ROUTER_LATE': return '#28a745'; // Green (same as ROUTER)
-        case 'REPEATER': return '#ffc107'; // Yellow
-        case 'ROUTER_CLIENT': return '#17a2b8'; // Teal
-        case 'SENSOR': return '#e83e8c'; // Pink
-        default: return '#dc3545'; // Red for unknown/null roles
+        case 'CLIENT': return computedStyle.getPropertyValue('--bs-primary').trim(); // Blue
+        case 'CLIENT_MUTE': return computedStyle.getPropertyValue('--bs-secondary').trim(); // Gray
+        case 'ROUTER': return computedStyle.getPropertyValue('--bs-success').trim(); // Green
+        case 'ROUTER_LATE': return computedStyle.getPropertyValue('--bs-success').trim(); // Green (same as ROUTER)
+        case 'REPEATER': return computedStyle.getPropertyValue('--bs-warning').trim(); // Yellow
+        case 'ROUTER_CLIENT': return computedStyle.getPropertyValue('--bs-info').trim(); // Teal
+        case 'SENSOR': return computedStyle.getPropertyValue('--bs-sensor').trim(); // Pink
+        default: return computedStyle.getPropertyValue('--bs-danger').trim(); // Red for unknown/null roles
     }
 }
 
