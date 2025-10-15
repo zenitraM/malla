@@ -176,7 +176,7 @@ cython_debug/
 *.db-wal
 *.sqlite
 *.sqlite3
-meshtastic_history.db
+meshtastic_history.db*
 
 # Log files (project-specific)
 *.log

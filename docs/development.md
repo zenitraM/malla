@@ -56,6 +56,24 @@ uv run ruff check src tests
 uv run basedpyright src
 ```
 
+## CI & Docker images
+
+GitHub Actions builds the Docker image automatically in two cases:
+
+- every push to `main`
+- publishing a Git tag that starts with `v` (for example `v1.2.0`) or a GitHub release
+
+The workflow lives in `.github/workflows/docker.yml`. It pushes multiplatform
+images to GitHub Container Registry (`ghcr.io/<owner>/meshworks-malla`) and tags
+them as:
+
+- `latest` for the default branch
+- `sha-<commit>` for traceability
+- semantic version tags when a release/tag is created (`v1.2.3`, `1.2`)
+
+Keep the repository secret `GHCR_TOKEN` up to date – it must be a PAT with
+`write:packages` permission so the workflow can publish successfully.
+
 ## Pre-push checklist
 
 - `uv sync --dev` (keeps lock file and virtualenv updated)
