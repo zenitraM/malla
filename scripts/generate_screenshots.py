@@ -164,6 +164,18 @@ def _capture_screenshots(base_url: str, out_dir: Path) -> list[Path]:
                 "height": 1200,
             },  # Standard FHD viewport that works well with Chart.js
             device_scale_factor=2,  # HiDPI rendering
+            color_scheme="dark",  # Force dark theme rendering
+        )
+        context.add_init_script(
+            """
+            (() => {
+                try {
+                    window.localStorage.setItem('malla-theme-preference', 'dark');
+                } catch (err) {
+                    console.warn('Failed to persist dark theme preference', err);
+                }
+            })();
+            """
         )
         page = context.new_page()
 

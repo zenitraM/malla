@@ -6,6 +6,16 @@ Malla (_Mesh_, in Spanish) is an ([AI-built](./AI.md)) tool that logs Meshtastic
 Check out some instances with running data from community MQTT servers:
 - meshtastic.es (Spain): https://malla.meshtastic.es
 
+## Meshworks Fork Enhancements
+
+This repository is a Meshworks-maintained fork of [zenitraM/malla](https://github.com/zenitraM/malla) with the following additions:
+
+- Includes the upstream protocol-diversity fix (no 10-item cap) plus extra integration coverage.
+- Ships refreshed dark-mode assets and README screenshots generated directly from this fork.
+- Provides ready-to-use local demo tooling (fixtures + `scripts/generate_screenshots.py`) aligned with our infrastructure needs.
+
+All other functionality stays compatible with the original project so upstream changes can be merged easily.
+
 ## Features
 
 ### 🚀 Key Highlights
