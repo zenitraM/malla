@@ -134,16 +134,15 @@ def _ensure_schema_migrations(cursor: sqlite3.Cursor) -> None:
 
     global _SCHEMA_MIGRATIONS_DONE  # pylint: disable=global-statement
 
-    # Quickly short-circuit if we've already handled migrations in this process
-    if "primary_channel" in _SCHEMA_MIGRATIONS_DONE:
+    # Avoid re-running the migration logic multiple times per process
+    if "schema_migrations" in _SCHEMA_MIGRATIONS_DONE:
         return
 
     try:
-        # Check whether the column already exists
+        # node_info.primary_channel (April 2024)
         cursor.execute("PRAGMA table_info(node_info)")
-        columns = [row[1] for row in cursor.fetchall()]
-
-        if "primary_channel" not in columns:
+        node_columns = {row[1] for row in cursor.fetchall()}
+        if "primary_channel" not in node_columns:
             cursor.execute("ALTER TABLE node_info ADD COLUMN primary_channel TEXT")
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_node_primary_channel ON node_info(primary_channel)"
@@ -152,11 +151,35 @@ def _ensure_schema_migrations(cursor: sqlite3.Cursor) -> None:
                 "Added primary_channel column to node_info table via auto-migration"
             )
 
-        _SCHEMA_MIGRATIONS_DONE.add("primary_channel")
+        # packet_history chat-related columns (October 2025)
+        cursor.execute("PRAGMA table_info(packet_history)")
+        packet_columns = {row[1] for row in cursor.fetchall()}
+
+        if "message_type" not in packet_columns:
+            cursor.execute("ALTER TABLE packet_history ADD COLUMN message_type TEXT")
+            logging.info(
+                "Added message_type column to packet_history table via auto-migration"
+            )
+
+        if "raw_service_envelope" not in packet_columns:
+            cursor.execute(
+                "ALTER TABLE packet_history ADD COLUMN raw_service_envelope BLOB"
+            )
+            logging.info(
+                "Added raw_service_envelope column to packet_history table via auto-migration"
+            )
+
+        if "parsing_error" not in packet_columns:
+            cursor.execute("ALTER TABLE packet_history ADD COLUMN parsing_error TEXT")
+            logging.info(
+                "Added parsing_error column to packet_history table via auto-migration"
+            )
+
+        _SCHEMA_MIGRATIONS_DONE.add("schema_migrations")
+
     except sqlite3.OperationalError as exc:
-        # Ignore errors about duplicate columns in race situations – another
-        # process may have altered the table first.
+        # Ignore duplicate column errors (another process may have migrated already)
         if "duplicate column name" in str(exc).lower():
-            _SCHEMA_MIGRATIONS_DONE.add("primary_channel")
+            _SCHEMA_MIGRATIONS_DONE.add("schema_migrations")
         else:
             raise

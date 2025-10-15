@@ -1,0 +1,1443 @@
+{% extends "base.html" %}
+{% block title %}Chat · {{ APP_NAME }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.chat-panel .card-header {
+    background-color: var(--bs-body-bg);
+    border-bottom: 1px solid var(--bs-border-color);
+}
+.chat-header-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+}
+.chat-header-bar .chat-heading {
+    min-width: 200px;
+}
+.chat-heading-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.chat-heading-stats {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+}
+.chat-heading-stats .chat-activity-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+.chat-refresh-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+.chat-refresh-group .form-select {
+    width: auto;
+    min-width: 120px;
+}
+.chat-refresh-group .chat-refresh-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    min-width: fit-content;
+}
+.chat-summary-badge {
+    font-size: 0.85rem;
+}
+.chat-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+.chat-toolbar .form-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--bs-tertiary-color);
+    margin-bottom: 0.35rem;
+}
+.chat-toolbar .form-select,
+.chat-toolbar .dropdown-toggle,
+.chat-toolbar .form-control {
+    min-width: 180px;
+}
+.chat-toolbar .dropdown-toggle {
+    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+}
+.chat-toolbar .dropdown-toggle::after {
+    margin-left: auto;
+}
+.chat-dropdown-wrapper .dropdown-menu {
+    width: 100%;
+}
+.chat-dropdown-menu {
+    width: 100%;
+    min-width: 200px;
+    max-width: min(100%, 360px);
+    max-height: 280px;
+    overflow: hidden;
+    padding: 0;
+}
+.chat-dropdown-options {
+    max-height: 240px;
+    overflow-y: auto;
+}
+.chat-dropdown-search {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--bs-border-color);
+    background-color: var(--bs-body-bg);
+}
+.chat-dropdown-search .form-control {
+    min-width: 0;
+}
+.chat-dropdown-menu .dropdown-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+}
+.chat-dropdown-menu .dropdown-item.active,
+.chat-dropdown-menu .dropdown-item:active {
+    background-color: var(--bs-primary);
+    color: #fff;
+    font-weight: 600;
+}
+.chat-dropdown-menu .dropdown-item:hover {
+    background-color: rgba(var(--bs-primary-rgb), 0.06);
+}
+.chat-dropdown-menu .dropdown-item.active .text-muted,
+.chat-dropdown-menu .dropdown-item:active .text-muted {
+    color: rgba(255, 255, 255, 0.75) !important;
+}
+.chat-search-group {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+}
+.chat-search-group .input-group-text {
+    flex: 0 0 auto;
+    min-width: 2.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.chat-search-group .form-control {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.chat-activity-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.75rem;
+    background-color: var(--bs-secondary-bg);
+    color: var(--bs-body-color);
+    border-radius: 999px;
+}
+.chat-sender-dropdown .dropdown-menu {
+    width: 100%;
+    max-height: 300px;
+    overflow: hidden;
+    padding: 0;
+}
+.chat-card {
+    position: relative;
+    max-height: 70vh;
+    overflow-y: auto;
+    transition: opacity 0.25s ease;
+}
+.chat-card.is-loading {
+    opacity: 0.6;
+}
+.chat-card.is-loading .list-unstyled {
+    pointer-events: none;
+}
+.chat-loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    background: linear-gradient(
+        rgba(15, 23, 42, 0.45),
+        rgba(15, 23, 42, 0.45)
+    );
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+.chat-card.is-loading .chat-loading-overlay {
+    opacity: 1;
+    pointer-events: auto;
+}
+.chat-meta {
+    font-size: 0.85rem;
+    color: var(--bs-secondary-color);
+}
+.chat-body {
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin-top: 0.5rem;
+}
+.chat-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.chat-node-link {
+    text-decoration: none;
+}
+.chat-node-link:hover {
+    text-decoration: underline;
+}
+.chat-channel-badge {
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+}
+.chat-gateway-badge {
+    font-size: 0.7rem;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    border: none;
+    background: var(--bs-secondary-bg);
+    color: var(--bs-body-color);
+    padding: 0.2rem 0.45rem;
+    border-radius: 999px;
+    margin-top: 0.2rem;
+}
+.chat-gateway-badge.is-open {
+    background: var(--bs-primary-bg-subtle);
+    color: var(--bs-primary-text);
+}
+.chat-refresh-button.is-loading {
+    pointer-events: none;
+    opacity: 0.75;
+}
+.chat-refresh-button.is-loading i {
+    animation: chat-spin 0.8s linear infinite;
+}
+@keyframes chat-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+.chat-message {
+    background-color: var(--bs-tertiary-bg);
+    border-radius: var(--bs-border-radius);
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--bs-border-color);
+}
+.chat-message:last-child {
+    margin-bottom: 0;
+}
+.chat-list-animate .chat-message {
+    animation: chatFadeIn 0.35s ease both;
+}
+@keyframes chatFadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.tooltip .tooltip-inner {
+    max-width: none;
+    text-align: left;
+    white-space: nowrap;
+}
+.chat-gateway-tooltip {
+    --bs-tooltip-opacity: 1;
+    --bs-tooltip-bg: rgba(15, 23, 42, 0.95);
+    --bs-tooltip-color: var(--bs-light);
+}
+.chat-gateway-tooltip .tooltip-inner {
+    padding: 0.65rem 0.9rem;
+    font-size: 0.85rem;
+    box-shadow: 0 0.5rem 1rem rgba(15, 23, 42, 0.35);
+    display: inline-block;
+    white-space: nowrap;
+    width: max-content;
+    max-width: min(95vw, 720px);
+}
+.chat-gateway-tooltip .tooltip-arrow::before {
+    border-top-color: rgba(15, 23, 42, 0.95) !important;
+}
+.chat-empty {
+    padding: 3rem 0;
+    text-align: center;
+    color: var(--bs-secondary-color);
+}
+@media (max-width: 576px) {
+    .chat-header-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+    }
+    .chat-refresh-group {
+        gap: 0.75rem;
+        justify-content: flex-start;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .chat-heading-stats {
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 0.5rem;
+    }
+    .chat-heading-stats .chat-activity-pill {
+        flex: 1 1 calc(50% - 0.25rem);
+        text-align: center;
+    }
+    #chat-auto-refresh-note {
+        text-align: center;
+    }
+    .chat-refresh-group .form-select,
+    .chat-refresh-group .chat-refresh-button {
+        width: 100%;
+    }
+    .chat-toolbar {
+        flex-direction: column;
+    }
+    .chat-toolbar .dropdown-toggle,
+    .chat-toolbar .form-control,
+    .chat-toolbar .btn {
+        width: 100%;
+        min-width: 0;
+    }
+    .chat-panel {
+        border-radius: var(--bs-border-radius);
+    }
+    .chat-card {
+        max-height: none;
+        overflow-y: visible;
+        margin: 0 -0.25rem;
+    }
+    .chat-message {
+        border-radius: calc(var(--bs-border-radius) - 2px);
+        padding: 0.85rem;
+    }
+    .chat-header {
+        gap: 0.35rem;
+    }
+    .chat-meta {
+        font-size: 0.8rem;
+    }
+    .chat-gateway-badge {
+        margin-left: 0;
+    }
+    .chat-gateway-tooltip .tooltip-inner {
+        display: block;
+        white-space: normal;
+        width: min(92vw, 420px);
+        max-width: min(92vw, 420px);
+        word-break: break-word;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="mb-3">
+        <h1 class="h3 mb-1"><i class="bi bi-chat-dots"></i> Chat</h1>
+        <p class="text-muted mb-0">Live Meshtastic text messages captured from the MQTT broker.</p>
+    </div>
+
+    <div class="card shadow-sm chat-panel">
+        <div class="card-header">
+            <div class="chat-header-bar">
+                <div class="chat-heading flex-grow-1">
+                    <div class="chat-heading-title d-flex align-items-center gap-2">
+                        <span class="fw-semibold"><i class="bi bi-chat-square-text"></i> Recent messages</span>
+                    </div>
+                    <div class="chat-heading-stats">
+                        <span class="chat-activity-pill" id="chat-count-hour">
+                            <i class="bi bi-clock-history"></i>
+                            <span>Last hour:</span>
+                            <strong>{{ (chat_meta.counts.last_hour if chat_meta.counts else 0) | int }}</strong>
+                        </span>
+                        <span class="chat-activity-pill" id="chat-count-day">
+                            <i class="bi bi-calendar-event"></i>
+                            <span>Last 24h:</span>
+                            <strong>{{ (chat_meta.counts.last_day if chat_meta.counts else 0) | int }}</strong>
+                        </span>
+                    </div>
+                    <div class="text-muted small" id="chat-last-updated">Updated --</div>
+                </div>
+                <div class="chat-refresh-group">
+                    <span class="text-muted small" id="chat-auto-refresh-note">Auto-refresh in 30 seconds</span>
+                    <select class="form-select form-select-sm" id="chat-refresh-interval">
+                        {% set refresh_options = [
+                            (0, "Off"),
+                            (15000, "15 seconds"),
+                            (30000, "30 seconds"),
+                            (60000, "1 minute"),
+                            (300000, "5 minutes")
+                        ] %}
+                        {% for value, label in refresh_options %}
+                            <option value="{{ value }}" {% if value == 30000 %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <button class="btn btn-outline-primary btn-sm chat-refresh-button" type="button" id="chat-refresh-button">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                </div>
+            </div>
+
+            <form class="chat-toolbar" method="get" id="chat-filter-form">
+                <div class="flex-grow-1 flex-sm-grow-0 chat-dropdown-wrapper">
+                    <label class="form-label">Channel</label>
+                    <div class="dropdown w-100">
+                        <button
+                            class="btn btn-outline-secondary btn-sm dropdown-toggle w-100"
+                            type="button"
+                            id="chat-channel-dropdown"
+                            data-bs-toggle="dropdown"
+                            aria-expanded="false"
+                        >
+                            <span class="chat-dropdown-label" data-role="label" data-default="All channels">{{ channel_label }}</span>
+                        </button>
+                        <div class="dropdown-menu chat-dropdown-menu" aria-labelledby="chat-channel-dropdown" id="chat-channel-menu">
+                            <div class="chat-dropdown-options" data-role="options">
+                                <button class="dropdown-item {% if not selected_channel %}active{% endif %}" type="button" data-value="" data-label="All channels">
+                                    All channels
+                                </button>
+                                {% for channel in channels %}
+                                    <button class="dropdown-item {% if selected_channel == channel.id %}active{% endif %}" type="button" data-value="{{ channel.id }}" data-label="{{ channel.label }}">
+                                        {{ channel.label }} <span class="text-muted">({{ channel.count }})</span>
+                                    </button>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <input type="hidden" name="channel" id="chat-channel-input" value="{{ selected_channel or '' }}">
+                    </div>
+                </div>
+                <div class="flex-grow-1 flex-sm-grow-0 chat-dropdown-wrapper">
+                    <label class="form-label">Message type</label>
+                    <div class="dropdown w-100">
+                        <button
+                            class="btn btn-outline-secondary btn-sm dropdown-toggle w-100"
+                            type="button"
+                            id="chat-audience-dropdown"
+                            data-bs-toggle="dropdown"
+                            aria-expanded="false"
+                        >
+                            <span class="chat-dropdown-label" data-role="label" data-default="All messages">{{ audience_label }}</span>
+                        </button>
+                        <div class="dropdown-menu chat-dropdown-menu" aria-labelledby="chat-audience-dropdown" id="chat-audience-menu">
+                            <div class="chat-dropdown-options" data-role="options">
+                                <button class="dropdown-item {% if selected_audience == 'all' %}active{% endif %}" type="button" data-value="all" data-label="All messages">
+                                    All messages
+                                </button>
+                                <button class="dropdown-item {% if selected_audience == 'broadcast' %}active{% endif %}" type="button" data-value="broadcast" data-label="Broadcast only">
+                                    Broadcast only
+                                </button>
+                                <button class="dropdown-item {% if selected_audience == 'direct' %}active{% endif %}" type="button" data-value="direct" data-label="Direct messages">
+                                    Direct messages
+                                </button>
+                            </div>
+                        </div>
+                        <input type="hidden" name="audience" id="chat-audience-input" value="{{ selected_audience or 'all' }}">
+                    </div>
+                </div>
+                <div class="flex-grow-1 flex-sm-grow-0 chat-sender-dropdown">
+                    <label class="form-label">Sender</label>
+                    <div class="dropdown">
+                        <button
+                            class="btn btn-outline-secondary btn-sm dropdown-toggle w-100"
+                            type="button"
+                            id="chat-sender-dropdown"
+                            data-bs-toggle="dropdown"
+                            aria-expanded="false"
+                        >
+                            <span id="chat-sender-label" data-default="All senders">{{ sender_label }}</span>
+                        </button>
+                        <div class="dropdown-menu chat-dropdown-menu" aria-labelledby="chat-sender-dropdown" id="chat-sender-menu">
+                            <div class="chat-dropdown-search">
+                                <div class="input-group input-group-sm chat-search-group">
+                                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                    <input type="search" class="form-control form-control-sm" placeholder="Search sender..." data-role="search-input" id="chat-sender-search">
+                                </div>
+                            </div>
+                            <div class="chat-dropdown-options" data-role="options">
+                                <button class="dropdown-item {% if not selected_sender %}active{% endif %}" type="button" data-value="" data-label="All senders">
+                                    All senders
+                                </button>
+                                {% for sender in senders %}
+                                    <button class="dropdown-item {% if selected_sender == sender.id %}active{% endif %}" type="button" data-value="{{ sender.id }}" data-label="{{ sender.label }}">
+                                        {{ sender.label }} <span class="text-muted">({{ sender.count }})</span>
+                                    </button>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <input type="hidden" name="sender" id="chat-sender-input" value="{{ selected_sender or '' }}">
+                    </div>
+                </div>
+                <div class="flex-grow-1 flex-sm-grow-0 chat-dropdown-wrapper">
+                    <label class="form-label">Messages</label>
+                    <div class="dropdown w-100">
+                        <button
+                            class="btn btn-outline-secondary btn-sm dropdown-toggle w-100"
+                            type="button"
+                            id="chat-limit-dropdown"
+                            data-bs-toggle="dropdown"
+                            aria-expanded="false"
+                        >
+                            <span class="chat-dropdown-label" data-role="label" data-default="100">{{ limit_label }}</span>
+                        </button>
+                        <div class="dropdown-menu chat-dropdown-menu" aria-labelledby="chat-limit-dropdown" id="chat-limit-menu">
+                            <div class="chat-dropdown-options" data-role="options">
+                                {% for option in [25, 50, 100, 150, 200] %}
+                                    <button class="dropdown-item {% if chat_meta.limit == option %}active{% endif %}" type="button" data-value="{{ option }}" data-label="{{ option }}">
+                                        {{ option }}
+                                    </button>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <input type="hidden" name="limit" id="chat-limit-input" value="{{ chat_meta.limit }}">
+                    </div>
+                </div>
+                <div class="flex-grow-1 flex-sm-grow-0">
+                    <label for="chat-text-search" class="form-label">Search</label>
+                    <div class="input-group input-group-sm chat-search-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input
+                            type="search"
+                            class="form-control form-control-sm"
+                            id="chat-text-search"
+                            name="q"
+                            value="{{ search_query }}"
+                            placeholder="Message text"
+                            autocomplete="off"
+                        >
+                    </div>
+                </div>
+            </form>
+        </div>
+        <div class="card-body chat-card" id="chat-card-body">
+            <div id="chat-loading" class="chat-loading-overlay text-center">
+                <div class="spinner-border text-primary" role="status" aria-hidden="true"></div>
+                <div class="mt-2 text-muted small">Loading chat messages…</div>
+            </div>
+            <ul class="list-unstyled mb-0" id="chat-message-list">
+                {% if messages %}
+                    {% for msg in messages %}
+                        <li class="chat-message py-3" data-message-id="{{ msg.id }}">
+                            <div class="chat-header">
+                                {% if msg.from_node_id %}
+                                    <a class="chat-node-link text-primary fw-semibold" href="{{ url_for('node.node_detail', node_id=msg.from_node_id) }}">
+                                        {{ msg.from_name }}
+                                    </a>
+                                {% else %}
+                                    <span class="fw-semibold text-primary">{{ msg.from_name }}</span>
+                                {% endif %}
+                                <i class="bi bi-arrow-right-short text-muted"></i>
+                                {% if msg.to_node_id and not msg.to_is_broadcast %}
+                                    <a class="chat-node-link text-secondary fw-semibold" href="{{ url_for('node.node_detail', node_id=msg.to_node_id) }}">
+                                        {{ msg.to_name }}
+                                    </a>
+                                {% else %}
+                                    <span class="fw-semibold text-secondary">{{ msg.to_name }}</span>
+                                {% endif %}
+                                <span class="badge text-bg-dark chat-channel-badge">{{ msg.channel_label }}</span>
+                                {% if msg.gateway_nodes %}
+                                    <span
+                                        class="badge text-bg-secondary chat-gateway-badge"
+                                        role="button"
+                                        tabindex="0"
+                                        aria-haspopup="true"
+                                        aria-expanded="false"
+                                        data-tooltip-html="{{ msg.gateway_tooltip | e }}"
+                                    >
+                                        {{ msg.gateway_count }} gateway{% if msg.gateway_count != 1 %}s{% endif %}
+                                    </span>
+                                {% endif %}
+                            </div>
+                            <div class="chat-meta mt-1">
+                                {{ msg.time_ago }} • {{ msg.timestamp_display }}
+                            </div>
+                            <div class="chat-body">{{ msg.message | e | replace('\n', '<br>') | safe }}</div>
+                        </li>
+                    {% endfor %}
+                {% else %}
+                    <li class="chat-empty">No chat messages available for the selected filters.</li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const chatState = {
+        apiUrl: "{{ url_for('api.api_chat_messages') }}",
+        limit: {{ chat_meta.limit }},
+        channel: {{ (selected_channel or '') | tojson }},
+        audience: {{ (selected_audience or 'all') | tojson }},
+        sender: {{ (selected_sender or '') | tojson }},
+        search: {{ (search_query or '') | tojson }},
+        refreshInterval: 30000,
+    };
+
+    const initialData = {
+        messages: {{ messages | safe_json | safe }},
+        channels: {{ channels | safe_json | safe }},
+        senders: {{ senders | safe_json | safe }},
+        meta: {{ chat_meta | safe_json | safe }},
+    };
+
+    const messageListEl = document.getElementById('chat-message-list');
+    const loadingEl = document.getElementById('chat-loading');
+    const cardBodyEl = document.getElementById('chat-card-body');
+    const lastUpdatedEl = document.getElementById('chat-last-updated');
+    const autoRefreshEl = document.getElementById('chat-auto-refresh-note');
+    const hourCountEl = document.getElementById('chat-count-hour');
+    const dayCountEl = document.getElementById('chat-count-day');
+    const hourCountValueEl = hourCountEl ? hourCountEl.querySelector('strong') : null;
+    const dayCountValueEl = dayCountEl ? dayCountEl.querySelector('strong') : null;
+
+    const refreshButton = document.getElementById('chat-refresh-button');
+    const refreshIntervalSelect = document.getElementById('chat-refresh-interval');
+    const filterForm = document.getElementById('chat-filter-form');
+
+    const channelInput = document.getElementById('chat-channel-input');
+    const channelLabelEl = document.querySelector('#chat-channel-dropdown .chat-dropdown-label');
+    const channelMenu = document.getElementById('chat-channel-menu');
+    const channelToggle = document.getElementById('chat-channel-dropdown');
+
+    const audienceInput = document.getElementById('chat-audience-input');
+    const audienceLabelEl = document.querySelector('#chat-audience-dropdown .chat-dropdown-label');
+    const audienceMenu = document.getElementById('chat-audience-menu');
+    const audienceToggle = document.getElementById('chat-audience-dropdown');
+
+    const limitInput = document.getElementById('chat-limit-input');
+    const limitLabelEl = document.querySelector('#chat-limit-dropdown .chat-dropdown-label');
+    const limitMenu = document.getElementById('chat-limit-menu');
+    const limitToggle = document.getElementById('chat-limit-dropdown');
+
+    const senderInput = document.getElementById('chat-sender-input');
+    const senderLabel = document.getElementById('chat-sender-label');
+    const senderMenu = document.getElementById('chat-sender-menu');
+    const senderSearchInput = document.getElementById('chat-sender-search');
+    const senderToggle = document.getElementById('chat-sender-dropdown');
+
+    const searchInput = document.getElementById('chat-text-search');
+
+    if (searchInput) {
+        if (chatState.search) {
+            searchInput.value = chatState.search;
+        } else {
+            chatState.search = searchInput.value.trim();
+        }
+    } else {
+        chatState.search = chatState.search || '';
+    }
+
+    if (loadingEl) {
+        loadingEl.setAttribute('aria-hidden', 'true');
+    }
+    if (refreshIntervalSelect) {
+        const parsedInterval = parseInt(refreshIntervalSelect.value, 10);
+        if (!Number.isNaN(parsedInterval)) {
+            chatState.refreshInterval = parsedInterval;
+        }
+    }
+
+    let autoRefreshTimer = null;
+    let countdownTimer = null;
+    let nextRefreshAt = null;
+    let searchDebounceTimer = null;
+    const tooltipInstances = new WeakMap();
+    const tooltipHandlers = new WeakMap();
+    let activeTooltipEl = null;
+
+    function escapeHtml(value) {
+        return value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function escapeAttribute(value) {
+        return escapeHtml(value).split('\n').join('&#10;');
+    }
+
+    function animateMessageList() {
+        if (!messageListEl) {
+            return;
+        }
+        messageListEl.classList.remove('chat-list-animate');
+        void messageListEl.offsetWidth;
+        messageListEl.classList.add('chat-list-animate');
+    }
+
+    function buildGatewayTooltipHtml(message) {
+        if (!message) {
+            return '';
+        }
+
+        if (message.gateway_tooltip) {
+            return message.gateway_tooltip;
+        }
+
+        if (Array.isArray(message.gateway_nodes) && message.gateway_nodes.length) {
+            return message.gateway_nodes
+                .map((gw) => {
+                    if (gw.tooltip_line) {
+                        return gw.tooltip_line;
+                    }
+
+                    const baseLabel = gw.label
+                        || gw.name
+                        || gw.raw_id
+                        || 'Unknown gateway';
+                    const metrics = gw.metrics && gw.metrics.text
+                        ? gw.metrics.text
+                        : null;
+                    const suffix = gw.raw_id && !baseLabel.includes(gw.raw_id)
+                        ? ` (${gw.raw_id})`
+                        : '';
+                    const safeLabel = escapeHtml(`${baseLabel}${suffix}`);
+
+                    if (metrics) {
+                        return `• ${safeLabel}: ${escapeHtml(metrics)}`;
+                    }
+
+                    return `• ${safeLabel}`;
+                })
+                .filter(Boolean)
+                .join('<br>');
+        }
+
+        return '';
+    }
+
+    function setupDropdown(config) {
+        const menuEl = config.menuEl;
+        const inputEl = config.inputEl;
+        const labelEl = config.labelEl;
+        const toggleEl = config.toggleEl;
+
+        if (!menuEl || !inputEl || !labelEl || !toggleEl) {
+            return;
+        }
+
+        menuEl.querySelectorAll('.dropdown-item').forEach((btn) => {
+            btn.addEventListener('click', (event) => {
+                event.preventDefault();
+                const value = btn.dataset.value ?? '';
+                const labelText = btn.dataset.label || btn.textContent.trim();
+
+                inputEl.value = value;
+                labelEl.textContent = labelText || labelEl.dataset.default || '';
+
+                menuEl.querySelectorAll('.dropdown-item').forEach((item) => {
+                    item.classList.toggle('active', item === btn);
+                });
+
+                bootstrap.Dropdown.getOrCreateInstance(toggleEl).hide();
+                applyFilters();
+            });
+        });
+    }
+
+    function updateSenderMenuActive() {
+        if (!senderMenu) {
+            return false;
+        }
+
+        const optionsContainer = senderMenu.querySelector('[data-role="options"]');
+        if (!optionsContainer) {
+            return false;
+        }
+
+        let matched = false;
+        optionsContainer.querySelectorAll('.dropdown-item').forEach((btn) => {
+            const value = btn.dataset.value ?? '';
+            const isActive =
+                value === chatState.sender || (!chatState.sender && value === '');
+            btn.classList.toggle('active', isActive);
+            if (isActive) {
+                matched = true;
+            }
+        });
+
+        return matched;
+    }
+
+    function updateSenderLabel(forcedLabel) {
+        if (!senderLabel) {
+            return;
+        }
+
+        if (forcedLabel) {
+            senderLabel.textContent = forcedLabel;
+            return;
+        }
+
+        let labelText = senderLabel.dataset.default || 'All senders';
+        if (senderMenu) {
+            const optionsContainer = senderMenu.querySelector('[data-role="options"]');
+            if (optionsContainer) {
+                optionsContainer.querySelectorAll('.dropdown-item').forEach((btn) => {
+                    const value = btn.dataset.value ?? '';
+                    if (value === chatState.sender || (!chatState.sender && value === '')) {
+                        labelText = btn.dataset.label || btn.textContent.trim() || labelText;
+                    }
+                });
+            }
+        }
+
+        senderLabel.textContent = labelText;
+    }
+
+    function createSenderButton(value, label, count) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'dropdown-item';
+        button.dataset.value = value ?? '';
+        button.dataset.label = label ?? '';
+
+        const labelText = label || value || 'Unknown sender';
+        button.append(labelText);
+
+        if (Number.isFinite(count)) {
+            button.append(' ');
+            const span = document.createElement('span');
+            span.className = 'text-muted';
+            span.textContent = '(' + count + ')';
+            button.appendChild(span);
+        }
+
+        return button;
+    }
+
+    function bindSenderMenuEvents() {
+        if (!senderMenu) {
+            return;
+        }
+
+        const optionsContainer = senderMenu.querySelector('[data-role="options"]');
+        if (!optionsContainer) {
+            return;
+        }
+
+        optionsContainer.querySelectorAll('.dropdown-item').forEach((btn) => {
+            btn.addEventListener('click', (event) => {
+                event.preventDefault();
+                const value = btn.dataset.value ?? '';
+                const labelText = btn.dataset.label || btn.textContent.trim();
+
+                optionsContainer.querySelectorAll('.dropdown-item').forEach((item) => {
+                    item.classList.toggle('active', item === btn);
+                });
+
+                setSenderState(value, labelText, { silent: false });
+                bootstrap.Dropdown.getOrCreateInstance(senderToggle).hide();
+            });
+        });
+    }
+
+    function filterSenderOptions() {
+        if (!senderMenu) {
+            return;
+        }
+        const term = senderSearchInput ? senderSearchInput.value.trim().toLowerCase() : '';
+        const optionsContainer = senderMenu.querySelector('[data-role="options"]');
+        if (!optionsContainer) {
+            return;
+        }
+
+        optionsContainer.querySelectorAll('.dropdown-item').forEach((btn) => {
+            const labelText = (btn.dataset.label || btn.textContent || '').toLowerCase();
+            const shouldShow = !term || labelText.includes(term);
+            btn.style.display = shouldShow ? '' : 'none';
+        });
+    }
+
+    function renderSendersList(sendersList) {
+        if (!senderMenu) {
+            return;
+        }
+
+        const optionsContainer = senderMenu.querySelector('[data-role="options"]');
+        if (!optionsContainer) {
+            return;
+        }
+
+        optionsContainer.innerHTML = '';
+        optionsContainer.appendChild(createSenderButton('', 'All senders', undefined));
+
+        if (Array.isArray(sendersList)) {
+            sendersList.forEach((sender) => {
+                const value = sender && sender.id ? sender.id : '';
+                const label = sender && sender.label ? sender.label : (value || 'Unknown sender');
+                const countValue = sender && Number.isFinite(sender.count) ? sender.count : undefined;
+                optionsContainer.appendChild(createSenderButton(value, label, countValue));
+            });
+        }
+
+        bindSenderMenuEvents();
+        filterSenderOptions();
+
+        if (!updateSenderMenuActive() && chatState.sender) {
+            setSenderState('', senderLabel ? senderLabel.dataset.default || 'All senders' : 'All senders', { silent: true });
+        } else {
+            updateSenderLabel();
+        }
+    }
+
+    function setSenderState(value, labelText, options) {
+        const silent = options && options.silent === true;
+        const previousValue = chatState.sender;
+        chatState.sender = value;
+        if (senderInput) {
+            senderInput.value = value;
+        }
+        updateSenderLabel(labelText);
+        if (!silent) {
+            applyFilters({ force: previousValue !== value });
+        } else {
+            updateSenderMenuActive();
+        }
+    }
+
+    function formatMessageItem(message) {
+        const messageText = message.message
+            ? escapeHtml(message.message).split('\n').join('<br>')
+            : '<em class="text-muted">[empty message]</em>';
+
+        const fromName = escapeHtml(message.from_name || 'Unknown sender');
+        const toName = escapeHtml(message.to_name || 'Unknown recipient');
+        const channel = escapeHtml(message.channel_label || 'Primary');
+        const timeAgo = escapeHtml(message.time_ago || '');
+        const timestampDisplay = escapeHtml(message.timestamp_display || '');
+
+        const fromNodeLink = message.from_node_id
+            ? `<a class="chat-node-link text-primary fw-semibold" href="/node/${message.from_node_id}">${fromName}</a>`
+            : `<span class="fw-semibold text-primary">${fromName}</span>`;
+
+        const toNodeLink = message.to_node_id && !message.to_is_broadcast
+            ? `<a class="chat-node-link text-secondary fw-semibold" href="/node/${message.to_node_id}">${toName}</a>`
+            : `<span class="fw-semibold text-secondary">${toName}</span>`;
+
+        let gatewayBadge = '';
+        const gatewayCount = Array.isArray(message.gateway_nodes)
+            ? message.gateway_nodes.length
+            : typeof message.gateway_count === 'number'
+                ? message.gateway_count
+                : 0;
+        if (gatewayCount > 0) {
+            const tooltipHtml = buildGatewayTooltipHtml(message);
+            const tooltipAttr = tooltipHtml
+                ? ` data-tooltip-html="${escapeAttribute(tooltipHtml)}"`
+                : '';
+            gatewayBadge = `
+                <span
+                    class="badge text-bg-secondary chat-gateway-badge"
+                    role="button"
+                    tabindex="0"
+                    aria-haspopup="true"
+                    aria-expanded="false"${tooltipAttr}
+                >
+                    ${gatewayCount} gateway${gatewayCount !== 1 ? 's' : ''}
+                </span>
+            `;
+        }
+
+        const metaSegments = [];
+        if (timeAgo) {
+            metaSegments.push(timeAgo);
+        }
+        if (timestampDisplay) {
+            metaSegments.push(timestampDisplay);
+        }
+
+        return `
+            <li class="chat-message py-3" data-message-id="${message.id}">
+                <div class="chat-header">
+                    ${fromNodeLink}
+                    <i class="bi bi-arrow-right-short text-muted"></i>
+                    ${toNodeLink}
+                    <span class="badge text-bg-dark chat-channel-badge">${channel}</span>
+                    ${gatewayBadge}
+                </div>
+                <div class="chat-meta mt-1">
+                    ${metaSegments.join(' • ')}
+                </div>
+                <div class="chat-body">${messageText}</div>
+            </li>
+        `;
+    }
+
+    function renderMessages(messages) {
+        if (!messageListEl) {
+            return;
+        }
+
+        hideActiveTooltip();
+
+        if (!messages || messages.length === 0) {
+            messageListEl.innerHTML = '<li class="chat-empty">No chat messages available for the selected filters.</li>';
+            messageListEl.classList.remove('chat-list-animate');
+            refreshTooltips();
+            return;
+        }
+
+        const html = messages.map(formatMessageItem).join('');
+        messageListEl.innerHTML = html;
+        animateMessageList();
+        refreshTooltips();
+    }
+
+    function setLoading(isLoading) {
+        if (loadingEl) {
+            loadingEl.setAttribute('aria-hidden', isLoading ? 'false' : 'true');
+        }
+        if (messageListEl) {
+            messageListEl.setAttribute('aria-busy', String(isLoading));
+        }
+        if (refreshButton) {
+            refreshButton.classList.toggle('is-loading', isLoading);
+            refreshButton.disabled = isLoading;
+        }
+        cardBodyEl?.classList.toggle('is-loading', isLoading);
+    }
+
+    function formatIntervalLabel(intervalMs) {
+        const seconds = Math.max(1, Math.round(intervalMs / 1000));
+        if (seconds >= 60 && seconds % 60 === 0) {
+            const minutes = seconds / 60;
+            return minutes === 1 ? '1 minute' : `${minutes} minutes`;
+        }
+        return seconds === 1 ? '1 second' : `${seconds} seconds`;
+    }
+
+    function formatCountdownLabel(totalSeconds) {
+        const seconds = Math.max(0, totalSeconds);
+        if (seconds <= 60) {
+            return seconds === 1 ? '1 second' : `${seconds} seconds`;
+        }
+        const minutes = Math.floor(seconds / 60);
+        const remainder = seconds % 60;
+        const minutesLabel = minutes === 1 ? '1 minute' : `${minutes} minutes`;
+        if (remainder === 0) {
+            return minutesLabel;
+        }
+        const secondsLabel = remainder === 1 ? '1 second' : `${remainder} seconds`;
+        return `${minutesLabel} ${secondsLabel}`;
+    }
+
+    function updateAutoRefreshNote() {
+        if (!autoRefreshEl) {
+            return;
+        }
+        if (!chatState.refreshInterval || chatState.refreshInterval <= 0) {
+            autoRefreshEl.textContent = 'Auto-refresh off';
+            return;
+        }
+        if (nextRefreshAt) {
+            const remainingMs = Math.max(0, nextRefreshAt - Date.now());
+            const seconds = Math.ceil(remainingMs / 1000);
+            autoRefreshEl.textContent = `Auto-refresh in ${formatCountdownLabel(seconds)}`;
+        } else {
+            autoRefreshEl.textContent = `Auto-refresh in ${formatIntervalLabel(chatState.refreshInterval)}`;
+        }
+    }
+
+    function cancelAutoRefresh() {
+        if (autoRefreshTimer) {
+            clearTimeout(autoRefreshTimer);
+            autoRefreshTimer = null;
+        }
+        if (countdownTimer) {
+            clearInterval(countdownTimer);
+            countdownTimer = null;
+        }
+        nextRefreshAt = null;
+        updateAutoRefreshNote();
+    }
+
+    function scheduleAutoRefresh() {
+        cancelAutoRefresh();
+        if (!chatState.refreshInterval || chatState.refreshInterval <= 0) {
+            return;
+        }
+        nextRefreshAt = Date.now() + chatState.refreshInterval;
+        updateAutoRefreshNote();
+        countdownTimer = setInterval(updateAutoRefreshNote, 1000);
+        autoRefreshTimer = setTimeout(() => {
+            loadMessages({ showSpinner: false });
+        }, chatState.refreshInterval);
+    }
+
+    function formatTimestampWithOffset(date) {
+        const pad = (value) => String(value).padStart(2, '0');
+        const offsetMinutes = -date.getTimezoneOffset();
+        const sign = offsetMinutes >= 0 ? '+' : '-';
+        const absMinutes = Math.abs(offsetMinutes);
+        const offsetHours = pad(Math.floor(absMinutes / 60));
+        const offsetMins = pad(absMinutes % 60);
+
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+            + `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())} `
+            + `${sign}${offsetHours}:${offsetMins}`;
+    }
+
+    function updateMeta(meta, messages) {
+        const counts = (meta && meta.counts) || {};
+        const hourCount = counts.last_hour ?? counts.count_1h ?? counts.hour ?? 0;
+        const dayCount = counts.last_day ?? counts.count_24h ?? counts.day ?? 0;
+
+        if (hourCountValueEl) {
+            hourCountValueEl.textContent = hourCount;
+        }
+        if (dayCountValueEl) {
+            dayCountValueEl.textContent = dayCount;
+        }
+
+        if (lastUpdatedEl) {
+            lastUpdatedEl.textContent = `Updated ${formatTimestampWithOffset(new Date())}`;
+        }
+    }
+
+    async function loadMessages(options) {
+        const opts = options || {};
+        const showSpinner = opts.showSpinner !== false;
+
+        cancelAutoRefresh();
+
+        try {
+            if (showSpinner) {
+                setLoading(true);
+            }
+
+            const params = new URLSearchParams();
+            params.set('limit', chatState.limit);
+            if (chatState.channel) {
+                params.set('channel', chatState.channel);
+            }
+            if (chatState.audience) {
+                params.set('audience', chatState.audience);
+            }
+            if (chatState.sender) {
+                params.set('sender', chatState.sender);
+            }
+            if (chatState.search) {
+                params.set('q', chatState.search);
+            }
+
+            const response = await fetch(`${chatState.apiUrl}?${params.toString()}` , {
+                headers: { Accept: 'application/json' },
+            });
+
+            if (!response.ok) {
+                throw new Error(`Request failed with status ${response.status}`);
+            }
+
+            const data = await response.json();
+            renderMessages(data.messages);
+            updateMeta(data, data.messages);
+            if (Array.isArray(data.senders)) {
+                renderSendersList(data.senders);
+            }
+        } catch (error) {
+            console.error('Failed to load chat messages', error);
+        } finally {
+            setLoading(false);
+            scheduleAutoRefresh();
+        }
+    }
+
+    function applyFilters(options) {
+        if (!filterForm) {
+            return;
+        }
+        const opts = options || {};
+
+        const channelValue = channelInput ? channelInput.value : '';
+        const audienceValue = audienceInput ? audienceInput.value || 'all' : 'all';
+        const senderValue = senderInput ? senderInput.value : '';
+        const limitValueRaw = limitInput ? limitInput.value : chatState.limit;
+        const parsedLimit = parseInt(limitValueRaw, 10);
+        const normalizedLimit = Number.isNaN(parsedLimit)
+            ? chatState.limit
+            : Math.max(10, Math.min(parsedLimit, 200));
+        const searchValue = searchInput ? searchInput.value.trim() : '';
+
+        const previousChannel = chatState.channel;
+        const previousAudience = chatState.audience;
+        const previousSender = chatState.sender;
+        const previousLimit = chatState.limit;
+        const previousSearch = chatState.search;
+
+        chatState.channel = channelValue;
+        chatState.audience = audienceValue;
+        chatState.sender = senderValue;
+        chatState.limit = normalizedLimit;
+        chatState.search = searchValue;
+
+        if (limitInput && limitInput.value !== String(normalizedLimit)) {
+            limitInput.value = String(normalizedLimit);
+        }
+
+        const searchParams = new URLSearchParams();
+        if (channelValue) {
+            searchParams.set('channel', channelValue);
+        }
+        searchParams.set('audience', audienceValue);
+        if (senderValue) {
+            searchParams.set('sender', senderValue);
+        }
+        searchParams.set('limit', chatState.limit);
+        if (searchValue) {
+            searchParams.set('q', searchValue);
+        }
+
+        const paramString = searchParams.toString();
+        const newUrl = paramString
+            ? `${window.location.pathname}?${paramString}`
+            : window.location.pathname;
+        window.history.replaceState({}, '', newUrl);
+
+        const changed =
+            opts.force === true
+            || previousChannel !== chatState.channel
+            || previousAudience !== chatState.audience
+            || previousSender !== chatState.sender
+            || previousLimit !== chatState.limit
+            || previousSearch !== chatState.search;
+
+        if (changed) {
+            loadMessages({ showSpinner: true });
+        } else if (!opts.skipRefresh) {
+            scheduleAutoRefresh();
+        }
+    }
+
+    function renderSendersInitial() {
+        renderSendersList(initialData.senders);
+        updateSenderMenuActive();
+        updateSenderLabel();
+    }
+
+    function refreshTooltips() {
+        const elements = document.querySelectorAll('[data-tooltip-html]');
+        elements.forEach((el) => {
+            const htmlContent = el.dataset.tooltipHtml || '';
+            const existing = tooltipInstances.get(el);
+            if (existing) {
+                existing.dispose();
+                tooltipInstances.delete(el);
+            }
+
+            const handlers = tooltipHandlers.get(el);
+            if (handlers) {
+                el.removeEventListener('click', handlers.click);
+                el.removeEventListener('keydown', handlers.keydown);
+                tooltipHandlers.delete(el);
+            }
+
+            if (!htmlContent) {
+                return;
+            }
+
+            const renderedContent = htmlContent
+                .replace(/&#10;/g, '\n')
+                .split('\n')
+                .join('<br>');
+            el.setAttribute('data-bs-title', renderedContent);
+            const tooltip = new bootstrap.Tooltip(el, {
+                trigger: 'manual',
+                html: true,
+                sanitize: false,
+                container: 'body',
+                placement: 'top',
+                fallbackPlacements: ['bottom', 'auto'],
+                customClass: 'chat-gateway-tooltip',
+            });
+            tooltipInstances.set(el, tooltip);
+
+            const toggleTooltip = (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+
+                if (activeTooltipEl === el) {
+                    hideActiveTooltip();
+                    return;
+                }
+
+                if (!el.isConnected) {
+                    tooltipInstances.delete(el);
+                    return;
+                }
+
+                const styles = window.getComputedStyle(el);
+                if (styles.display === 'none' || styles.visibility === 'hidden') {
+                    return;
+                }
+
+                hideActiveTooltip();
+                try {
+                    tooltip.show();
+                } catch (error) {
+                    console.warn('Unable to show tooltip', error);
+                    tooltipInstances.delete(el);
+                    return;
+                }
+
+                const tipEl = typeof tooltip.getTipElement === 'function'
+                    ? tooltip.getTipElement()
+                    : tooltip.tip;
+                if (tipEl) {
+                    if (typeof tooltip.update === 'function') {
+                        tooltip.update();
+                    }
+                    el.classList.add('is-open');
+                    el.setAttribute('aria-expanded', 'true');
+                    activeTooltipEl = el;
+                } else {
+                    tooltip.hide();
+                }
+            };
+
+            const keyHandler = (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    toggleTooltip(event);
+                } else if (event.key === 'Escape') {
+                    hideActiveTooltip();
+                }
+            };
+
+            el.addEventListener('click', toggleTooltip, { passive: false });
+            el.addEventListener('keydown', keyHandler);
+
+            tooltipHandlers.set(el, {
+                click: toggleTooltip,
+                keydown: keyHandler,
+            });
+        });
+    }
+
+    function hideActiveTooltip() {
+        if (!activeTooltipEl) {
+            return;
+        }
+        const instance = tooltipInstances.get(activeTooltipEl);
+        if (instance) {
+            instance.hide();
+        }
+        activeTooltipEl.classList.remove('is-open');
+        activeTooltipEl.setAttribute('aria-expanded', 'false');
+        activeTooltipEl = null;
+    }
+
+    document.addEventListener('click', (event) => {
+        if (!activeTooltipEl) {
+            return;
+        }
+        if (activeTooltipEl.contains(event.target)) {
+            return;
+        }
+        const instance = tooltipInstances.get(activeTooltipEl);
+        if (instance) {
+            const tipElement = typeof instance.getTipElement === 'function'
+                ? instance.getTipElement()
+                : instance.tip;
+            if (tipElement && tipElement.contains(event.target)) {
+                return;
+            }
+        }
+        hideActiveTooltip();
+    });
+
+    window.addEventListener('scroll', hideActiveTooltip, { capture: true, passive: true });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            hideActiveTooltip();
+        }
+    });
+
+    if (senderSearchInput) {
+        senderSearchInput.addEventListener('input', filterSenderOptions);
+    }
+
+    const SEARCH_DEBOUNCE_MS = 400;
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            if (searchDebounceTimer) {
+                clearTimeout(searchDebounceTimer);
+            }
+            searchDebounceTimer = setTimeout(() => {
+                applyFilters({ force: true });
+            }, SEARCH_DEBOUNCE_MS);
+        });
+        searchInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                if (searchDebounceTimer) {
+                    clearTimeout(searchDebounceTimer);
+                    searchDebounceTimer = null;
+                }
+                applyFilters({ force: true });
+            }
+        });
+    }
+
+    const dropdowns = [
+        { menuEl: channelMenu, inputEl: channelInput, labelEl: channelLabelEl, toggleEl: channelToggle },
+        { menuEl: audienceMenu, inputEl: audienceInput, labelEl: audienceLabelEl, toggleEl: audienceToggle },
+        { menuEl: limitMenu, inputEl: limitInput, labelEl: limitLabelEl, toggleEl: limitToggle },
+    ];
+    dropdowns.forEach(setupDropdown);
+
+    if (refreshButton) {
+        refreshButton.addEventListener('click', () => loadMessages({ showSpinner: true }));
+    }
+
+    if (refreshIntervalSelect) {
+        refreshIntervalSelect.addEventListener('change', () => {
+            const parsed = parseInt(refreshIntervalSelect.value, 10);
+            chatState.refreshInterval = Number.isNaN(parsed) ? 30000 : parsed;
+            scheduleAutoRefresh();
+        });
+    }
+
+    if (filterForm) {
+        filterForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            applyFilters({ force: true });
+        });
+    }
+
+    renderSendersInitial();
+    renderMessages(initialData.messages);
+    updateMeta(initialData.meta, initialData.messages);
+    refreshTooltips();
+    scheduleAutoRefresh();
+})();
+</script>
+{% endblock %}

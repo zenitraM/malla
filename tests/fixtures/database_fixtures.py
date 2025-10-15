@@ -83,7 +83,10 @@ class DatabaseFixtures:
                 pki_encrypted BOOLEAN,
                 next_hop INTEGER,
                 relay_node INTEGER,
-                tx_after INTEGER
+                tx_after INTEGER,
+                message_type TEXT,
+                raw_service_envelope BLOB,
+                parsing_error TEXT
             )
         """)
 
@@ -458,8 +461,9 @@ class DatabaseFixtures:
                     gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
                     payload_length, raw_payload, mesh_packet_id, processed_successfully,
                     via_mqtt, want_ack, priority, delayed, channel_index, rx_time,
-                    pki_encrypted, next_hop, relay_node, tx_after
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    pki_encrypted, next_hop, relay_node, tx_after, message_type,
+                    raw_service_envelope, parsing_error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     packet["id"],
@@ -489,6 +493,9 @@ class DatabaseFixtures:
                     packet.get("next_hop"),
                     packet.get("relay_node"),
                     packet.get("tx_after"),
+                    packet.get("message_type"),
+                    packet.get("raw_service_envelope"),
+                    packet.get("parsing_error"),
                 ),
             )
 
@@ -699,6 +706,7 @@ class DatabaseFixtures:
 
         # Create MQTT topic
         topic = f"msh/US/2/e/{channel_id}"
+        topic_parts = topic.split("/")
 
         packet_data = {
             "id": packet_id,
@@ -734,6 +742,9 @@ class DatabaseFixtures:
             "tx_after": (packet_id * 100)
             if packet_id % 6 == 0
             else None,  # ~17% have tx_after delay
+            "message_type": topic_parts[3] if len(topic_parts) > 3 else None,
+            "raw_service_envelope": None,
+            "parsing_error": None,
         }
 
         self.packet_counter += 1

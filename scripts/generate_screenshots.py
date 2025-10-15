@@ -72,6 +72,7 @@ PAGES: list[tuple[str, str]] = [
     ("/", "dashboard.jpg"),
     ("/nodes", "nodes.jpg"),
     ("/packets", "packets.jpg"),
+    ("/chat", "chat.jpg"),
     ("/traceroute", "traceroutes.jpg"),
     ("/map", "map.jpg"),
     ("/traceroute-graph", "traceroute_graph.jpg"),

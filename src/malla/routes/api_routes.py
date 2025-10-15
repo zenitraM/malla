@@ -10,6 +10,7 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from ..database import (
+    ChatRepository,
     DashboardRepository,
     LocationRepository,
     NodeRepository,
@@ -46,6 +47,56 @@ def api_stats():
     except Exception as e:
         logger.error(f"Error in API stats: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/chat/messages")
+def api_chat_messages():
+    """Return recent chat messages decoded from text packets."""
+    logger.info("API chat messages endpoint accessed")
+
+    try:
+        limit = request.args.get("limit", default=100, type=int)
+        offset = request.args.get("offset", default=0, type=int)
+        channel = request.args.get("channel")
+        node_param = request.args.get("node_id")
+
+        # Clamp pagination values
+        limit = max(1, min(limit, 500))
+        offset = max(0, offset)
+
+        node_id = None
+        if node_param:
+            try:
+                node_id = convert_node_id(node_param)
+            except ValueError:
+                return jsonify({"error": "Invalid node_id parameter"}), 400
+
+        messages_data = ChatRepository.get_recent_messages(
+            limit=limit,
+            offset=offset,
+            channel=channel,
+            node_id=node_id,
+        )
+        channels = ChatRepository.get_channels()
+
+        response = {
+            "messages": messages_data["messages"],
+            "total": messages_data["total"],
+            "limit": messages_data["limit"],
+            "offset": messages_data["offset"],
+            "has_more": messages_data["has_more"],
+            "channels": channels,
+            "selected_channel": channel,
+        }
+
+        if node_id is not None:
+            response["selected_node_id"] = node_id
+
+        return jsonify(response)
+
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Error in API chat messages: {exc}")
+        return jsonify({"error": str(exc)}), 500
 
 
 @api_bp.route("/meshtastic/hardware-models")

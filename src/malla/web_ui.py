@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from flask import Flask
+from markupsafe import Markup
 
 # Import application configuration loader
 from .config import AppConfig, get_config
@@ -147,12 +148,20 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
         """
         try:
             safe_obj = make_json_safe(obj)
-            return json.dumps(safe_obj, indent=indent, ensure_ascii=False)
+            json_str = json.dumps(safe_obj, indent=indent, ensure_ascii=False)
         except Exception as e:
             logger.warning(f"Error in safe_json filter: {e}")
-            return json.dumps(
+            json_str = json.dumps(
                 {"error": f"Serialization failed: {str(e)}"}, indent=indent
             )
+
+        # Escape sequences that would prematurely terminate a <script> tag or break JS parsing.
+        json_str = (
+            json_str.replace("</", "<\\/")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029")
+        )
+        return Markup(json_str)
 
     @app.template_filter("format_rssi")
     def format_rssi_filter(rssi):

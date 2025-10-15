@@ -6,6 +6,7 @@ This package provides database connection management and data access operations.
 
 from .connection import get_db_connection
 from .repositories import (
+    ChatRepository,
     DashboardRepository,
     LocationRepository,
     NodeRepository,
@@ -20,4 +21,5 @@ __all__ = [
     "NodeRepository",
     "TracerouteRepository",
     "LocationRepository",
+    "ChatRepository",
 ]

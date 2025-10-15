@@ -13,6 +13,7 @@ from typing import Any
 from meshtastic import mesh_pb2
 
 from ..utils.formatting import format_time_ago
+from ..utils.node_utils import get_bulk_node_names
 from .connection import get_db_connection
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,250 @@ class PacketRepository:
             return text_content
         except (AttributeError, TypeError, UnicodeDecodeError):
             return None
+
+    @staticmethod
+    def decode_text_payload(raw_payload: Any) -> str | None:
+        """
+        Decode text payload without truncation.
+
+        Args:
+            raw_payload: Raw payload bytes or string
+
+        Returns:
+            Decoded text or ``None`` if decoding fails
+        """
+        if raw_payload is None:
+            return None
+
+        try:
+            if isinstance(raw_payload, bytes):
+                return raw_payload.decode("utf-8", errors="replace")
+            if isinstance(raw_payload, str):
+                return raw_payload
+            return str(raw_payload)
+        except (AttributeError, TypeError, UnicodeDecodeError):
+            return None
+
+
+class ChatRepository:
+    """Repository for chat message operations."""
+
+    _TEXT_PORT = "TEXT_MESSAGE_APP"
+    _BROADCAST_NODE_ID = 0xFFFFFFFF
+
+    @staticmethod
+    def get_recent_messages(
+        limit: int = 100,
+        offset: int = 0,
+        channel: str | None = None,
+        node_id: int | None = None,
+    ) -> dict[str, Any]:
+        """
+        Fetch recent text messages from the packet history.
+
+        Args:
+            limit: Maximum number of messages to return
+            offset: Result offset for pagination
+            channel: Optional channel filter
+            node_id: Optional node filter (matches sender or recipient)
+
+        Returns:
+            Dictionary with messages list, total count, and pagination metadata
+        """
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        where_clauses = ["portnum_name = ?"]
+        params: list[Any] = [ChatRepository._TEXT_PORT]
+
+        channel_value = ChatRepository._normalize_channel_param(channel)
+        if channel_value is not None:
+            if channel_value == "__primary__":
+                where_clauses.append("(channel_id IS NULL OR channel_id = '')")
+            else:
+                where_clauses.append("channel_id = ?")
+                params.append(channel_value)
+
+        if node_id is not None:
+            where_clauses.append(
+                "(from_node_id = ? OR to_node_id = ?)"
+            )
+            params.extend([node_id, node_id])
+
+        where_sql = " AND ".join(where_clauses)
+
+        cursor.execute(
+            f"SELECT COUNT(*) as total FROM packet_history WHERE {where_sql}",
+            params,
+        )
+        total = cursor.fetchone()["total"]
+
+        cursor.execute(
+            f"""
+            SELECT
+                id,
+                timestamp,
+                from_node_id,
+                to_node_id,
+                channel_id,
+                gateway_id,
+                mesh_packet_id,
+                raw_payload,
+                processed_successfully,
+                message_type
+            FROM packet_history
+            WHERE {where_sql}
+            ORDER BY timestamp DESC
+            LIMIT ? OFFSET ?
+        """,
+            params + [limit, offset],
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        node_ids: set[int] = set()
+        for row in rows:
+            from_id = row["from_node_id"]
+            to_id = row["to_node_id"]
+            if isinstance(from_id, int):
+                node_ids.add(from_id)
+            if isinstance(to_id, int) and to_id != ChatRepository._BROADCAST_NODE_ID:
+                node_ids.add(to_id)
+
+        node_names = get_bulk_node_names(list(node_ids))
+
+        messages: list[dict[str, Any]] = []
+        for row in rows:
+            timestamp_utc = datetime.fromtimestamp(row["timestamp"], tz=UTC)
+            channel_raw = row["channel_id"]
+            if isinstance(channel_raw, bytes):
+                channel_raw = channel_raw.decode("utf-8", errors="replace")
+            channel_label = ChatRepository._format_channel_label(channel_raw)
+            channel_key = ChatRepository._channel_key(channel_raw)
+            from_node_id = row["from_node_id"]
+            to_node_id = row["to_node_id"]
+
+            from_name = ChatRepository._format_node_name(
+                from_node_id, node_names, default="Unknown sender"
+            )
+
+            to_name = (
+                "Broadcast"
+                if to_node_id in (None, ChatRepository._BROADCAST_NODE_ID)
+                else ChatRepository._format_node_name(
+                    to_node_id, node_names, default="Unknown recipient"
+                )
+            )
+
+            message = PacketRepository.decode_text_payload(row["raw_payload"]) or ""
+
+            messages.append(
+                {
+                    "id": row["id"],
+                    "timestamp": timestamp_utc.isoformat(),
+                    "timestamp_unix": row["timestamp"],
+                    "timestamp_display": timestamp_utc.astimezone().strftime(
+                        "%Y-%m-%d %H:%M:%S %Z"
+                    ),
+                    "time_ago": format_time_ago(timestamp_utc),
+                    "from_node_id": from_node_id,
+                    "from_name": from_name,
+                    "to_node_id": to_node_id,
+                    "to_name": to_name,
+                    "channel_id": channel_raw if channel_key != "__primary__" else None,
+                    "channel_key": channel_key,
+                    "channel_label": channel_label,
+                    "gateway_id": row["gateway_id"] or "Unknown",
+                    "mesh_packet_id": row["mesh_packet_id"],
+                    "message": message,
+                    "processed_successfully": bool(row["processed_successfully"]),
+                    "message_type": row["message_type"],
+                    "portnum_name": ChatRepository._TEXT_PORT,
+                }
+            )
+
+        return {
+            "messages": messages,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": (offset + limit) < total,
+        }
+
+    @staticmethod
+    def get_channels() -> list[dict[str, Any]]:
+        """Return distinct chat channels with usage counts."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                COALESCE(channel_id, '') AS channel_id,
+                COUNT(*) AS count
+            FROM packet_history
+            WHERE portnum_name = ?
+            GROUP BY COALESCE(channel_id, '')
+            ORDER BY count DESC
+        """,
+            (ChatRepository._TEXT_PORT,),
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        channels: list[dict[str, Any]] = []
+        for row in rows:
+            channel_id = row["channel_id"]
+            if isinstance(channel_id, bytes):
+                channel_id = channel_id.decode("utf-8", errors="replace")
+
+            channel_key = ChatRepository._channel_key(channel_id)
+
+            channels.append(
+                {
+                    "id": channel_key,
+                    "label": ChatRepository._format_channel_label(channel_id),
+                    "count": row["count"],
+                }
+            )
+
+        return channels
+
+    @staticmethod
+    def _format_node_name(
+        node_id: int | None, name_map: dict[int, str], default: str
+    ) -> str:
+        if node_id is None:
+            return default
+        if node_id in name_map:
+            return name_map[node_id]
+        if isinstance(node_id, int):
+            return f"!{node_id:08x}"
+        return default
+
+    @staticmethod
+    def _format_channel_label(channel_id: Any) -> str:
+        if channel_id in (None, ""):
+            return "Primary"
+        if isinstance(channel_id, bytes):
+            channel_id = channel_id.decode("utf-8", errors="replace")
+        return str(channel_id)
+
+    @staticmethod
+    def _channel_key(channel_id: Any) -> str:
+        if channel_id in (None, ""):
+            return "__primary__"
+        if isinstance(channel_id, bytes):
+            channel_id = channel_id.decode("utf-8", errors="replace")
+        return str(channel_id)
+
+    @staticmethod
+    def _normalize_channel_param(channel: str | None) -> str | None:
+        if channel is None or channel == "":
+            return None
+        return channel
 
     @staticmethod
     def get_packets(

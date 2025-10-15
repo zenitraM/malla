@@ -4,12 +4,10 @@ Main routes for the Meshtastic Mesh Health Web UI
 
 import logging
 
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, request
 
 # Import from the new modular architecture
-from ..database.repositories import (
-    DashboardRepository,
-)
+from ..database.repositories import ChatRepository, DashboardRepository
 
 logger = logging.getLogger(__name__)
 main_bp = Blueprint("main", __name__)
@@ -43,6 +41,29 @@ def dashboard():
             gateway_count=0,
             error_message="Some dashboard features may be unavailable",
         )
+
+
+@main_bp.route("/chat")
+def chat():
+    """Chat view displaying recent text messages."""
+    selected_channel = request.args.get("channel")
+    limit = request.args.get("limit", default=100, type=int)
+    limit = max(10, min(limit, 200))
+
+    chat_data = ChatRepository.get_recent_messages(
+        limit=limit,
+        offset=0,
+        channel=selected_channel,
+    )
+    channels = ChatRepository.get_channels()
+
+    return render_template(
+        "chat.html",
+        messages=chat_data["messages"],
+        channels=channels,
+        selected_channel=selected_channel,
+        chat_meta=chat_data,
+    )
 
 
 @main_bp.route("/map")

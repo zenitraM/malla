@@ -1,21 +1,29 @@
-# Malla
+# Malla (Meshworks fork)
 
-Malla (_Mesh_, in Spanish) is an ([AI-built](./AI.md)) tool that logs Meshtastic packets from an MQTT broker into a SQLite database and exposes a web UI to get some interesting data insights from them.
+Malla (_Mesh_, in Spanish) is an ([AI-built](./AI.md)) tool that logs Meshtastic packets from an MQTT broker into a SQLite database and exposes a web UI to explore and monitor the network.  
+This repository is Meshworks' maintained fork of [zenitraM/malla](https://github.com/zenitraM/malla) and powers the monitoring stack behind [meshworks.ru](https://meshworks.ru/).
 
-## Running Instances
-Check out some instances with running data from community MQTT servers:
-- meshtastic.es (Spain): https://malla.meshtastic.es
-- meshworks.ru (Russia/Moscow): https://malla.meshworks.ru/
+> **Heads-up:** we do **not** publish container images for this fork.  
+> Build the Docker image locally (instructions below) before running with Docker Compose.
 
-## Meshworks Fork Enhancements
+## Running instances
 
-This repository is a Meshworks-maintained fork of [zenitraM/malla](https://github.com/zenitraM/malla) with the following additions:
+Meshworks operates a public deployment backed by this fork:
+- https://malla.meshworks.ru/ (Russia / Moscow mesh)
 
-- Includes the upstream protocol-diversity fix (no 10-item cap) plus extra integration coverage.
-- Ships refreshed dark-mode assets and README screenshots generated directly from this fork.
-- Provides ready-to-use local demo tooling (fixtures + `scripts/generate_screenshots.py`) aligned with our infrastructure needs.
+Community-operated upstream instances such as https://malla.meshtastic.es/ may run different code; feature parity is not guaranteed.
 
-All other functionality stays compatible with the original project so upstream changes can be merged easily.
+## Meshworks-specific enhancements
+
+In addition to staying close to upstream, this fork ships Meshworks-focused improvements:
+
+- Hardened chat experience with filterable live stream, adaptive tooltips and extensive end-to-end tests.
+- Dark-mode aligned UI assets and Playwright-based screenshot tooling (`scripts/generate_screenshots.py`).
+- Deterministic demo database generator for docs/tests via `scripts/create_demo_database.py`.
+- Continuous integration coverage for Python 3.13 + Playwright, matching our production stack.
+- Infrastructure docs and GitOps alignment for the Meshworks Meshtastic deployment.
+
+Wherever possible we keep changes compatible so upstream updates remain easy to merge.
 
 ## Features
 
@@ -26,6 +34,8 @@ All other functionality stays compatible with the original project so upstream c
 • **Live dashboard** – Real-time counters for total / active nodes, packet rate, signal quality bars and network-health indicators (auto-refresh).
 
 • **Packet browser** – Lightning-fast table with powerful filtering (time range, node, port, RSSI/SNR, type), pagination and one-click CSV export.
+
+• **Live chat stream** – Real-time view of decoded text (`TEXT_MESSAGE_APP`) messages with channel-aware filtering.
 
 • **Node explorer** – Detailed hardware, role, battery and signal info for every node – searchable picker plus online/offline badges.
 
@@ -47,6 +57,7 @@ All other functionality stays compatible with the original project so upstream c
 ![dashboard](.screenshots/dashboard.jpg)
 ![nodes](.screenshots/nodes.jpg)
 ![packets](.screenshots/packets.jpg)
+![chat](.screenshots/chat.jpg)
 ![traceroutes](.screenshots/traceroutes.jpg)
 ![map](.screenshots/map.jpg)
 ![traceroute_graph](.screenshots/traceroute_graph.jpg)
@@ -63,68 +74,79 @@ All other functionality stays compatible with the original project so upstream c
 
 ## Installation
 
-### Using Docker (Recommended)
+### Using Docker (build locally)
 
-The easiest way to run Malla is using Docker. Pre-built images are available from GitHub Container Registry:
+There is no public container image for this fork. Build it locally and point Docker Compose at the result.
 
-1. **Copy the environment configuration:**
+1. **Clone this repository** and copy the sample environment:
    ```bash
+   git clone https://git.meshworks.ru/MeshWorks/meshworks-malla.git
+   cd meshworks-malla
    cp env.example .env
    ```
 
-2. **Edit the configuration:**
+2. **Adjust configuration** (MQTT settings, instance name, etc.):
    ```bash
-   $EDITOR .env  # Set your MQTT broker address and other settings
+   $EDITOR .env
    ```
 
-3. **Start the services:**
+3. **Build the image** (single-arch example shown):
    ```bash
-   docker-compose up -d
+   docker build -t meshworks/malla:local .
+   ```
+   For multi-arch builds use BuildKit, for example:
+   ```bash
+   docker buildx build --platform linux/arm64,linux/amd64 \
+     -t meshworks/malla:local --load .
    ```
 
-4. **View logs:**
+4. **Run with Docker Compose**:
    ```bash
-   docker-compose logs -f
+   export MALLA_IMAGE=meshworks/malla:local
+   docker compose up -d
    ```
+   The compose file ships with a pre-wired capture + web pair. Set MQTT credentials in `.env` before starting.
 
-5. **Access the web UI:**
-   - Open http://localhost:5008 in your browser
-
-**For development with local code changes:**
-```bash
-# Edit docker-compose.yml to uncomment the 'build: .' lines
-# Then build and run:
-docker-compose up --build -d
-```
+5. **Inspect logs / stop the stack**:
+   ```bash
+   docker compose logs -f
+   docker compose down
+   ```
 
 **Manual Docker run (advanced):**
 ```bash
-# Run the capture service
-docker run -d \
-  --name malla-capture \
-  -v malla_data:/app/data \
+# Shared volume for the SQLite database
+docker volume create malla_data
+
+# Capture worker
+docker run -d --name malla-capture \
   -e MALLA_MQTT_BROKER_ADDRESS=your.mqtt.broker.address \
-  ghcr.io/zenitram/malla:latest \
+  -e MALLA_DATABASE_FILE=/app/data/meshtastic_history.db \
+  -v malla_data:/app/data \
+  meshworks/malla:local \
   /app/.venv/bin/malla-capture
 
-# Run the web UI
-docker run -d \
-  --name malla-web \
+# Web UI
+docker run -d --name malla-web \
   -p 5008:5008 \
+  -e MALLA_DATABASE_FILE=/app/data/meshtastic_history.db \
+  -e MALLA_HOST=0.0.0.0 \
+  -e MALLA_PORT=5008 \
   -v malla_data:/app/data \
-  ghcr.io/zenitram/malla:latest
+  meshworks/malla:local \
+  /app/.venv/bin/malla-web
 ```
 
 ### Using uv
 
-You can also install and run Malla directly using [uv](https://docs.astral.sh/uv/):
-1. **Clone or download** the project files to your preferred directory
+You can also install and run this fork directly using [uv](https://docs.astral.sh/uv/):
+1. **Clone the repository** (Meshworks fork):
    ```bash
-   git clone https://github.com/zenitraM/malla.git
-   cd malla
+   git clone https://git.meshworks.ru/MeshWorks/meshworks-malla.git
+   cd meshworks-malla
    ```
 
-2. **Install uv** if you don't have it installed yet:
+2. **Install uv** if you do not have it yet:
    ```bash
    curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
@@ -135,7 +157,13 @@ You can also install and run Malla directly using [uv](https://docs.astral.sh/uv
    $EDITOR config.yaml  # tweak values as desired
    ```
 
-4. **Start it** with `uv run` in the project directory, which should pull the required dependencies.
+4. **Install dependencies** (development extras recommended):
+   ```bash
+   uv sync --dev
+   playwright install chromium --with-deps
+   ```
+
+5. **Start it** with `uv run` in the project directory, which pulls the required dependencies automatically.
    ```bash
    # Start the web UI
    uv run malla-web
@@ -184,6 +212,22 @@ uv run malla-web
 **Access the web interface:**
 - Local: http://localhost:5008
 
+## Demo data & docs tooling
+
+- Generate a reproducible demo database for local testing or screenshots:
+  ```bash
+  uv run python scripts/create_demo_database.py --output demo.db
+  ```
+  Point `MALLA_DATABASE_FILE` to the generated file to explore the sample data set.
+
+- Refresh README screenshots after UX changes:
+  ```bash
+  uv sync --dev                   # ensure Playwright + deps are installed
+  playwright install chromium --with-deps
+  uv run python scripts/generate_screenshots.py
+  ```
+  The helper spins up a temporary Flask server using the demo fixtures, captures high-DPI screenshots, and rewrites the `<!-- screenshots:start --> ... <!-- screenshots:end -->` block automatically.
+
 ## Running Both Tools Together
 
 For a complete monitoring setup, run both tools simultaneously:
@@ -200,6 +244,17 @@ export MALLA_MQTT_BROKER_ADDRESS="127.0.0.1"  # Replace with your broker
 ```
 
 Both tools use the same SQLite database concurrently using thread-safe connections.
+
+## Development workflow & pre-push checklist
+
+- `uv sync --dev` to install all developer dependencies (Playwright, pytest, linting).
+- `playwright install chromium --with-deps` once per workstation/CI runner.
+- `pytest` (or `uv run pytest`) – the full suite includes integration + Playwright e2e coverage.
+- `ruff check src tests` and `basedpyright src` for static analysis (see `make lint`).
+- `uv run python scripts/generate_screenshots.py` when UI changes affect README imagery.
+- `docker build -t meshworks/malla:local .` to ensure the container build path stays green.
+
+Make sure these steps stay green before opening a PR or pushing to the deployment branch.
 
 ## Docker Configuration
 
