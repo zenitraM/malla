@@ -6,6 +6,8 @@ This module provides data access layer with business logic for different entitie
 
 import json
 import logging
+import html
+import re
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -17,6 +19,10 @@ from ..utils.node_utils import get_bulk_node_names
 from .connection import get_db_connection
 
 logger = logging.getLogger(__name__)
+
+ISO_TIMESTAMP_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$"
+)
 
 
 class DashboardRepository:
@@ -168,227 +174,6 @@ class PacketRepository:
             return None
 
 
-class ChatRepository:
-    """Repository for chat message operations."""
-
-    _TEXT_PORT = "TEXT_MESSAGE_APP"
-    _BROADCAST_NODE_ID = 0xFFFFFFFF
-
-    @staticmethod
-    def get_recent_messages(
-        limit: int = 100,
-        offset: int = 0,
-        channel: str | None = None,
-        node_id: int | None = None,
-    ) -> dict[str, Any]:
-        """
-        Fetch recent text messages from the packet history.
-
-        Args:
-            limit: Maximum number of messages to return
-            offset: Result offset for pagination
-            channel: Optional channel filter
-            node_id: Optional node filter (matches sender or recipient)
-
-        Returns:
-            Dictionary with messages list, total count, and pagination metadata
-        """
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        where_clauses = ["portnum_name = ?"]
-        params: list[Any] = [ChatRepository._TEXT_PORT]
-
-        channel_value = ChatRepository._normalize_channel_param(channel)
-        if channel_value is not None:
-            if channel_value == "__primary__":
-                where_clauses.append("(channel_id IS NULL OR channel_id = '')")
-            else:
-                where_clauses.append("channel_id = ?")
-                params.append(channel_value)
-
-        if node_id is not None:
-            where_clauses.append(
-                "(from_node_id = ? OR to_node_id = ?)"
-            )
-            params.extend([node_id, node_id])
-
-        where_sql = " AND ".join(where_clauses)
-
-        cursor.execute(
-            f"SELECT COUNT(*) as total FROM packet_history WHERE {where_sql}",
-            params,
-        )
-        total = cursor.fetchone()["total"]
-
-        cursor.execute(
-            f"""
-            SELECT
-                id,
-                timestamp,
-                from_node_id,
-                to_node_id,
-                channel_id,
-                gateway_id,
-                mesh_packet_id,
-                raw_payload,
-                processed_successfully,
-                message_type
-            FROM packet_history
-            WHERE {where_sql}
-            ORDER BY timestamp DESC
-            LIMIT ? OFFSET ?
-        """,
-            params + [limit, offset],
-        )
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        node_ids: set[int] = set()
-        for row in rows:
-            from_id = row["from_node_id"]
-            to_id = row["to_node_id"]
-            if isinstance(from_id, int):
-                node_ids.add(from_id)
-            if isinstance(to_id, int) and to_id != ChatRepository._BROADCAST_NODE_ID:
-                node_ids.add(to_id)
-
-        node_names = get_bulk_node_names(list(node_ids))
-
-        messages: list[dict[str, Any]] = []
-        for row in rows:
-            timestamp_utc = datetime.fromtimestamp(row["timestamp"], tz=UTC)
-            channel_raw = row["channel_id"]
-            if isinstance(channel_raw, bytes):
-                channel_raw = channel_raw.decode("utf-8", errors="replace")
-            channel_label = ChatRepository._format_channel_label(channel_raw)
-            channel_key = ChatRepository._channel_key(channel_raw)
-            from_node_id = row["from_node_id"]
-            to_node_id = row["to_node_id"]
-
-            from_name = ChatRepository._format_node_name(
-                from_node_id, node_names, default="Unknown sender"
-            )
-
-            to_name = (
-                "Broadcast"
-                if to_node_id in (None, ChatRepository._BROADCAST_NODE_ID)
-                else ChatRepository._format_node_name(
-                    to_node_id, node_names, default="Unknown recipient"
-                )
-            )
-
-            message = PacketRepository.decode_text_payload(row["raw_payload"]) or ""
-
-            messages.append(
-                {
-                    "id": row["id"],
-                    "timestamp": timestamp_utc.isoformat(),
-                    "timestamp_unix": row["timestamp"],
-                    "timestamp_display": timestamp_utc.astimezone().strftime(
-                        "%Y-%m-%d %H:%M:%S %Z"
-                    ),
-                    "time_ago": format_time_ago(timestamp_utc),
-                    "from_node_id": from_node_id,
-                    "from_name": from_name,
-                    "to_node_id": to_node_id,
-                    "to_name": to_name,
-                    "channel_id": channel_raw if channel_key != "__primary__" else None,
-                    "channel_key": channel_key,
-                    "channel_label": channel_label,
-                    "gateway_id": row["gateway_id"] or "Unknown",
-                    "mesh_packet_id": row["mesh_packet_id"],
-                    "message": message,
-                    "processed_successfully": bool(row["processed_successfully"]),
-                    "message_type": row["message_type"],
-                    "portnum_name": ChatRepository._TEXT_PORT,
-                }
-            )
-
-        return {
-            "messages": messages,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "has_more": (offset + limit) < total,
-        }
-
-    @staticmethod
-    def get_channels() -> list[dict[str, Any]]:
-        """Return distinct chat channels with usage counts."""
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT
-                COALESCE(channel_id, '') AS channel_id,
-                COUNT(*) AS count
-            FROM packet_history
-            WHERE portnum_name = ?
-            GROUP BY COALESCE(channel_id, '')
-            ORDER BY count DESC
-        """,
-            (ChatRepository._TEXT_PORT,),
-        )
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        channels: list[dict[str, Any]] = []
-        for row in rows:
-            channel_id = row["channel_id"]
-            if isinstance(channel_id, bytes):
-                channel_id = channel_id.decode("utf-8", errors="replace")
-
-            channel_key = ChatRepository._channel_key(channel_id)
-
-            channels.append(
-                {
-                    "id": channel_key,
-                    "label": ChatRepository._format_channel_label(channel_id),
-                    "count": row["count"],
-                }
-            )
-
-        return channels
-
-    @staticmethod
-    def _format_node_name(
-        node_id: int | None, name_map: dict[int, str], default: str
-    ) -> str:
-        if node_id is None:
-            return default
-        if node_id in name_map:
-            return name_map[node_id]
-        if isinstance(node_id, int):
-            return f"!{node_id:08x}"
-        return default
-
-    @staticmethod
-    def _format_channel_label(channel_id: Any) -> str:
-        if channel_id in (None, ""):
-            return "Primary"
-        if isinstance(channel_id, bytes):
-            channel_id = channel_id.decode("utf-8", errors="replace")
-        return str(channel_id)
-
-    @staticmethod
-    def _channel_key(channel_id: Any) -> str:
-        if channel_id in (None, ""):
-            return "__primary__"
-        if isinstance(channel_id, bytes):
-            channel_id = channel_id.decode("utf-8", errors="replace")
-        return str(channel_id)
-
-    @staticmethod
-    def _normalize_channel_param(channel: str | None) -> str | None:
-        if channel is None or channel == "":
-            return None
-        return channel
-
-    @staticmethod
     def get_packets(
         limit: int = 100,
         offset: int = 0,
@@ -1116,6 +901,563 @@ class ChatRepository:
         except Exception as e:
             logger.error(f"Error getting gateway comparison data: {e}")
             raise
+
+
+class ChatRepository:
+    """Repository for chat message operations."""
+
+    _TEXT_PORT = "TEXT_MESSAGE_APP"
+    _BROADCAST_NODE_ID = 0xFFFFFFFF
+
+    @staticmethod
+    def get_recent_messages(
+        limit: int = 100,
+        offset: int = 0,
+        channel: str | None = None,
+        node_id: int | None = None,
+        audience: str | None = None,
+        sender_id: int | None = None,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        """Fetch recent text messages from the packet history."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        where_clauses = ["portnum_name = ?"]
+        params: list[Any] = [ChatRepository._TEXT_PORT]
+
+        channel_value = ChatRepository._normalize_channel_param(channel)
+        if channel_value is not None:
+            if channel_value == "__primary__":
+                where_clauses.append("(channel_id IS NULL OR channel_id = '')")
+            else:
+                where_clauses.append("channel_id = ?")
+                params.append(channel_value)
+
+        if node_id is not None:
+            where_clauses.append("(from_node_id = ? OR to_node_id = ?)")
+            params.extend([node_id, node_id])
+
+        if sender_id is not None:
+            where_clauses.append("from_node_id = ?")
+            params.append(sender_id)
+
+        search_term = ChatRepository._normalize_search_param(search)
+        if search_term is not None:
+            where_clauses.append("CAST(raw_payload AS TEXT) LIKE ?")
+            params.append(f"%{search_term}%")
+
+        if audience == "broadcast":
+            where_clauses.append(
+                "(to_node_id IS NULL OR to_node_id = ?)"
+            )
+            params.append(ChatRepository._BROADCAST_NODE_ID)
+        elif audience == "direct":
+            where_clauses.append(
+                "(to_node_id IS NOT NULL AND to_node_id != ?)"
+            )
+            params.append(ChatRepository._BROADCAST_NODE_ID)
+
+        where_sql = " AND ".join(where_clauses)
+        where_clause = f"WHERE {where_sql}" if where_sql else ""
+        base_params = list(params)
+
+        now_ts = time.time()
+        one_hour_ago = now_ts - 3600
+        twenty_four_hours_ago = now_ts - 86400
+
+        group_expr = "COALESCE(mesh_packet_id, id)"
+
+        cursor.execute(
+            f"""
+            SELECT COUNT(*) as total
+            FROM (
+                SELECT {group_expr}
+                FROM packet_history
+                {where_clause}
+                GROUP BY {group_expr}, from_node_id, to_node_id, channel_id
+            ) AS grouped_packets
+        """,
+            base_params,
+        )
+        total = cursor.fetchone()["total"]
+
+        cursor.execute(
+            f"""
+            SELECT
+                SUM(CASE WHEN timestamp >= ? THEN 1 ELSE 0 END) AS count_1h,
+                SUM(CASE WHEN timestamp >= ? THEN 1 ELSE 0 END) AS count_24h
+            FROM (
+                SELECT MAX(timestamp) AS timestamp
+                FROM packet_history
+                {where_clause}
+                GROUP BY {group_expr}, from_node_id, to_node_id, channel_id
+            ) AS grouped_counts
+        """,
+            [one_hour_ago, twenty_four_hours_ago] + base_params,
+        )
+        counts_row = cursor.fetchone()
+        hourly_count = 0
+        daily_count = 0
+        if counts_row:
+            hourly_count = counts_row["count_1h"] or 0
+            daily_count = counts_row["count_24h"] or 0
+
+        cursor.execute(
+            f"""
+            SELECT
+                MIN(id) AS id,
+                MAX(timestamp) AS timestamp,
+                from_node_id,
+                to_node_id,
+                channel_id,
+                {group_expr} AS message_group_id,
+                GROUP_CONCAT(DISTINCT gateway_id) AS gateway_list,
+                COUNT(DISTINCT gateway_id) AS gateway_count,
+                MAX(mesh_packet_id) AS mesh_packet_id,
+                MIN(raw_payload) AS raw_payload,
+                MIN(processed_successfully) AS processed_successfully,
+                MIN(message_type) AS message_type
+            FROM packet_history
+            {where_clause}
+            GROUP BY {group_expr}, from_node_id, to_node_id, channel_id
+            ORDER BY timestamp DESC
+            LIMIT ? OFFSET ?
+        """,
+            base_params + [limit, offset],
+        )
+
+        rows = cursor.fetchall()
+
+        message_group_ids = list(
+            {
+                row["message_group_id"]
+                for row in rows
+                if row["message_group_id"] is not None
+            }
+        )
+
+        gateway_metrics_map: dict[Any, dict[str, dict[str, list[Any]]]] = {}
+        if message_group_ids:
+            placeholders = ",".join("?" for _ in message_group_ids)
+            cursor.execute(
+                f"""
+                SELECT
+                    COALESCE(mesh_packet_id, id) AS message_group_id,
+                    COALESCE(gateway_id, '') AS gateway_id,
+                    rssi,
+                    snr,
+                    hop_start,
+                    hop_limit
+                FROM packet_history
+                WHERE COALESCE(mesh_packet_id, id) IN ({placeholders})
+            """,
+                message_group_ids,
+            )
+
+            metric_rows = cursor.fetchall()
+            for detail in metric_rows:
+                group_id = detail["message_group_id"]
+                gateway_id_raw = detail["gateway_id"] or ""
+
+                metrics = gateway_metrics_map.setdefault(group_id, {}).setdefault(
+                    gateway_id_raw, {"rssi": [], "snr": [], "hop_counts": []}
+                )
+
+                rssi_val = detail["rssi"]
+                if rssi_val is not None:
+                    metrics["rssi"].append(rssi_val)
+
+                snr_val = detail["snr"]
+                if snr_val is not None:
+                    metrics["snr"].append(snr_val)
+
+                hop_start = detail["hop_start"]
+                hop_limit = detail["hop_limit"]
+                hop_count_val = None
+                if hop_start is not None and hop_limit is not None:
+                    hop_count_val = hop_start - hop_limit
+                elif hop_start is not None:
+                    hop_count_val = hop_start
+                elif hop_limit is not None:
+                    hop_count_val = hop_limit
+
+                if hop_count_val is not None:
+                    try:
+                        metrics["hop_counts"].append(float(hop_count_val))
+                    except (TypeError, ValueError):
+                        pass
+
+        conn.close()
+
+        node_ids: set[int] = set()
+        for row in rows:
+            from_id = row["from_node_id"]
+            to_id = row["to_node_id"]
+            if isinstance(from_id, int):
+                node_ids.add(from_id)
+            if isinstance(to_id, int) and to_id != ChatRepository._BROADCAST_NODE_ID:
+                node_ids.add(to_id)
+
+        node_names = get_bulk_node_names(list(node_ids))
+        gateway_node_ids: set[int] = set()
+        for row in rows:
+            metrics_for_message = gateway_metrics_map.get(row["message_group_id"], {})
+            gateway_keys = ChatRepository._collect_gateway_keys(
+                row["gateway_list"], metrics_for_message
+            )
+            for raw_id in gateway_keys:
+                if raw_id.startswith("!"):
+                    try:
+                        gateway_node_ids.add(int(raw_id[1:], 16))
+                    except ValueError:
+                        continue
+
+        gateway_name_map = (
+            get_bulk_node_names(list(gateway_node_ids)) if gateway_node_ids else {}
+        )
+
+        messages: list[dict[str, Any]] = []
+        filtered_count = 0
+        for row in rows:
+            timestamp_utc = datetime.fromtimestamp(row["timestamp"], tz=UTC)
+            channel_raw = row["channel_id"]
+            if isinstance(channel_raw, bytes):
+                channel_raw = channel_raw.decode("utf-8", errors="replace")
+            channel_label = ChatRepository._format_channel_label(channel_raw)
+            channel_key = ChatRepository._channel_key(channel_raw)
+
+            from_node_id = row["from_node_id"]
+            to_node_id = row["to_node_id"]
+
+            from_name = ChatRepository._format_node_name(
+                from_node_id, node_names, default="Unknown sender"
+            )
+            to_name = (
+                "Broadcast"
+                if to_node_id in (None, ChatRepository._BROADCAST_NODE_ID)
+                else ChatRepository._format_node_name(
+                    to_node_id, node_names, default="Unknown recipient"
+                )
+            )
+            to_is_broadcast = to_node_id in (None, ChatRepository._BROADCAST_NODE_ID)
+
+            metrics_for_message = gateway_metrics_map.get(row["message_group_id"], {})
+            gateway_nodes: list[dict[str, Any]] = []
+            tooltip_lines: list[str] = []
+            gateway_display_parts: list[str] = []
+            gateway_keys = ChatRepository._collect_gateway_keys(
+                row["gateway_list"], metrics_for_message
+            )
+
+            for raw_gateway in gateway_keys:
+                node_id = None
+                display_name = raw_gateway
+                if raw_gateway.startswith("!"):
+                    try:
+                        node_id = int(raw_gateway[1:], 16)
+                        display_name = gateway_name_map.get(node_id, display_name)
+                    except ValueError:
+                        node_id = None
+                if raw_gateway and display_name and display_name != raw_gateway:
+                    label = f"{display_name} ({raw_gateway})"
+                else:
+                    label = display_name or raw_gateway or "Unknown gateway"
+
+                metrics_summary = ChatRepository._summarize_gateway_metrics(
+                    metrics_for_message.get(raw_gateway)
+                )
+                tooltip_line = ChatRepository._format_gateway_tooltip_line(
+                    label,
+                    raw_gateway,
+                    metrics_summary.get("text"),
+                    node_id,
+                )
+
+                if tooltip_line:
+                    tooltip_lines.append(tooltip_line)
+
+                gateway_nodes.append(
+                    {
+                        "raw_id": raw_gateway,
+                        "node_id": node_id,
+                        "name": display_name,
+                        "label": label,
+                        "metrics": metrics_summary,
+                        "tooltip_line": tooltip_line,
+                        "tooltip_html": tooltip_line,
+                    }
+                )
+                gateway_display_parts.append(label)
+
+            message = PacketRepository.decode_text_payload(row["raw_payload"]) or ""
+            if ChatRepository._is_time_ping(message):
+                filtered_count += 1
+                continue
+
+            messages.append(
+                {
+                    "id": row["id"],
+                    "timestamp": timestamp_utc.isoformat(),
+                    "timestamp_unix": row["timestamp"],
+                    "timestamp_display": timestamp_utc.astimezone().strftime(
+                        "%Y-%m-%d %H:%M:%S %Z"
+                    ),
+                    "time_ago": format_time_ago(timestamp_utc),
+                    "from_node_id": from_node_id,
+                    "from_name": from_name,
+                    "to_node_id": to_node_id,
+                    "to_name": to_name,
+                    "to_is_broadcast": to_is_broadcast,
+                    "gateway_count": len(gateway_nodes),
+                    "gateway_nodes": gateway_nodes,
+                    "gateway_tooltip": "<br>".join(t for t in tooltip_lines if t),
+                    "gateway_display": ", ".join(gateway_display_parts) if gateway_display_parts else None,
+                    "channel_id": channel_raw if channel_key != "__primary__" else None,
+                    "channel_key": channel_key,
+                    "channel_label": channel_label,
+                    "gateway_id": row["gateway_list"] or "Unknown",
+                    "mesh_packet_id": row["mesh_packet_id"],
+                    "message": message,
+                    "processed_successfully": bool(row["processed_successfully"]),
+                    "message_type": row["message_type"],
+                    "portnum_name": ChatRepository._TEXT_PORT,
+                }
+            )
+
+        effective_total = max(0, total - filtered_count)
+
+        return {
+            "messages": messages,
+            "total": effective_total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": (offset + limit) < effective_total,
+            "selected_audience": audience,
+            "selected_sender_id": sender_id,
+            "search": search_term,
+            "counts": {
+                "last_hour": int(hourly_count),
+                "last_day": int(daily_count),
+            },
+        }
+
+    @staticmethod
+    def get_channels() -> list[dict[str, Any]]:
+        """Return distinct chat channels with usage counts."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                COALESCE(channel_id, '') AS channel_id,
+                COUNT(*) AS count
+            FROM packet_history
+            WHERE portnum_name = ?
+            GROUP BY COALESCE(channel_id, '')
+            ORDER BY count DESC
+        """,
+            (ChatRepository._TEXT_PORT,),
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        channels: list[dict[str, Any]] = []
+        for row in rows:
+            channel_id = row["channel_id"]
+            if isinstance(channel_id, bytes):
+                channel_id = channel_id.decode("utf-8", errors="replace")
+
+            channel_key = ChatRepository._channel_key(channel_id)
+
+            channels.append(
+                {
+                    "id": channel_key,
+                    "label": ChatRepository._format_channel_label(channel_id),
+                    "count": row["count"],
+                }
+            )
+
+        return channels
+
+    @staticmethod
+    def get_senders(limit: int = 100) -> list[dict[str, Any]]:
+        """Return distinct chat senders with usage counts."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT from_node_id, COUNT(*) AS count
+            FROM packet_history
+            WHERE portnum_name = ?
+              AND from_node_id IS NOT NULL
+            GROUP BY from_node_id
+            ORDER BY count DESC
+            LIMIT ?
+        """,
+            (ChatRepository._TEXT_PORT, limit),
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        node_ids = [
+            row["from_node_id"] for row in rows if isinstance(row["from_node_id"], int)
+        ]
+        name_map = get_bulk_node_names(node_ids) if node_ids else {}
+
+        senders: list[dict[str, Any]] = []
+        for row in rows:
+            node_id = row["from_node_id"]
+            if not isinstance(node_id, int):
+                continue
+            hex_id = f"!{node_id:08x}"
+            label = name_map.get(node_id) or hex_id
+            senders.append(
+                {
+                    "id": hex_id,
+                    "label": label,
+                    "count": row["count"],
+                    "node_id": node_id,
+                }
+            )
+
+        return senders
+
+    @staticmethod
+    def _format_node_name(
+        node_id: int | None, name_map: dict[int, str], default: str
+    ) -> str:
+        if node_id is None:
+            return default
+        if node_id in name_map:
+            return name_map[node_id]
+        if isinstance(node_id, int):
+            return f"!{node_id:08x}"
+        return default
+
+    @staticmethod
+    def _format_channel_label(channel_id: Any) -> str:
+        if channel_id in (None, ""):
+            return "Primary"
+        if isinstance(channel_id, bytes):
+            channel_id = channel_id.decode("utf-8", errors="replace")
+        return str(channel_id)
+
+    @staticmethod
+    def _channel_key(channel_id: Any) -> str:
+        if channel_id in (None, ""):
+            return "__primary__"
+        if isinstance(channel_id, bytes):
+            channel_id = channel_id.decode("utf-8", errors="replace")
+        return str(channel_id)
+
+    @staticmethod
+    def _normalize_channel_param(channel: str | None) -> str | None:
+        if channel is None or channel == "":
+            return None
+        return channel
+
+    @staticmethod
+    def _is_time_ping(message: str) -> bool:
+        if not message:
+            return False
+        return bool(ISO_TIMESTAMP_RE.match(message.strip()))
+
+    @staticmethod
+    def _collect_gateway_keys(
+        gateway_list_raw: Any, metrics_map: dict[str, dict[str, Any]] | None
+    ) -> list[str]:
+        keys: list[str] = []
+
+        if gateway_list_raw:
+            for raw in str(gateway_list_raw).split(","):
+                candidate = raw.strip()
+                if candidate and candidate not in keys:
+                    keys.append(candidate)
+
+        if metrics_map:
+            for raw_key in metrics_map.keys():
+                candidate = raw_key or ""
+                if candidate == "":
+                    if "" not in keys:
+                        keys.append("")
+                elif candidate not in keys:
+                    keys.append(candidate)
+
+        return keys
+
+    @staticmethod
+    def _normalize_search_param(search: str | None) -> str | None:
+        if search is None:
+            return None
+        search_clean = search.strip()
+        return search_clean or None
+
+    @staticmethod
+    def _summarize_gateway_metrics(
+        metrics: dict[str, list[Any]] | None,
+    ) -> dict[str, Any]:
+        if not metrics:
+            return {"avg_rssi": None, "avg_snr": None, "hop_count": None, "text": ""}
+
+        def _mean(values: list[float]) -> float | None:
+            if not values:
+                return None
+            try:
+                return sum(values) / len(values)
+            except Exception:  # noqa: BLE001
+                return None
+
+        avg_rssi_val = _mean([float(v) for v in metrics.get("rssi", [])])
+        avg_snr_val = _mean([float(v) for v in metrics.get("snr", [])])
+        hop_val = _mean([float(v) for v in metrics.get("hop_counts", [])])
+
+        avg_rssi = int(round(avg_rssi_val)) if avg_rssi_val is not None else None
+        avg_snr = round(avg_snr_val, 2) if avg_snr_val is not None else None
+        hop_count = int(round(hop_val)) if hop_val is not None else None
+
+        parts: list[str] = []
+        if avg_rssi is not None:
+            parts.append(f"{avg_rssi}dBm")
+        if avg_snr is not None:
+            parts.append(f"{avg_snr:.2f}SNR")
+        if hop_count is not None:
+            parts.append(f"{hop_count} Hop")
+
+        return {
+            "avg_rssi": avg_rssi,
+            "avg_snr": avg_snr,
+            "hop_count": hop_count,
+            "text": " / ".join(parts),
+        }
+
+    @staticmethod
+    def _format_gateway_tooltip_line(
+        label: str | None,
+        raw_gateway: str | None,
+        metrics_text: str | None,
+        node_id: int | None,
+    ) -> str:
+        base_label = (label or raw_gateway or "Unknown gateway").strip()
+        metrics_clean = (metrics_text or "").strip()
+
+        if not base_label:
+            base_label = "Unknown gateway"
+
+        label_html = html.escape(base_label)
+
+        if node_id is not None:
+            label_html = f'<a class="chat-node-link" href="/node/{node_id}">{label_html}</a>'
+
+        if metrics_clean:
+            metrics_html = html.escape(metrics_clean)
+            return f"• {label_html} : {metrics_html}"
+
+        return f"• {label_html}"
 
 
 class NodeRepository:

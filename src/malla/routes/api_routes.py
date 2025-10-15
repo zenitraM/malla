@@ -59,6 +59,9 @@ def api_chat_messages():
         offset = request.args.get("offset", default=0, type=int)
         channel = request.args.get("channel")
         node_param = request.args.get("node_id")
+        audience = request.args.get("audience")
+        sender_param = request.args.get("sender")
+        search_query = request.args.get("q")
 
         # Clamp pagination values
         limit = max(1, min(limit, 500))
@@ -71,13 +74,24 @@ def api_chat_messages():
             except ValueError:
                 return jsonify({"error": "Invalid node_id parameter"}), 400
 
+        sender_id = None
+        if sender_param:
+            try:
+                sender_id = convert_node_id(sender_param)
+            except ValueError:
+                return jsonify({"error": "Invalid sender parameter"}), 400
+
         messages_data = ChatRepository.get_recent_messages(
             limit=limit,
             offset=offset,
             channel=channel,
             node_id=node_id,
+            audience=audience,
+            sender_id=sender_id,
+            search=search_query,
         )
         channels = ChatRepository.get_channels()
+        senders = ChatRepository.get_senders()
 
         response = {
             "messages": messages_data["messages"],
@@ -87,10 +101,16 @@ def api_chat_messages():
             "has_more": messages_data["has_more"],
             "channels": channels,
             "selected_channel": channel,
+            "senders": senders,
+            "selected_audience": audience,
+            "counts": messages_data.get("counts", {}),
+            "search": messages_data.get("search"),
         }
 
         if node_id is not None:
             response["selected_node_id"] = node_id
+        if sender_id is not None:
+            response["selected_sender_id"] = sender_id
 
         return jsonify(response)
 
