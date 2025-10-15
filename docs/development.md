@@ -1,7 +1,8 @@
 # Meshworks Malla Development Guide
 
-This document collects the day-to-day instructions for working on the Meshworks
-fork of Malla – from local development to production-style deployments.
+This document is aimed at Meshworks maintainers. It collects the day-to-day
+instructions for working on the fork – from local development to
+production-style deployments.
 
 ## Local development (uv)
 
@@ -82,7 +83,7 @@ Keep the repository secret `GHCR_TOKEN` up to date – it must be a PAT with
 - `uv run ruff check src tests`
 - `uv run basedpyright src`
 - `uv run python scripts/generate_screenshots.py`
-- `docker build -t meshworks/malla:local .`
+- `docker build -t meshworks/malla:local .` (optional; GHCR images are published automatically)
 
 All steps should pass before opening a pull request or pushing to deployment
 branches.
@@ -94,14 +95,16 @@ git clone https://git.meshworks.ru/MeshWorks/meshworks-malla.git
 cd meshworks-malla
 cp env.example .env                      # provide MQTT credentials
 $EDITOR .env
-docker build -t meshworks/malla:local .
-export MALLA_IMAGE=meshworks/malla:local
+docker pull ghcr.io/aminovpavel/meshworks-malla:latest
+export MALLA_IMAGE=ghcr.io/aminovpavel/meshworks-malla:latest
 docker compose up -d
 docker compose logs -f
 ```
 
 - The default compose file launches both `malla-capture` and `malla-web`
   containers and shares the SQLite database through the `malla_data` volume.
+- Need local tweaks? Build your own image and override `MALLA_IMAGE` with the
+  custom tag.
 - For production we prefer running the web UI via Gunicorn. Set
   `MALLA_WEB_COMMAND=/app/.venv/bin/malla-web-gunicorn` in `.env` or use
   `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`.
