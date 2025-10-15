@@ -6,6 +6,35 @@ This repository is Meshworks' maintained fork of [zenitraM/malla](https://github
 > **Heads-up:** we do **not** publish container images for this fork.  
 > Build the Docker image locally (instructions below) before running with Docker Compose.
 
+## Quick start
+
+Pick whichever workflow fits you best:
+
+- **Local development (recommended)**  
+  ```bash
+  git clone https://git.meshworks.ru/MeshWorks/meshworks-malla.git
+  cd meshworks-malla
+  curl -LsSf https://astral.sh/uv/install.sh | sh        # install uv (once)
+  uv sync --dev                                         # install deps incl. Playwright tooling
+  playwright install chromium --with-deps              # e2e/browser support (once per host)
+  cp config.sample.yaml config.yaml                    # adjust broker settings
+  uv run malla-capture                                  # terminal 1 – capture
+  uv run malla-web                                      # terminal 2 – web UI
+  ```
+
+- **Docker compose (deployment-style)**  
+  ```bash
+  git clone https://git.meshworks.ru/MeshWorks/meshworks-malla.git
+  cd meshworks-malla
+  cp env.example .env                                  # fill in MQTT credentials
+  docker build -t meshworks/malla:local .
+  export MALLA_IMAGE=meshworks/malla:local
+  docker compose up -d
+  ```
+  `malla-capture` and `malla-web` share the volume `malla_data`, so captured history persists across restarts.
+
+Need demo data, screenshots, or detailed dev docs? See [docs/development.md](docs/development.md).
+
 ## Running instances
 
 Meshworks operates a public deployment backed by this fork:
@@ -29,29 +58,16 @@ Wherever possible we keep changes compatible so upstream updates remain easy to 
 
 ### 🚀 Key Highlights
 
-• **End-to-end capture** – Logs every packet from your Meshtastic MQTT broker straight into an optimised SQLite database.
-
-• **Live dashboard** – Real-time counters for total / active nodes, packet rate, signal quality bars and network-health indicators (auto-refresh).
-
-• **Packet browser** – Lightning-fast table with powerful filtering (time range, node, port, RSSI/SNR, type), pagination and one-click CSV export.
-
-• **Live chat stream** – Real-time view of decoded text (`TEXT_MESSAGE_APP`) messages with channel-aware filtering.
-
-• **Node explorer** – Detailed hardware, role, battery and signal info for every node – searchable picker plus online/offline badges.
-
-• **Traceroutes** – Historical list view to inspect packet paths across the mesh network.
-
-• **Map view** – Leaflet map with live node locations, RF-link overlays and role colour-coding.
-
-• **Network graph** – Force-directed graph visualising multi-hop links and RF distances between nodes / gateways.
-
-• **Toolbox** – Hop-analysis tables, gateway-compare matrix and "longest links" explorer for deep dives.
-
-• **Analytics charts** – 7-day trends, RSSI distribution, top talkers, hop distribution and more (Plotly powered).
-
-• **Single-source config** – One `config.yaml` (or `MALLA_*` env-vars) drives both the capture tool and the web UI.
-
-• **One-command launch** – `malla-capture` and `malla-web` wrapper scripts get you up and running in seconds.
+- **Capture & storage** – every MQTT packet lands in an optimized SQLite history.
+- **Dashboard** – live counters, health indicators and auto-refresh cards.
+- **Packets browser** – fast filters (time, node, RSSI/SNR, type) with CSV export.
+- **Chat page** – rich `TEXT_MESSAGE_APP` stream with sender/channel filters.
+- **Node explorer** – full hardware/role/battery view with search & status badges.
+- **Traceroutes / map / network graph** – visualize paths, geography and topology.
+- **Toolbox** – hop analysis, gateway comparison, longest links and more.
+- **Analytics** – 7‑day trends, RSSI distribution, top talkers and hop stats.
+- **Single config** – `config.yaml` (or `MALLA_*` env vars) drives both services.
+- **One-command launch** – `malla-capture` + `malla-web` wrappers for quick starts.
 
 <!-- screenshots:start -->
 ![dashboard](.screenshots/dashboard.jpg)
@@ -66,9 +82,21 @@ Wherever possible we keep changes compatible so upstream updates remain easy to 
 ![longest_links](.screenshots/longest_links.jpg)
 <!-- screenshots:end -->
 
+## Repository layout
+
+- `src/malla/web_ui.py` – Flask app factory, template filters and entrypoints.
+- `src/malla/routes/` – HTTP routes (`main_routes.py` for UI pages, `api_routes.py` for JSON endpoints).
+- `src/malla/database/` – connection helpers and repositories (includes the chat data access layer).
+- `src/malla/templates/` – Jinja2 templates; `chat.html` contains the new chat interface.
+- `src/malla/static/` – CSS/JS assets tailored for the Meshworks fork.
+- `scripts/` – local tooling (`create_demo_database.py`, `generate_screenshots.py`).
+- `tests/` – unit, integration and Playwright e2e suites.
+- `.screenshots/` – auto-generated images embedded in this README.
+
 ## Prerequisites
 
-- Python 3.13+
+- Python 3.13+ (when running locally with `uv`)
+- Docker 24+ (if you prefer containers)
 - Access to a Meshtastic MQTT broker
 - Modern web browser with JavaScript enabled
 
@@ -78,40 +106,17 @@ Wherever possible we keep changes compatible so upstream updates remain easy to 
 
 There is no public container image for this fork. Build it locally and point Docker Compose at the result.
 
-1. **Clone this repository** and copy the sample environment:
-   ```bash
-   git clone https://git.meshworks.ru/MeshWorks/meshworks-malla.git
-   cd meshworks-malla
-   cp env.example .env
-   ```
-
-2. **Adjust configuration** (MQTT settings, instance name, etc.):
-   ```bash
-   $EDITOR .env
-   ```
-
-3. **Build the image** (single-arch example shown):
-   ```bash
-   docker build -t meshworks/malla:local .
-   ```
-   For multi-arch builds use BuildKit, for example:
-   ```bash
-   docker buildx build --platform linux/arm64,linux/amd64 \
-     -t meshworks/malla:local --load .
-   ```
-
-4. **Run with Docker Compose**:
-   ```bash
-   export MALLA_IMAGE=meshworks/malla:local
-   docker compose up -d
-   ```
-   The compose file ships with a pre-wired capture + web pair. Set MQTT credentials in `.env` before starting.
-
-5. **Inspect logs / stop the stack**:
-   ```bash
-   docker compose logs -f
-   docker compose down
-   ```
+```bash
+git clone https://git.meshworks.ru/MeshWorks/meshworks-malla.git
+cd meshworks-malla
+cp env.example .env                      # fill in MQTT credentials
+$EDITOR .env
+docker build -t meshworks/malla:local .  # add --platform for multi-arch
+export MALLA_IMAGE=meshworks/malla:local
+docker compose up -d
+docker compose logs -f                   # watch containers
+```
+The compose file ships with a capture + web pair already wired to share `malla_data` volume.
 
 **Manual Docker run (advanced):**
 ```bash
@@ -181,7 +186,7 @@ nix develop --command uv run malla-web
 nix develop --command uv run malla-capture
 ```
 
-## Quick Start
+## Core components overview
 
 The system consists of two components that work together:
 
@@ -212,160 +217,29 @@ uv run malla-web
 **Access the web interface:**
 - Local: http://localhost:5008
 
-## Demo data & docs tooling
-
-- Generate a reproducible demo database for local testing or screenshots:
-  ```bash
-  uv run python scripts/create_demo_database.py --output demo.db
-  ```
-  Point `MALLA_DATABASE_FILE` to the generated file to explore the sample data set.
-
-- Refresh README screenshots after UX changes:
-  ```bash
-  uv sync --dev                   # ensure Playwright + deps are installed
-  playwright install chromium --with-deps
-  uv run python scripts/generate_screenshots.py
-  ```
-  The helper spins up a temporary Flask server using the demo fixtures, captures high-DPI screenshots, and rewrites the `<!-- screenshots:start --> ... <!-- screenshots:end -->` block automatically.
-
 ## Running Both Tools Together
 
 For a complete monitoring setup, run both tools simultaneously:
 
-**Terminal 1 - Data Capture:**
+**Terminal 1 – capture:**
 ```bash
-export MALLA_MQTT_BROKER_ADDRESS="127.0.0.1"  # Replace with your broker
+uv run malla-capture
+# or, after `uv sync`, use the helper script:
 ./malla-capture
 ```
 
-**Terminal 2 - Web UI:**
+**Terminal 2 – web UI:**
 ```bash
+uv run malla-web
+# or:
 ./malla-web
 ```
 
-Both tools use the same SQLite database concurrently using thread-safe connections.
+Both commands read the same SQLite database and cooperate safely thanks to the repository connection pool.
 
-## Development workflow & pre-push checklist
+## Further reading
 
-- `uv sync --dev` to install all developer dependencies (Playwright, pytest, linting).
-- `playwright install chromium --with-deps` once per workstation/CI runner.
-- `pytest` (or `uv run pytest`) – the full suite includes integration + Playwright e2e coverage.
-- `ruff check src tests` and `basedpyright src` for static analysis (see `make lint`).
-- `uv run python scripts/generate_screenshots.py` when UI changes affect README imagery.
-- `docker build -t meshworks/malla:local .` to ensure the container build path stays green.
-
-Make sure these steps stay green before opening a PR or pushing to the deployment branch.
-
-## Docker Configuration
-
-When using Docker, configuration is handled through environment variables defined in your `.env` file:
-
-### Production Deployment with Gunicorn
-
-For production deployments, Malla supports running with Gunicorn, a production-ready WSGI server that provides better performance and stability than Flask's development server.
-
-**Option 1: Using environment variable (recommended)**
-```bash
-# In your .env file:
-MALLA_WEB_COMMAND=/app/.venv/bin/malla-web-gunicorn
-```
-
-**Option 2: Using the production override file**
-```bash
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-```
-
-**Option 3: Direct script execution**
-```bash
-# For local development with uv:
-uv run malla-web-gunicorn
-
-# Or using the executable script:
-./malla-web-gunicorn
-```
-
-The Gunicorn configuration automatically:
-- Uses multiple worker processes based on CPU cores
-- Enables proper logging and monitoring
-- Configures appropriate timeouts and connection limits
-- Provides better concurrent request handling
-
-**Benefits of Gunicorn over Flask dev server:**
-- Production-ready with proper process management
-- Better performance under load
-- Automatic worker process recycling
-- Proper signal handling for graceful shutdowns
-- Enhanced logging and monitoring capabilities
-
-### Environment File Setup
-1. **Copy the example:**
-   ```bash
-   cp env.example .env
-   ```
-
-2. **Configure your settings:**
-   ```bash
-   # Required: Set your MQTT broker address
-   MALLA_MQTT_BROKER_ADDRESS=your.mqtt.broker.address
-
-   # Optional: Customize other settings
-   MALLA_NAME=My Malla Instance
-   MALLA_WEB_PORT=5008
-   MALLA_SECRET_KEY=your-production-secret-key
-   ```
-
-### Key Configuration Options
-- `MALLA_MQTT_BROKER_ADDRESS`: Your MQTT broker IP/hostname (**required**)
-- `MALLA_MQTT_PORT`: MQTT broker port (default: 1883)
-- `MALLA_MQTT_USERNAME`/`MALLA_MQTT_PASSWORD`: MQTT authentication (optional)
-- `MALLA_WEB_PORT`: Port to expose the web UI (default: 5008)
-- `MALLA_NAME`: Display name in the web interface
-
-### Data Persistence
-Data is automatically stored in a Docker volume (`malla_data`) and persists across container restarts. No manual volume setup is required when using `docker-compose`.
-
-## Configuration Options
-
-### YAML configuration file *(recommended)*
-
-Malla will automatically look for a file named `config.yaml` in the **current
-working directory** when it starts.  You can point to an alternative file by
-setting the `MALLA_CONFIG_FILE` environment variable.
-
-If the file is not found, all built-in defaults are used (see
-`config.sample.yaml`).
-
-Copy the sample file and customise it:
-
-```bash
-cp config.sample.yaml config.yaml
-$EDITOR config.yaml  # tweak values as required
-```
-
-The file is **git-ignored** so you will never accidentally commit secrets such
-as your `secret_key`.
-
-The following keys are recognised:
-
-| YAML key        | Type   | Default                                  | Description                                   | Env-var override |
-| --------------- | ------ | ---------------------------------------- | --------------------------------------------- | ---------------- |
-| `name`          | str    | `"Malla"`                                | Display name shown in the navigation bar.     | `MALLA_NAME` |
-| `home_markdown` | str    | `""`                                     | Markdown rendered on the dashboard homepage.  | `MALLA_HOME_MARKDOWN` |
-| `secret_key`    | str    | `"dev-secret-key-change-in-production"` | Flask session secret key (change in prod!). (currently unused)   | `MALLA_SECRET_KEY` |
-| `database_file` | str    | `"meshtastic_history.db"`                | SQLite database file location.                | `MALLA_DATABASE_FILE` |
-| `host`          | str    | `"0.0.0.0"`                              | Interface to bind the web server to.          | `MALLA_HOST` |
-| `port`          | int    | `5008`                                   | TCP port for the web server.                  | `MALLA_PORT` |
-| `debug`         | bool   | `false`                                  | Run Flask in debug mode (unsafe for prod!).   | `MALLA_DEBUG` |
-| `mqtt_broker_address` | str | `"127.0.0.1"`                      | MQTT broker hostname or IP address.           | `MALLA_MQTT_BROKER_ADDRESS` |
-| `mqtt_port`     | int    | `1883`                                   | MQTT broker port.                              | `MALLA_MQTT_PORT` |
-| `mqtt_username` | str    | `""`                                     | MQTT broker username (optional).               | `MALLA_MQTT_USERNAME` |
-| `mqtt_password` | str    | `""`                                     | MQTT broker password (optional).               | `MALLA_MQTT_PASSWORD` |
-| `mqtt_topic_prefix` | str | `"msh"`                                 | MQTT topic prefix for Meshtastic messages.    | `MALLA_MQTT_TOPIC_PREFIX` |
-| `mqtt_topic_suffix` | str | `"/+/+/+/#"`                           | MQTT topic suffix pattern.                     | `MALLA_MQTT_TOPIC_SUFFIX` |
-| `default_channel_key` | str | `"1PG7OiApB1nwvP+rz05pAQ=="`         | Default channel key for decryption (base64).  | `MALLA_DEFAULT_CHANNEL_KEY` |
-
-Environment variables **always override** values coming from the YAML file.
-
+- [Development guide](docs/development.md) – demo database tooling, detailed testing matrix, Docker production tips, configuration reference and the full pre-push checklist.
 ## Contributing
 
 Feel free to submit issues, feature requests, or pull requests to improve Malla!
