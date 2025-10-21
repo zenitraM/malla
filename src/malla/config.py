@@ -42,6 +42,9 @@ class AppConfig:
     # Meshtastic channel default key (for optional packet decryption)
     default_channel_key: str = "1PG7OiApB1nwvP+rz05pAQ=="
 
+    # Allowed domains for CORS
+    cors_allowed_domains: list = [];
+
     # Logging
     log_level: str = "INFO"
 

@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from flask import Blueprint, jsonify, request
+from flask_cors import CORS
 
 from ..database import (
     DashboardRepository,
@@ -31,9 +32,19 @@ from ..utils.node_utils import (
 from ..utils.serialization_utils import convert_bytes_to_base64, sanitize_floats
 from ..utils.traceroute_utils import parse_traceroute_payload
 
+
+# ---------------------------------------------------------------------------
+# Configuration (centralised via malla.config)
+# ---------------------------------------------------------------------------
+from malla.config import get_config
+
+_cfg = get_config()
+
+CORS_ALLOWED_DOMAINS: list = _cfg.cors_allowed_domains
+
 logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__, url_prefix="/api")
-
+CORS(api_bp, origins=CORS_ALLOWED_DOMAINS)
 
 @api_bp.route("/stats")
 def api_stats():
