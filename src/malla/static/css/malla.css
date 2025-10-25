@@ -21,12 +21,25 @@
   --bs-info: #0dcaf0;
   --bs-warning: #ffc107;
   --bs-danger: #dc3545;
+  --bs-dark: #212529;
+  --bs-light: #f8f9fa;
+
+  /* Custom colors for specific roles */
+  --bs-sensor: #e83e8c;
 
   /* Surface colors with better contrast */
   --bs-body-bg: #fafbfc;
   --bs-body-bg-rgb: 250, 251, 252;
+  --bs-body-color: #212529;
+  --bs-body-color-rgb: 33, 37, 41;
   --bs-tertiary-bg: #f8f9fa;
+  --bs-tertiary-bg-rgb: 248, 249, 250;
   --bs-secondary-bg: #e9ecef;
+  --bs-secondary-color: #6c757d;
+
+  /* Border colors */
+  --bs-border-color: #dee2e6;
+  --bs-border-color-translucent: rgba(0, 0, 0, 0.175);
 
   /* Modern border radius */
   --bs-border-radius: 0.5rem;
@@ -182,11 +195,23 @@ h1, .h1 {
 [data-bs-theme=dark] {
   --bs-body-bg: #212529;
   --bs-body-bg-rgb: 33, 37, 41;
-  --bs-tertiary-bg: #2b3035;
-  --bs-secondary-bg: #343a40;
   --bs-body-color: #dee2e6;
   --bs-body-color-rgb: 222, 226, 230;
+  --bs-tertiary-bg: #2b3035;
+  --bs-tertiary-bg-rgb: 43, 48, 53;
+  --bs-secondary-bg: #343a40;
   --bs-secondary-color: #adb5bd;
+
+  /* Border colors for dark mode */
+  --bs-border-color: #495057;
+  --bs-border-color-translucent: rgba(255, 255, 255, 0.15);
+
+  /* Dark/light color variants for dark mode */
+  --bs-dark: #f8f9fa;
+  --bs-light: #495057;
+
+  /* Custom colors for dark mode */
+  --bs-sensor: #f8a2c2;
 }
 
 [data-bs-theme=dark] .card {
@@ -196,6 +221,11 @@ h1, .h1 {
 
 [data-bs-theme=dark] .card:hover {
   background-color: var(--bs-secondary-bg);
+}
+
+[data-bs-theme=dark] .tooltip-inner {
+  --bs-tooltip-color: var(--bs-body-color);
+  --bs-tooltip-bg: var(--bs-tertiary-bg);
 }
 
 /* Application-specific components using Bootstrap utilities */
@@ -371,6 +401,202 @@ h1, .h1 {
   background-color: rgba(var(--bs-primary-rgb), 0.15);
 }
 
+/* Bootstrap utility class overrides for dark mode */
+[data-bs-theme=dark] .bg-light {
+  background-color: var(--bs-tertiary-bg) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-bs-theme=dark] .text-dark {
+  color: var(--bs-body-color) !important;
+}
+
+/* Card with bg-light override */
+[data-bs-theme=dark] .card.bg-light {
+  background-color: var(--bs-tertiary-bg) !important;
+  border-color: var(--bs-border-color) !important;
+  color: var(--bs-body-color) !important;
+}
+
+/* Badge with bg-light override - make it more visible in dark mode */
+[data-bs-theme=dark] .badge.bg-light {
+  background-color: var(--bs-secondary-bg) !important;
+  color: var(--bs-body-color) !important;
+  border: 1px solid var(--bs-border-color);
+}
+
+/* Ensure text contrast for warning badges in dark mode */
+[data-bs-theme=dark] .badge.bg-warning {
+  color: var(--bs-dark) !important;
+  background-color: rgb(189, 142, 0) !important;
+}
+
+[data-bs-theme=dark] .badge.bg-info {
+  color: var(--bs-dark) !important;
+  background-color: rgb(0, 145, 174) !important;
+}
+
+/* Table layout overrides for dark mode */
+[data-bs-theme=dark] .table-header {
+  background: var(--bs-body-bg) !important;
+  border-bottom-color: var(--bs-border-color) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-bs-theme=dark] .table-content {
+  background: var(--bs-body-bg) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-bs-theme=dark] .table-container {
+  background: var(--bs-tertiary-bg) !important;
+}
+
+[data-bs-theme=dark] .table-sidebar {
+  background: var(--bs-body-bg) !important;
+  border-left-color: var(--bs-border-color) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-bs-theme=dark] .sidebar-header {
+  background: var(--bs-tertiary-bg) !important;
+  border-bottom-color: var(--bs-border-color) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-bs-theme=dark] .sidebar-section {
+  border-bottom-color: var(--bs-border-color) !important;
+}
+
+[data-bs-theme=dark] .sidebar-section h6 {
+  color: var(--bs-body-color) !important;
+}
+
+[data-bs-theme=dark] .table-sidebar.collapsed ~ .table-main #toggleSidebar {
+  background: var(--bs-body-bg) !important;
+  border-color: var(--bs-border-color) !important;
+  color: var(--bs-body-color) !important;
+  box-shadow: var(--bs-box-shadow) !important;
+}
+
+[data-bs-theme=dark] .modern-table-pagination {
+  background: var(--bs-tertiary-bg) !important;
+  border-top-color: var(--bs-border-color) !important;
+}
+
+/* Table info styling for dark mode - use darker background for better readability */
+[data-bs-theme=dark] .table-info {
+  --bs-table-striped-bg: var(--bs-border-color) !important;
+}
+
+/* Metric label styling for dark mode - make it lighter and more visible */
+[data-bs-theme=dark] .metric-label {
+  color: var(--bs-secondary-color) !important;
+}
+
+/* Gateway selector card dark mode support */
+[data-bs-theme=dark] .gateway-selector {
+  background: var(--bs-tertiary-bg) !important;
+  color: var(--bs-body-color) !important;
+}
+
+/* Node selector card dark mode support */
+[data-bs-theme=dark] .node-selector {
+  background: var(--bs-tertiary-bg) !important;
+  color: var(--bs-body-color) !important;
+}
+
+/* Graph container dark mode support */
+[data-bs-theme=dark] .graph-container {
+  background: var(--bs-tertiary-bg) !important;
+}
+
+/* Shared sidebar dark mode support */
+[data-bs-theme=dark] .sidebar {
+  background: var(--bs-body-bg) !important;
+  border-left-color: var(--bs-border-color) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-bs-theme=dark] .sidebar.collapsed #toggleSidebar {
+  background: var(--bs-body-bg) !important;
+  border-color: var(--bs-border-color) !important;
+  color: var(--bs-body-color) !important;
+  box-shadow: var(--bs-box-shadow) !important;
+}
+
+/* Traceroute graph container dark mode support */
+[data-bs-theme=dark] .traceroute-graph-container {
+  background: var(--bs-body-bg) !important;
+}
+
+/* Loading and error overlays for dark mode */
+[data-bs-theme=dark] .loading-overlay,
+[data-bs-theme=dark] .error-overlay {
+  background: rgba(var(--bs-tertiary-bg-rgb), 0.9) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-bs-theme=dark] .error-overlay {
+  color: var(--bs-danger) !important;
+}
+
+/* Node labels in graphs for dark mode */
+[data-bs-theme=dark] .node-label {
+  fill: var(--bs-body-color) !important;
+}
+
+/* Node list item styling for dark mode */
+[data-bs-theme=dark] .node-list-item,
+[data-bs-theme=dark] .search-result-item {
+  border-color: var(--bs-border-color) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-bs-theme=dark] .node-list-item:hover,
+[data-bs-theme=dark] .search-result-item:hover {
+  background-color: var(--bs-tertiary-bg) !important;
+}
+
+[data-bs-theme=dark] .node-list-item.selected,
+[data-bs-theme=dark] .search-result-item.selected {
+  background-color: rgba(var(--bs-primary-rgb), 0.2) !important;
+  border-color: var(--bs-primary) !important;
+}
+
+/* Leaflet map dark mode support */
+[data-bs-theme=dark] .leaflet-popup-content-wrapper,
+[data-bs-theme=dark] .leaflet-popup-tip {
+  background: var(--bs-body-bg) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-bs-theme=dark] .leaflet-control-layers,
+[data-bs-theme=dark] .leaflet-control-zoom a,
+[data-bs-theme=dark] .leaflet-control-attribution {
+  background: var(--bs-body-bg) !important;
+  color: var(--bs-body-color) !important;
+  border-color: var(--bs-border-color) !important;
+}
+
+[data-bs-theme=dark] .leaflet-control-zoom a:hover {
+  background: var(--bs-tertiary-bg) !important;
+}
+
+/* Marker cluster styling for dark mode */
+[data-bs-theme=dark] .marker-cluster-small,
+[data-bs-theme=dark] .marker-cluster-medium,
+[data-bs-theme=dark] .marker-cluster-large {
+  background-color: rgba(var(--bs-primary-rgb), 0.8) !important;
+}
+
+[data-bs-theme=dark] .marker-cluster-small div,
+[data-bs-theme=dark] .marker-cluster-medium div,
+[data-bs-theme=dark] .marker-cluster-large div {
+  background-color: rgba(var(--bs-primary-rgb), 0.9) !important;
+  color: white !important;
+}
+
 /* Utility classes following Bootstrap naming conventions */
 .shadow-modern {
   box-shadow: var(--bs-box-shadow) !important;
@@ -407,4 +633,156 @@ h1, .h1 {
 
 .signal-poor {
   color: var(--bs-danger) !important;
+}
+
+/* Signal quality indicators with background colors for light mode */
+.signal-excellent {
+  background-color: #d4edda !important;
+  color: #155724 !important;
+}
+
+.signal-good {
+  background-color: #fff3cd !important;
+  color: #856404 !important;
+}
+
+.signal-fair {
+  background-color: #f8d7da !important;
+  color: #721c24 !important;
+}
+
+.signal-poor {
+  background-color: #f5c6cb !important;
+  color: #721c24 !important;
+}
+
+/* Dark mode signal quality indicators - adjusted colors for better contrast on dark backgrounds */
+[data-bs-theme=dark] .signal-excellent {
+  background-color: #0f5132 !important;
+  color: #75b798 !important;
+}
+
+[data-bs-theme=dark] .signal-good {
+  background-color: #664d03 !important;
+  color: #ffda6a !important;
+}
+
+[data-bs-theme=dark] .signal-fair {
+  background-color: #58151c !important;
+  color: #f1aeb5 !important;
+}
+
+[data-bs-theme=dark] .signal-poor {
+  background-color: #58151c !important;
+  color: #f5c2c7 !important;
+}
+
+/* Dark mode toggle button styling */
+#theme-toggle {
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  transition: var(--bs-transition);
+  margin-left: 0.5rem;
+}
+
+#theme-toggle:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+#theme-toggle:focus {
+  box-shadow: 0 0 0 0.2rem rgba(255, 255, 255, 0.25);
+}
+
+#theme-toggle i {
+  font-size: 0.9rem;
+  transition: var(--bs-transition);
+}
+
+/* Dark mode specific adjustments for toggle button */
+[data-bs-theme=dark] #theme-toggle {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-bs-theme=dark] #theme-toggle:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+/* Legend line styles for traceroute graph */
+.legend-line {
+  width: 18px;
+  height: 3px;
+  margin-right: 8px;
+  display: inline-block;
+}
+
+.legend-rf-link {
+  background: var(--bs-primary);
+}
+
+.legend-gateway-connection {
+  height: 2px;
+  background: var(--bs-info);
+  border-top: 1px dashed var(--bs-info);
+}
+
+.legend-direct-reception {
+  height: 2px;
+  background: var(--bs-warning);
+  border-top: 1px dashed var(--bs-warning);
+}
+
+/* Map hop count label */
+.map-hop-count-label {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 10px;
+  font-weight: bold;
+  color: var(--bs-body-color);
+  box-shadow: var(--bs-box-shadow-sm);
+}
+
+/* Payload hex and YAML content styling for dark mode */
+[data-bs-theme=dark] .payload-hex {
+  background-color: var(--bs-tertiary-bg) !important;
+  color: var(--bs-body-color) !important;
+  border: 1px solid var(--bs-border-color);
+}
+
+[data-bs-theme=dark] .yaml-content {
+  background-color: var(--bs-tertiary-bg) !important;
+  color: var(--bs-body-color) !important;
+  border: 1px solid var(--bs-border-color);
+}
+
+/* Stats card styling for dark mode */
+[data-bs-theme=dark] .stats-card {
+  background-color: var(--bs-tertiary-bg) !important;
+  border-color: var(--bs-border-color) !important;
+  color: var(--bs-body-color) !important;
+}
+
+/* Stat label and value styling for dark mode */
+[data-bs-theme=dark] .stat-label {
+  color: var(--bs-secondary-color) !important;
+}
+
+[data-bs-theme=dark] .stat-value {
+  color: var(--bs-body-color) !important;
+}
+
+/* Diff classes styling for dark mode - maintain colors for visual distinction */
+[data-bs-theme=dark] .positive-diff {
+  color: #198754 !important; /* Keep green for positive values */
+}
+
+[data-bs-theme=dark] .negative-diff {
+  color: #dc3545 !important; /* Keep red for negative values */
+}
+
+[data-bs-theme=dark] .neutral-diff {
+  color: #6c757d !important; /* Keep gray for neutral values */
 }
