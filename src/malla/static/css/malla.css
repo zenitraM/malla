@@ -786,3 +786,43 @@ h1, .h1 {
 [data-bs-theme=dark] .neutral-diff {
   color: #6c757d !important; /* Keep gray for neutral values */
 }
+
+/* Link colors for dark mode - lighter and more readable */
+[data-bs-theme=dark] a {
+  color: #6ea8fe !important; /* Lighter blue for better readability */
+}
+
+[data-bs-theme=dark] a:hover {
+  color: #9ec5fe !important; /* Even lighter on hover */
+}
+
+[data-bs-theme=dark] .node-link {
+  color: #6ea8fe !important;
+}
+
+[data-bs-theme=dark] .node-link:hover {
+  color: #9ec5fe !important;
+}
+
+[data-bs-theme=dark] .modern-table a {
+  color: #6ea8fe !important;
+}
+
+[data-bs-theme=dark] .modern-table a:hover {
+  color: #9ec5fe !important;
+}
+
+/* Keep primary color links in nav elements at Bootstrap default */
+[data-bs-theme=dark] .nav-link,
+[data-bs-theme=dark] .navbar-brand {
+  color: rgba(255, 255, 255, 0.75) !important;
+}
+
+[data-bs-theme=dark] .nav-link:hover,
+[data-bs-theme=dark] .navbar-brand:hover {
+  color: rgba(255, 255, 255, 1) !important;
+}
+
+[data-bs-theme=dark] .nav-link.active {
+  color: rgba(255, 255, 255, 1) !important;
+}
