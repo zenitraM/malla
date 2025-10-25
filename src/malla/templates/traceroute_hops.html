@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/node-picker.css') }}">
 <style>
     .node-selector {
-        background: #f8f9fa;
+        background: var(--bs-tertiary-bg);
         border-radius: 8px;
         padding: 1rem;
         margin-bottom: 1rem;
@@ -206,7 +206,7 @@
     document.addEventListener('DOMContentLoaded', function() {
         loadAvailableNodes();
         setupEventListeners();
-        
+
         // Check for URL parameters and auto-select nodes if present
         checkURLParameters();
     });
@@ -215,7 +215,7 @@
         const urlParams = new URLSearchParams(window.location.search);
         const fromNode = urlParams.get('from_node');
         const toNode = urlParams.get('to_node');
-        
+
         if (fromNode && toNode) {
             // Store the parameters to use after nodes are loaded
             window.autoSelectNodes = {
@@ -253,7 +253,7 @@
         const node1 = document.getElementById('node1-select_value').value; // Hidden input for node picker
         const node2 = document.getElementById('node2-select').value;
         const analyzeBtn = document.getElementById('analyze-btn');
-        
+
         analyzeBtn.disabled = !node1 || !node2 || node1 === node2;
     }
 
@@ -271,7 +271,7 @@
 
     function loadRelatedNodes(nodeId) {
         const node2Select = document.getElementById('node2-select');
-        
+
         if (!nodeId) {
             // Reset to show all nodes
             populateNode2Select(availableNodes);
@@ -288,7 +288,7 @@
                 relatedNodes = data.related_nodes || [];
                 populateNode2Select(relatedNodes);
                 node2Select.disabled = false;
-                
+
                 // Update node1 info to show how many related nodes were found
                 updateNode1InfoWithRelatedCount(nodeId, relatedNodes.length);
             })
@@ -304,38 +304,38 @@
         // Node1 is now handled by the node picker, so we don't need to populate it manually
         // Just populate node2 with all nodes initially
         populateNode2Select(availableNodes);
-        
+
         // Auto-select nodes from URL parameters if present
         if (window.autoSelectNodes) {
             const { fromNode, toNode } = window.autoSelectNodes;
-            
+
             // Convert node IDs to integers for comparison
             const fromNodeInt = parseInt(fromNode);
             const toNodeInt = parseInt(toNode);
-            
+
             // Find and select the nodes
             const fromNodeExists = availableNodes.find(n => n.node_id == fromNodeInt);
             const toNodeExists = availableNodes.find(n => n.node_id == toNodeInt);
-            
+
             if (fromNodeExists && toNodeExists) {
                 // Set the node picker value and display
                 const node1Input = document.getElementById('node1-select_value');
                 const node1Display = document.getElementById('node1-select');
                 node1Input.value = fromNodeInt;
                 node1Display.value = fromNodeExists.display_name;
-                
+
                 // Update node info displays
                 updateNodeInfo('node1', fromNodeInt);
-                
+
                 // Load related nodes for the first node, then select the second node
                 loadRelatedNodes(fromNodeInt).then(() => {
                     const node2Select = document.getElementById('node2-select');
                     node2Select.value = toNodeInt;
                     updateNodeInfo('node2', toNodeInt);
-                    
+
                     // Enable analyze button and trigger analysis
                     checkAnalyzeButton();
-                    
+
                     // Auto-trigger analysis after a short delay to ensure UI is ready
                     setTimeout(() => {
                         if (!document.getElementById('analyze-btn').disabled) {
@@ -343,7 +343,7 @@
                         }
                     }, 500);
                 });
-                
+
                 // Clear the auto-select data
                 delete window.autoSelectNodes;
             } else {
@@ -367,7 +367,7 @@
             if (node.traceroute_count) {
                 optionText += ` (${node.traceroute_count} traceroutes)`;
             }
-            
+
             const option = new Option(optionText, node.node_id);
             node2Select.add(option);
         });
@@ -380,7 +380,7 @@
 
     function updateNodeInfo(nodeType, nodeId) {
         const infoDiv = document.getElementById(`${nodeType}-info`);
-        
+
         if (!nodeId) {
             infoDiv.innerHTML = '';
             return;
@@ -402,7 +402,7 @@
     function updateNode1InfoWithRelatedCount(nodeId, relatedCount) {
         const infoDiv = document.getElementById('node1-info');
         const node = availableNodes.find(n => n.node_id == nodeId);
-        
+
         if (node) {
             let info = `<strong>${node.hex_id}</strong>`;
             if (node.location) {
@@ -411,14 +411,14 @@
             if (node.hw_model) {
                 info += ` • ${node.hw_model}`;
             }
-            
+
             // Add related nodes count
             if (relatedCount > 0) {
                 info += ` • <i class="bi bi-diagram-3"></i> ${relatedCount} related nodes`;
             } else {
                 info += ` • <i class="bi bi-exclamation-triangle text-warning"></i> No related nodes found`;
             }
-            
+
             infoDiv.innerHTML = info;
         }
     }
@@ -440,7 +440,7 @@
             .then(response => response.json())
             .then(data => {
                 document.getElementById('loading').style.display = 'none';
-                
+
                 if (data.traceroutes && data.traceroutes.length > 0) {
                     try {
                         displayResults(data);
@@ -473,7 +473,7 @@
     function updateURLFromSelections() {
         const node1Id = document.getElementById('node1-select_value').value; // Hidden input for node picker
         const node2Id = document.getElementById('node2-select').value;
-        
+
         if (node1Id && node2Id) {
             updateURL(node1Id, node2Id);
         } else {
@@ -506,7 +506,7 @@
     function createNodeLink(nodeId, displayText, includeTooltip = true) {
         const nodeInfo = getNodeDisplayInfo(nodeId);
         let tooltip = '';
-        
+
         if (includeTooltip) {
             tooltip = `title="${nodeInfo.name}`;
             if (nodeInfo.location) {
@@ -517,7 +517,7 @@
             }
             tooltip += `\nClick to view details"`;
         }
-        
+
         return `<a href="/node/${nodeId}" ${tooltip} class="text-decoration-none">${displayText || nodeInfo.name}</a>`;
     }
 
@@ -585,14 +585,14 @@
 
     function displayDirectionInfo(directionCounts, fromNodeId, toNodeId) {
         const directionDiv = document.getElementById('direction-info');
-        
+
         // Create formatted node links for the direction display
         const fromNodeLink = createNodeLink(fromNodeId, formatNodeIdForDisplay(fromNodeId));
         const toNodeLink = createNodeLink(toNodeId, formatNodeIdForDisplay(toNodeId));
-        
+
         let html = `<strong>Link Analysis:</strong> `;
         html += `${fromNodeLink} ↔ ${toNodeLink}<br>`;
-        
+
         const directions = Object.keys(directionCounts);
         if (directions.length > 1) {
             html += '<span class="badge bg-success signal-badge">Bidirectional Link</span>';
@@ -601,7 +601,7 @@
         } else {
             html += '<span class="badge bg-secondary signal-badge">No Data</span>';
         }
-        
+
         // Show traffic distribution if bidirectional
         if (directions.length > 1) {
             html += '<br><small class="text-muted mt-1 d-block">';
@@ -612,13 +612,13 @@
             });
             html += '</small>';
         }
-        
+
         directionDiv.innerHTML = html;
     }
 
     function updateSNRChart(traceroutes) {
         const ctx = document.getElementById('snr-chart').getContext('2d');
-        
+
         if (snrChart) {
             snrChart.destroy();
             snrChart = null;
@@ -689,7 +689,7 @@
 
     function updateDirectionChart(directionCounts) {
         const ctx = document.getElementById('direction-chart').getContext('2d');
-        
+
         if (directionChart) {
             directionChart.destroy();
             directionChart = null;
@@ -726,7 +726,7 @@
 
     function displayTracerouteList(traceroutes, fromNodeName, toNodeName) {
         const listDiv = document.getElementById('traceroute-list');
-        
+
         if (traceroutes.length === 0) {
             listDiv.innerHTML = '<p class="text-muted">No traceroutes found.</p>';
             return;
@@ -736,7 +736,7 @@
         traceroutes.forEach((tr, index) => {
             const snrBadgeClass = getSNRBadgeClass(tr.hop_snr);
             const snrText = tr.hop_snr !== null ? `${tr.hop_snr.toFixed(1)} dB` : 'N/A';
-            
+
             // Create route display using structured data
             let routeDisplay = '';
             if (tr.route_hops && tr.route_hops.length > 0) {
@@ -748,7 +748,7 @@
                     }
                     return true;
                 });
-                
+
                 routeDisplay = '<div class="table-responsive"><table class="table table-sm table-borderless mb-0" style="font-size: 0.85em;">';
                 routeDisplay += '<thead><tr class="text-muted" style="font-size: 0.75em;">';
                 routeDisplay += '<th style="width: 12%;">Hop</th>';
@@ -757,21 +757,21 @@
                 routeDisplay += '<th style="width: 13%;">SNR</th>';
                 routeDisplay += '<th style="width: 15%;">Direction</th>';
                 routeDisplay += '</tr></thead><tbody>';
-                
+
                 hopsToShow.forEach(hop => {
                     const rowClass = hop.is_target_hop ? 'table-primary' : '';
                     const fontWeight = hop.is_target_hop ? 'font-weight: bold; color: #0d6efd;' : '';
-                    
+
                     let snrDisplay = '—';
                     if (hop.snr !== null && hop.snr !== undefined) {
                         const snrClass = hop.snr >= 0 ? 'text-success' : 'text-danger';
                         snrDisplay = `<span class="${snrClass}">${hop.snr.toFixed(1)}</span>`;
                     }
-                    
+
                     // Create node links with proper formatting
                     const fromNodeLink = createNodeLink(hop.from_node_id, hop.from_node_name);
                     const toNodeLink = createNodeLink(hop.to_node_id, hop.to_node_name);
-                    
+
                     // Format direction display
                     let directionDisplay = '—';
                     if (hop.direction) {
@@ -783,7 +783,7 @@
                             directionDisplay = `<span class="badge bg-secondary" style="font-size: 0.7em;">${hop.direction}</span>`;
                         }
                     }
-                    
+
                     routeDisplay += `<tr class="${rowClass}">`;
                     routeDisplay += `<td><small class="text-muted">#${hop.hop_number}</small></td>`;
                     routeDisplay += `<td style="${fontWeight}"><small>${fromNodeLink}</small></td>`;
@@ -792,7 +792,7 @@
                     routeDisplay += `<td><small>${directionDisplay}</small></td>`;
                     routeDisplay += '</tr>';
                 });
-                
+
                 // Add warning row if we filtered out incomplete hops
                 if (hopsToShow.length < tr.route_hops.length) {
                     const filteredHop = tr.route_hops[tr.route_hops.length - 1];
@@ -803,13 +803,13 @@
                     routeDisplay += `<strong>Incomplete</strong> - Last hop to ${destinationNodeLink} not confirmed`;
                     routeDisplay += `</td></tr>`;
                 }
-                
+
                 routeDisplay += '</tbody></table></div>';
             } else {
                 // Fallback to complete_path_display if route_hops not available
                 routeDisplay = tr.complete_path_display || 'Route data unavailable';
             }
-            
+
             html += `
                 <div class="card mb-2">
                     <div class="card-body p-3">
@@ -823,7 +823,7 @@
                             <div class="col-md-4 text-md-end">
                                 <div class="d-flex flex-column align-items-end">
                                     <small class="text-muted mb-1">
-                                        <strong>From:</strong> ${createNodeLink(tr.from_node_id, tr.from_node_name)} 
+                                        <strong>From:</strong> ${createNodeLink(tr.from_node_id, tr.from_node_name)}
                                         ${tr.gateway_node_name ? `(via ${tr.gateway_node_name})` : ''}
                                     </small>
                                     <small class="text-muted mb-1">
@@ -844,7 +844,7 @@
         });
 
         listDiv.innerHTML = html;
-        
+
         // Re-initialize tooltips for the new content
         reinitializeTooltips();
     }
@@ -859,11 +859,11 @@
     function getRelativeTime(timestamp) {
         const now = Date.now() / 1000;
         const diff = now - timestamp;
-        
+
         if (diff < 60) return 'Just now';
         if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
         if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
         return `${Math.floor(diff / 86400)}d ago`;
     }
 </script>
-{% endblock %} 
+{% endblock %}

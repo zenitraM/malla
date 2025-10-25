@@ -93,14 +93,15 @@
 <style>
 .sidebar {
     width: 350px;
-    background: white;
-    border-left: 1px solid #dee2e6;
+    background: var(--bs-body-bg);
+    border-left: 1px solid var(--bs-border-color);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
     transition: margin-right 0.3s ease;
     z-index: 1000;
     order: 2;
+    color: var(--bs-body-color);
 }
 
 .sidebar.collapsed {
@@ -112,18 +113,20 @@
     right: 10px;
     top: 70px;
     z-index: 1001;
-    background: white;
-    border: 1px solid #dee2e6;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    color: var(--bs-body-color);
 }
 
 .sidebar-header {
     padding: 1rem;
-    border-bottom: 1px solid #dee2e6;
+    border-bottom: 1px solid var(--bs-border-color);
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: #f8f9fa;
+    background: var(--bs-tertiary-bg);
+    color: var(--bs-body-color);
 }
 
 .sidebar-header h5 {
@@ -173,11 +176,11 @@
 }
 
 .legend-line.direct {
-    background-color: #28a745;
+    background-color: var(--bs-success);
 }
 
 .legend-line.indirect {
-    background: linear-gradient(90deg, #ffc107 50%, transparent 50%);
+    background: linear-gradient(90deg, var(--bs-warning) 50%, transparent 50%);
     background-size: 8px 2px;
 }
 
