@@ -169,6 +169,23 @@
         </div>
     </div>
 
+    <!-- Terrain Profile -->
+    <div class="row mt-4" id="terrain-profile-section" style="display: none;">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h6><i class="bi bi-mountain"></i> Terrain Profile</h6>
+                </div>
+                <div class="card-body">
+                    <div class="text-muted small mb-2">Terrain images from <a href="http://www.heywhatsthat.com" target="_blank">HeyWhatsThat.com</a></div>
+                    <div id="terrain-profile-content" class="text-center">
+                        <!-- Terrain profile image will be inserted here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Traceroute Details -->
     <div class="row mt-4">
         <div class="col-12">
@@ -544,6 +561,9 @@
         // Display direction information with proper node formatting
         displayDirectionInfo(data.direction_counts, data.from_node_id, data.to_node_id);
 
+        // Display terrain profile if both nodes have location data
+        displayTerrainProfile(data.from_node_id, data.to_node_id);
+
         // Update charts
         updateSNRChart(data.traceroutes);
         updateDirectionChart(data.direction_counts);
@@ -551,6 +571,29 @@
         // Display traceroute list
         displayTracerouteList(data.traceroutes, data.from_node_name, data.to_node_name);
         document.getElementById('traceroute-count').textContent = data.traceroutes.length;
+    }
+
+    function displayTerrainProfile(fromNodeId, toNodeId) {
+        const fromNode = availableNodes.find(n => n.node_id == fromNodeId);
+        const toNode = availableNodes.find(n => n.node_id == toNodeId);
+        const terrainSection = document.getElementById('terrain-profile-section');
+        const terrainContent = document.getElementById('terrain-profile-content');
+
+        // Show terrain profile if both nodes have location data
+        if (fromNode?.location && toNode?.location) {
+            const terrainImageUrl = getTerrainProfileImage(fromNode, toNode);
+            terrainContent.innerHTML = `
+                <a href="${terrainImageUrl}" target="_blank">
+                    <img src="${terrainImageUrl}" 
+                         style="width: 100%; max-width: 600px; height: auto; border: 1px solid #dee2e6; border-radius: 0.375rem;" 
+                         alt="Terrain profile between ${fromNode.display_name} and ${toNode.display_name}"
+                         onerror="this.parentElement.parentElement.innerHTML='<div class=\\'text-muted\\'>Terrain profile could not be loaded</div>'">
+                </a>
+            `;
+            terrainSection.style.display = 'block';
+        } else {
+            terrainSection.style.display = 'none';
+        }
     }
 
     function calculateGeoDistance(node1Id, node2Id) {
@@ -581,6 +624,39 @@
         } else {
             return `${distance.toFixed(2)}km`;
         }
+    }
+
+    // Generate terrain profile image URL for HeyWhatsThat.com
+    function getTerrainProfileImage(node1, node2) {
+        // line colour between nodes
+        const lineColour = "0000FF"; // blue
+
+        // node 1 (left side of image)
+        const node1MarkerColour = "0000FF"; // blue
+        const node1Latitude = node1.location.latitude;
+        const node1Longitude = node1.location.longitude;
+        const node1ElevationMSL = node1.altitude || ""; // Use altitude if available
+
+        // node 2 (right side of image)
+        const node2MarkerColour = "0000FF"; // blue
+        const node2Latitude = node2.location.latitude;
+        const node2Longitude = node2.location.longitude;
+        const node2ElevationMSL = node2.altitude || ""; // Use altitude if available
+
+        // Determine source attribution - use configured website domain or default
+        const websiteDomain = "{{ APP_CONFIG.website_domain or 'github.com/zenitraM/malla' }}";
+
+        // generate terrain profile image url
+        return "https://heywhatsthat.com/bin/profile-0904.cgi?" + new URLSearchParams({
+            src: websiteDomain,
+            axes: 1, // include grid lines and a scale
+            metric: 1, // show metric units
+            curvature: 0, // don't include the curvature of the earth in the graphic
+            width: 500,
+            height: 200,
+            pt0: `${node1Latitude},${node1Longitude},${lineColour},${node1ElevationMSL},${node1MarkerColour}`,
+            pt1: `${node2Latitude},${node2Longitude},${lineColour},${node2ElevationMSL},${node2MarkerColour}`,
+        }).toString();
     }
 
     function displayDirectionInfo(directionCounts, fromNodeId, toNodeId) {
