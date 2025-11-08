@@ -137,6 +137,24 @@ function timestampToDatetimeLocal(timestamp) {
 }
 
 /**
+ * Escape HTML special characters to prevent XSS
+ * @param {string} str - String to escape
+ * @returns {string} HTML-escaped string
+ */
+function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, function(match) {
+        const escape = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+        return escape[match];
+    });
+}
+
+/**
  * Render a timestamp column for tables
  * Use this in ModernTable column render functions
  * @param {object} row - Table row data
@@ -151,38 +169,9 @@ function renderTimestampColumn(row, timestampField = 'timestamp', idField = 'id'
     const id = row[idField];
 
     // Escape HTML to prevent XSS
-    const escapedId = String(id).replace(/[&<>"']/g, function(match) {
-        const escape = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;'
-        };
-        return escape[match];
-    });
-
-    const escapedFormattedTime = String(formattedTime).replace(/[&<>"']/g, function(match) {
-        const escape = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;'
-        };
-        return escape[match];
-    });
-
-    const escapedTimestamp = String(timestamp).replace(/[&<>"']/g, function(match) {
-        const escape = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;'
-        };
-        return escape[match];
-    });
+    const escapedId = escapeHtml(id);
+    const escapedFormattedTime = escapeHtml(formattedTime);
+    const escapedTimestamp = escapeHtml(timestamp);
 
     const link = linkPath.replace('{id}', escapedId);
 
@@ -238,6 +227,7 @@ if (typeof module !== 'undefined' && module.exports) {
         formatLocal,
         datetimeLocalToTimestamp,
         timestampToDatetimeLocal,
+        escapeHtml,
         renderTimestampColumn,
         updateAllTimestamps
     };
