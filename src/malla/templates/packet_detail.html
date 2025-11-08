@@ -177,7 +177,7 @@
                                 </tr>
                                 <tr>
                                     <th>Timestamp:</th>
-                                    <td>{{ packet.timestamp_str }} UTC</td>
+                                    <td class="timestamp-display" data-timestamp="{{ packet.timestamp }}">{{ packet.timestamp_str }}</td>
                                 </tr>
                                 <tr>
                                     <th>From Node:</th>
@@ -1308,6 +1308,12 @@ document.addEventListener('DOMContentLoaded', function() {
     tooltipTriggerList.map(function (tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
+
+    // Format all timestamps based on current timezone preference
+    // This ensures timestamps on the detail page respect the timezone setting
+    if (typeof updateAllTimestamps === 'function') {
+        updateAllTimestamps();
+    }
 });
 </script>
 {% endblock %}

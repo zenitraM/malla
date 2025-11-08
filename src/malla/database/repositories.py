@@ -378,8 +378,8 @@ class PacketRepository:
                             p["processed_successfully"] for p in packets_in_group
                         ),
                         "timestamp_str": datetime.fromtimestamp(
-                            group_data["min_timestamp"]
-                        ).strftime("%Y-%m-%d %H:%M:%S"),
+                            group_data["min_timestamp"], UTC
+                        ).strftime("%Y-%m-%d %H:%M:%S UTC"),
                         "reception_count": len(packets_in_group),
                         "is_grouped": True,
                         "success": min(
@@ -508,8 +508,8 @@ class PacketRepository:
                     # Format timestamp if not already formatted
                     if packet["timestamp_str"] is None:
                         packet["timestamp_str"] = datetime.fromtimestamp(
-                            packet["timestamp"]
-                        ).strftime("%Y-%m-%d %H:%M:%S")
+                            packet["timestamp"], UTC
+                        ).strftime("%Y-%m-%d %H:%M:%S UTC")
 
                     # Calculate hop count if not already set
                     if (
@@ -2826,8 +2826,8 @@ class TracerouteRepository:
                     # Format timestamp if not already formatted
                     if packet["timestamp_str"] is None:
                         packet["timestamp_str"] = datetime.fromtimestamp(
-                            packet["timestamp"]
-                        ).strftime("%Y-%m-%d %H:%M:%S")
+                            packet["timestamp"], UTC
+                        ).strftime("%Y-%m-%d %H:%M:%S UTC")
 
                     # Add success indicator
                     packet["success"] = packet["processed_successfully"]

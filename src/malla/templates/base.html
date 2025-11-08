@@ -190,8 +190,14 @@
                     </li>
                 </ul>
 
-                <!-- Dark Mode Toggle -->
-                <div class="navbar-nav">
+                <!-- Timezone Toggle and Dark Mode Toggle -->
+                <div class="navbar-nav d-flex flex-row gap-2">
+                    <button id="timezone-toggle" class="btn btn-outline-light btn-sm" type="button"
+                            data-bs-toggle="tooltip" data-bs-placement="bottom"
+                            title="Toggle timezone"
+                            aria-label="Toggle timezone">
+                        <i class="bi bi-globe"></i>
+                    </button>
                     <button id="theme-toggle" class="btn btn-outline-light btn-sm" type="button"
                             data-bs-toggle="tooltip" data-bs-placement="bottom"
                             title="Toggle theme mode"
@@ -229,6 +235,10 @@
     <script src="{{ url_for('static', filename='js/node-cache.js') }}"></script>
     <!-- Dark Mode Toggle -->
     <script src="{{ url_for('static', filename='js/dark-mode-toggle.js') }}"></script>
+    <!-- Timezone Utilities (must load before timezone toggle) -->
+    <script src="{{ url_for('static', filename='js/timezone-utils.js') }}"></script>
+    <!-- Timezone Toggle -->
+    <script src="{{ url_for('static', filename='js/timezone-toggle.js') }}"></script>
 
     <!-- Node tooltip functionality -->
     <script>
@@ -379,6 +389,12 @@
             const themeToggle = document.getElementById('theme-toggle');
             if (themeToggle) {
                 new bootstrap.Tooltip(themeToggle);
+            }
+
+            // Initialize timezone toggle tooltip
+            const timezoneToggle = document.getElementById('timezone-toggle');
+            if (timezoneToggle) {
+                new bootstrap.Tooltip(timezoneToggle);
             }
         });
 
