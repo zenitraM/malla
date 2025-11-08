@@ -1370,7 +1370,7 @@ def api_packets_data():
                         1 if gateway_id and gateway_id != "Unknown" else 0
                     )
 
-            
+
             # Handle RSSI/SNR/Hops for grouped packets
             rssi_display = packet.get("rssi")
             snr_display = packet.get("snr")
