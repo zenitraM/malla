@@ -314,3 +314,23 @@ class TestMapFilters:
         role_filter.select_option("")
         apply_button.click()
         page.wait_for_timeout(2000)
+
+    @pytest.mark.e2e
+    def test_default_max_age_is_24_hours(self, page: Page, test_server_url):
+        """Test that the default max age is set to 24 hours."""
+        page.goto(f"{test_server_url}/map")
+
+        # Wait for loading to complete
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
+
+        # Check that age filter exists
+        age_filter = page.locator("#maxAge")
+        expect(age_filter).to_be_visible()
+
+        # Check that the default value is 24 hours
+        selected_value = age_filter.input_value()
+        assert selected_value == "24", f"Default max age should be 24 hours, but got {selected_value}"
+
+        # Also verify the selected option
+        selected_option = age_filter.locator("option[selected]")
+        expect(selected_option).to_have_attribute("value", "24")
