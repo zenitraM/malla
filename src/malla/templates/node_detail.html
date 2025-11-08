@@ -174,7 +174,7 @@
                             <table class="table table-sm">
                                 <tr>
                                     <th>Last Seen:</th>
-                                    <td>{{ node.last_seen }}</td>
+                                    <td class="timestamp-display" data-timestamp="{{ node.last_seen_timestamp }}">{{ node.last_seen }}</td>
                                 </tr>
                                 <tr>
                                     <th>Avg Signal:</th>
@@ -258,7 +258,7 @@
                             <table class="table table-sm">
                                 <tr>
                                     <th>Location Updated:</th>
-                                    <td>{{ location.timestamp }}</td>
+                                    <td class="timestamp-display" data-timestamp="{{ location.timestamp_unix }}">{{ location.timestamp }}</td>
                                 </tr>
                                 <tr>
                                     <th>Time Ago:</th>
@@ -886,13 +886,17 @@ async function loadLocationHistoryMap() {
             }).addTo(map);
 
             // Create popup content
+            // Format timestamp using timezone preference
+            const formattedTime = typeof formatTimestamp === 'function' 
+                ? formatTimestamp(location.timestamp) 
+                : location.timestamp_str;
+            
             const popupContent = `
                 <div>
                     <strong>Location #${data.location_history.length - index}</strong><br>
-                    <small class="text-muted">${location.timestamp_str}</small><br>
+                    <small class="text-muted">${formattedTime}</small><br>
                     <strong>Coordinates:</strong> ${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}<br>
                     ${location.altitude ? `<strong>Altitude:</strong> ${location.altitude}m<br>` : ''}
-                    <small><strong>Recorded:</strong> ${location.timestamp_str}</small>
                 </div>
             `;
             marker.bindPopup(popupContent);
@@ -951,6 +955,12 @@ document.addEventListener('DOMContentLoaded', function() {
     if (nodeId && window.DirectReceptionsChart) {
         directReceptionsChart = new DirectReceptionsChart(nodeId);
         directReceptionsChart.initialize();
+    }
+    
+    // Format all timestamps based on current timezone preference
+    // This ensures timestamps on the detail page respect the timezone setting
+    if (typeof updateAllTimestamps === 'function') {
+        updateAllTimestamps();
     }
 });
 </script>

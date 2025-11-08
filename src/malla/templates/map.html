@@ -1575,6 +1575,11 @@ function createLinkPopupContent(link) {
     if (link.success_rate < 50) qualityClass = 'text-danger';
     else if (link.success_rate < 80) qualityClass = 'text-warning';
 
+    // Format timestamp using timezone preference
+    const formattedTime = (typeof formatTimestamp === 'function' && link.last_seen)
+        ? formatTimestamp(link.last_seen)
+        : (link.last_seen_str || 'Unknown');
+
     return `
         <div class="traceroute-link-info">
             <div class="fw-bold mb-2">${link.link_type === 'packet' ? 'Direct Packet Link' : 'Traceroute RF Hop'}</div>
@@ -1582,7 +1587,7 @@ function createLinkPopupContent(link) {
             <div><strong>To:</strong> ${toName}</div>
             <div><strong>Success Rate:</strong> <span class="${qualityClass}">${link.success_rate.toFixed(1)}%</span></div>
             <div><strong>Attempts:</strong> ${link.total_hops_seen}</div>
-            <div><strong>Last Seen:</strong> ${link.last_seen_str}</div>
+            <div><strong>Last Seen:</strong> ${formattedTime}</div>
             ${link.avg_snr ? `<div><strong>Avg SNR:</strong> ${link.avg_snr.toFixed(1)} dB</div>` : ''}
             ${link.avg_rssi ? `<div><strong>Avg RSSI:</strong> ${link.avg_rssi.toFixed(0)} dBm</div>` : ''}
             <div class="mt-2">

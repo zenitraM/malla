@@ -354,9 +354,9 @@ class LocationService:
                 # Calculate age in hours
                 age_hours = (current_time - link["last_seen"]) / 3600
 
-                # Format last seen string
-                last_seen_dt = datetime.fromtimestamp(link["last_seen"])
-                last_seen_str = last_seen_dt.strftime("%Y-%m-%d %H:%M:%S")
+                # Format last seen string with UTC timezone
+                last_seen_dt = datetime.fromtimestamp(link["last_seen"], UTC)
+                last_seen_str = last_seen_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
                 # Calculate success rate (using packet count as proxy)
                 # Higher packet count suggests more reliable link
@@ -368,6 +368,7 @@ class LocationService:
                     "success_rate": success_rate,
                     "avg_snr": link.get("avg_snr"),
                     "age_hours": round(age_hours, 2),
+                    "last_seen": link["last_seen"],  # Raw Unix timestamp for client-side formatting
                     "last_seen_str": last_seen_str,
                     "is_bidirectional": True,  # Network graph links are bidirectional by design
                     "total_hops_seen": link["packet_count"],

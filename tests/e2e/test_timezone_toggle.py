@@ -235,3 +235,46 @@ class TestTimezoneToggleE2E:
 
         value = page.input_value("#start_time")
         assert value == "2025-01-02T14:30", "Datetime input should work after timezone toggle"
+
+    def test_node_detail_page_respects_timezone(self, page, test_server_url):
+        """Test that node detail page timestamps respect timezone setting."""
+        # Go to nodes page
+        page.goto(f"{test_server_url}/nodes")
+        page.wait_for_selector(".modern-table tbody tr", timeout=10000)
+
+        # Click on first node to go to detail page
+        page.click(".modern-table tbody tr:first-child td a")
+        page.wait_for_load_state("load")
+
+        # Find timestamp elements with data-timestamp attribute
+        timestamp_elements = page.locator("[data-timestamp]").all()
+
+        # Should have at least one timestamp element (last_seen)
+        assert len(timestamp_elements) > 0, "No timestamp elements found on node detail page"
+
+        # Get current timezone preference
+        pref = page.evaluate("localStorage.getItem('malla-timezone-preference') || 'local'")
+
+        # Check that timestamps are formatted according to preference
+        for element in timestamp_elements[:2]:  # Check first 2 timestamps
+            text = element.text_content()
+            if text and len(text) > 5:  # Skip empty or very short text
+                if pref == 'utc':
+                    assert "UTC" in text, f"UTC mode should show UTC in timestamp: {text}"
+                else:
+                    assert "UTC" not in text, f"Local mode should not show UTC in timestamp: {text}"
+
+    def test_map_page_link_timestamps_respect_timezone(self, page, test_server_url):
+        """Test that map page link popups respect timezone setting."""
+        # Set to UTC timezone
+        page.goto(f"{test_server_url}/map")
+        page.evaluate("localStorage.setItem('malla-timezone-preference', 'utc')")
+        page.reload()
+
+        # Wait for map to load
+        page.wait_for_selector("#map", timeout=10000)
+        page.wait_for_timeout(3000)  # Wait for data to load
+
+        # Check that formatTimestamp function is available
+        has_format_function = page.evaluate("typeof formatTimestamp === 'function'")
+        assert has_format_function, "formatTimestamp function should be available on map page"

@@ -1181,7 +1181,9 @@ class NodeRepository:
                 else None,
                 "total_packets": node_row["total_packets"],
                 "last_seen": last_seen.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "last_seen_timestamp": last_seen.timestamp(),  # Raw Unix timestamp for client-side formatting
                 "first_seen": first_seen.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "first_seen_timestamp": first_seen.timestamp(),  # Raw Unix timestamp for client-side formatting
                 "last_seen_relative": format_time_ago(last_seen),
                 "unique_destinations": node_row["unique_destinations"],
                 "unique_gateways": node_row["unique_gateways"],
@@ -1707,6 +1709,7 @@ class NodeRepository:
                         "timestamp": location_timestamp.strftime(
                             "%Y-%m-%d %H:%M:%S UTC"
                         ),
+                        "timestamp_unix": latest_location["timestamp"],  # Raw Unix timestamp for client-side formatting
                         "timestamp_relative": format_time_ago(location_timestamp),
                     }
             except Exception as e:
