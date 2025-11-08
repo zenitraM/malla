@@ -830,7 +830,7 @@ def cleanup_old_data() -> None:
         logging.debug("Data cleanup disabled (retention hours set to 0)")
         return
 
-    logging.info("Data cleanup started for retention hours: {DATA_RETENTION_HOURS}")
+    logging.info(f"Data cleanup started for retention hours: {DATA_RETENTION_HOURS}")
     current_time = time.time()
     cutoff_time = current_time - (DATA_RETENTION_HOURS * 3600)
 
