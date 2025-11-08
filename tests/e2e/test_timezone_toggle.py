@@ -80,11 +80,16 @@ class TestTimezoneToggleE2E:
         # Get timestamp after toggle
         new_timestamp = page.locator(".modern-table tbody tr:first-child td:first-child small").text_content()
 
-        # Timestamps should be formatted differently (one has UTC, one doesn't)
-        # OR the hour should be different if timezone changed
-        assert new_timestamp != first_timestamp or \
-               ("UTC" in new_timestamp) != ("UTC" in first_timestamp), \
-               "Timestamp should change after timezone toggle"
+        # Toggling the timezone should either change the timestamp value (e.g., hour) or its format (e.g., add/remove 'UTC' suffix).
+        # We check both possibilities for robustness.
+        if new_timestamp == first_timestamp:
+            # If the timestamp string is unchanged, the format (presence of 'UTC') must have changed.
+            assert ("UTC" in new_timestamp) != ("UTC" in first_timestamp), \
+                "Timestamp should change format (UTC suffix) after timezone toggle"
+        else:
+            # If the timestamp string changed, that's sufficient.
+            assert new_timestamp != first_timestamp, \
+                "Timestamp value should change after timezone toggle"
 
     def test_local_timezone_displays_without_utc_suffix(self, page, test_server_url):
         """Test that local timezone displays timestamps without UTC suffix."""

@@ -53,12 +53,6 @@ class TimezoneToggle {
                 timezone: timezone
             }
         }));
-
-        // If reload doesn't happen (event listener not ready), apply changes
-        // This is a fallback that shouldn't normally execute
-        setTimeout(() => {
-            this.applyTimezone(timezone);
-        }, 100);
     }
 
     /**
@@ -183,19 +177,8 @@ class TimezoneToggle {
      * Update all datetime-local inputs based on current timezone preference
      */
     updateAllDateTimeInputs() {
-        // Update all datetime-local inputs on the page
-        const inputs = document.querySelectorAll('input[type="datetime-local"]');
-        inputs.forEach(input => {
-            if (input.value) {
-                // Re-render the input based on current timezone
-                const currentValue = input.value;
-                if (currentValue) {
-                    // Store the actual timestamp value, not the display value
-                    // The input value in datetime-local is always in local time
-                    // We need to handle this in the form submission
-                }
-            }
-        });
+        // No action needed: <input type="datetime-local"> values are always in local time per HTML spec.
+        // If timezone conversion is required, handle it during form submission, not here.
     }
 
     /**

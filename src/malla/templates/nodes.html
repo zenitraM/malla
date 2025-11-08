@@ -310,7 +310,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 sortKey: 'last_packet_time',
                 render: (value, row) => {
                     if (value && value !== 'Never') {
-                        // Use last_packet_time if available (unix timestamp), otherwise format the string
+                        // Use last_packet_time (unix timestamp) if available, otherwise use value (pre-formatted string)
                         const timestamp = row.last_packet_time || value;
                         const formatted = formatTimestamp(timestamp);
                         return `<small class="timestamp-display" data-timestamp="${timestamp}">${formatted}</small>`;

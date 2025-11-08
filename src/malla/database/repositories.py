@@ -209,12 +209,14 @@ class PacketRepository:
             # Generic exclusion filters for from/to node IDs
             if filters.get("exclude_from") is not None:
                 # Exclude packets whose sender matches the specified node ID
-                where_conditions.append("(from_node_id IS NULL OR from_node_id != ?)")
+                # Optimized: Use simple != condition to allow index usage
+                where_conditions.append("from_node_id != ?")
                 params.append(filters["exclude_from"])
 
             if filters.get("exclude_to") is not None:
                 # Exclude packets whose destination matches the specified node ID
-                where_conditions.append("(to_node_id IS NULL OR to_node_id != ?)")
+                # Optimized: Use simple != condition to allow index usage
+                where_conditions.append("to_node_id != ?")
                 params.append(filters["exclude_to"])
 
             # Search functionality

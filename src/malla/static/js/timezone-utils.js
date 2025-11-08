@@ -29,7 +29,9 @@ function formatTimestamp(timestamp, format = 'datetime') {
     // Convert to unix timestamp if it's a string
     let unixTimestamp;
     if (typeof timestamp === 'string') {
-        // Check if it's already a formatted string (contains spaces or dashes)
+        // Check if it's already a formatted string (contains spaces, dashes, or 'T')
+        // Note: This assumes timestamps are always positive, as '-' in negative numbers would be
+        // incorrectly detected as a formatted string. This is acceptable for timestamp use cases.
         // If so, try to parse it (strip " UTC" suffix if present to avoid Date parsing issues)
         if (timestamp.includes('-') || timestamp.includes(' ') || timestamp.includes('T')) {
             // Remove " UTC" suffix if present before parsing
@@ -147,10 +149,45 @@ function renderTimestampColumn(row, timestampField = 'timestamp', idField = 'id'
     const timestamp = row[timestampField];
     const formattedTime = formatTimestamp(timestamp);
     const id = row[idField];
-    const link = linkPath.replace('{id}', id);
+
+    // Escape HTML to prevent XSS
+    const escapedId = String(id).replace(/[&<>"']/g, function(match) {
+        const escape = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+        return escape[match];
+    });
+
+    const escapedFormattedTime = String(formattedTime).replace(/[&<>"']/g, function(match) {
+        const escape = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+        return escape[match];
+    });
+
+    const escapedTimestamp = String(timestamp).replace(/[&<>"']/g, function(match) {
+        const escape = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+        return escape[match];
+    });
+
+    const link = linkPath.replace('{id}', escapedId);
 
     return `<a href="${link}" class="text-decoration-none" title="View details">
-                <small class="timestamp-display" data-timestamp="${timestamp}">${formattedTime}</small>
+                <small class="timestamp-display" data-timestamp="${escapedTimestamp}">${escapedFormattedTime}</small>
             </a>`;
 }
 
@@ -183,8 +220,12 @@ function updateAllTimestamps() {
  * Listen for timezone changes and update timestamps
  */
 window.addEventListener('timezoneChanged', function(event) {
-    // Simply reload the page when timezone changes
-    // This ensures all timestamps and tables are re-rendered with the new timezone
+    // Reload the page when timezone changes.
+    // Rationale: Reloading ensures all server-rendered timestamps and dynamic content
+    // are consistently updated, avoiding the need to track and update every timestamp
+    // location in the DOM. This is simpler and more robust than attempting to update
+    // all possible timestamp locations dynamically, especially for content rendered
+    // on the server or by third-party components.
     window.location.reload();
 });
 
