@@ -334,3 +334,49 @@ class TestMapFilters:
         # Also verify the selected option
         selected_option = age_filter.locator("option[selected]")
         expect(selected_option).to_have_attribute("value", "24")
+
+    @pytest.mark.e2e
+    def test_default_filter_configuration_applied(self, page: Page, test_server_url):
+        """Test that the default filter configuration is applied correctly when the page loads."""
+        page.goto(f"{test_server_url}/map")
+
+        # Wait for loading to complete
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
+
+        # Wait a bit more for JavaScript to initialize the form fields
+        page.wait_for_timeout(1000)
+
+        # Check that maxAge has the default value of 24 hours
+        age_filter = page.locator("#maxAge")
+        expect(age_filter).to_be_visible()
+        selected_value = age_filter.input_value()
+        assert selected_value == "24", f"Default max age should be 24 hours, but got {selected_value}"
+
+        # Check that the start date input is populated based on the default maxAge
+        start_date_input = page.locator("#startDateTime")
+        start_value = start_date_input.input_value()
+        assert start_value != "", "Start date should be populated based on default maxAge"
+
+        # Check that the end date input is empty (maxAge only sets start date)
+        end_date_input = page.locator("#endDateTime")
+        end_value = end_date_input.input_value()
+        assert end_value == "", "End date should be empty when maxAge is set"
+
+        # Verify that the start date is approximately 24 hours ago
+        hours_ago = page.evaluate("""
+            () => {
+                const startValue = document.getElementById('startDateTime').value;
+                const startDate = new Date(startValue);
+                const now = new Date();
+                const timeDiffMs = now.getTime() - startDate.getTime();
+                return timeDiffMs / (1000 * 60 * 60);
+            }
+        """)
+
+        # Allow for small variations due to rounding
+        assert 23.5 <= hours_ago <= 24.5, f"Start date should be approximately 24 hours ago, but got {hours_ago} hours"
+
+        # Check that minContacts has the default value of 1
+        min_contacts_input = page.locator("#minContacts")
+        min_contacts_value = min_contacts_input.input_value()
+        assert min_contacts_value == "1", f"Default min contacts should be 1, but got {min_contacts_value}"

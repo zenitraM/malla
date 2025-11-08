@@ -598,10 +598,11 @@ function initializeInterface() {
         } else {
             const hours = parseInt(val,10);
             if (!isNaN(hours)) {
-                const end = new Date();
-                const start = new Date(end.getTime() - hours*3600*1000);
+                const now = new Date();
+                const start = new Date(now.getTime() - hours*3600*1000);
                 $('#startDateTime').val(toLocalInputValue(start));
-                $('#endDateTime').val(toLocalInputValue(end));
+                // Don't set end date - leave it empty to show all data up to present
+                $('#endDateTime').val('');
             }
         }
         applyClientSideFilters();
@@ -644,6 +645,16 @@ function initializeInterface() {
 
     // Load channels on interface init
     loadPrimaryChannels();
+
+    // Trigger change events for all form fields to initialize them based on default values
+    const formFields = document.querySelectorAll('#locationFilterForm select, #locationFilterForm input');
+    formFields.forEach(field => {
+        if (field.value) {
+            // Manually trigger the change event handler
+            const event = new Event('change', { bubbles: true });
+            field.dispatchEvent(event);
+        }
+    });
 }
 
 // Map tile layers for different themes
