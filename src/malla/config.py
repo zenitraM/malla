@@ -40,6 +40,7 @@ class AppConfig:
     mqtt_topic_suffix: str = "/+/+/+/#"
 
     # Meshtastic channel default key (for optional packet decryption)
+    # Supports comma-separated list of base64-encoded keys
     default_channel_key: str = "1PG7OiApB1nwvP+rz05pAQ=="
 
     # Logging
@@ -47,6 +48,24 @@ class AppConfig:
 
     # Internal attribute to remember the source file used
     _config_path: Path | None = field(default=None, repr=False, compare=False)
+
+    def get_decryption_keys(self) -> list[str]:
+        """Parse and return list of decryption keys from the configuration.
+
+        Supports both single keys and comma-separated lists of keys.
+        Empty keys are filtered out.
+
+        Returns:
+            List of base64-encoded decryption keys
+        """
+        if not self.default_channel_key:
+            return []
+
+        # Split by comma and strip whitespace
+        keys = [key.strip() for key in self.default_channel_key.split(",")]
+
+        # Filter out empty keys
+        return [key for key in keys if key]
 
 
 # ---------------------------------------------------------------------------

@@ -41,5 +41,10 @@ debug: false
 # mqtt_topic_prefix: "msh"
 # mqtt_topic_suffix: "/+/+/+/#"
 
-# Default channel key used for decrypting secondary channels (base64)
+# Default channel key(s) used for decrypting secondary channels (base64)
+# Supports multiple comma-separated keys - each key will be tried in order
+# until one successfully decrypts the packet
+# Examples:
+#   Single key:    "1PG7OiApB1nwvP+rz05pAQ=="
+#   Multiple keys: "1PG7OiApB1nwvP+rz05pAQ==,AQ4GCAwQFBgcICQoLDA0ODw=,another+base64+key=="
 # default_channel_key: "1PG7OiApB1nwvP+rz05pAQ=="

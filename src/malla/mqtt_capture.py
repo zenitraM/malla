@@ -59,8 +59,9 @@ MQTT_TOPIC_SUFFIX: str = _cfg.mqtt_topic_suffix
 # Database file path
 DATABASE_FILE: str = _cfg.database_file
 
-# Decryption key for secondary channels (optional)
-DEFAULT_CHANNEL_KEY: str = _cfg.default_channel_key
+# Decryption keys for secondary channels (optional)
+# Supports multiple comma-separated keys
+DECRYPTION_KEYS: list[str] = _cfg.get_decryption_keys()
 
 # Logging configuration – falls back to INFO if an invalid level was supplied
 LOG_LEVEL = _cfg.log_level.upper()
@@ -153,15 +154,17 @@ def decrypt_packet(
 
 
 def try_decrypt_mesh_packet(
-    mesh_packet: Any, channel_name: str = "", key_base64: str = DEFAULT_CHANNEL_KEY
+    mesh_packet: Any, channel_name: str = "", keys_base64: list[str] | None = None
 ) -> bool:
     """
     Try to decrypt an encrypted MeshPacket and update it with decoded content.
 
+    Attempts decryption with each key in the provided list until successful.
+
     Args:
         mesh_packet: The MeshPacket protobuf object
         channel_name: Channel name for key derivation (empty for primary channel)
-        key_base64: Base64-encoded encryption key
+        keys_base64: List of base64-encoded encryption keys to try (uses DECRYPTION_KEYS if None)
 
     Returns:
         bool: True if decryption was successful and packet was updated
@@ -188,34 +191,53 @@ def try_decrypt_mesh_packet(
             f"Attempting to decrypt packet {packet_id} from {sender_id}, encrypted payload: {len(encrypted_payload)} bytes"
         )
 
-        # Derive the decryption key
-        key = derive_key_from_channel_name(channel_name, key_base64)
+        # Use provided keys or fall back to global DECRYPTION_KEYS
+        keys_to_try = keys_base64 if keys_base64 is not None else DECRYPTION_KEYS
 
-        # Decrypt the payload
-        decrypted_payload = decrypt_packet(encrypted_payload, packet_id, sender_id, key)
-
-        if not decrypted_payload:
-            logging.debug("Decryption returned empty payload")
+        if not keys_to_try:
+            logging.debug("No decryption keys configured")
             return False
 
-        # Try to parse the decrypted payload as a Data protobuf
-        try:
-            decoded_data = mesh_pb2.Data()
-            decoded_data.ParseFromString(decrypted_payload)
+        # Try each key until one works
+        for key_index, key_base64 in enumerate(keys_to_try):
+            logging.debug(f"Trying decryption key {key_index + 1}/{len(keys_to_try)}")
 
-            # Update the mesh packet with decoded data
-            mesh_packet.decoded.CopyFrom(decoded_data)
+            # Derive the decryption key
+            key = derive_key_from_channel_name(channel_name, key_base64)
 
-            logging.info(
-                f"✅ Successfully decrypted packet {packet_id} from {sender_id}: {portnums_pb2.PortNum.Name(decoded_data.portnum)}"
-            )
-            return True
+            # Decrypt the payload
+            decrypted_payload = decrypt_packet(encrypted_payload, packet_id, sender_id, key)
 
-        except Exception as parse_error:
-            logging.debug(
-                f"Failed to parse decrypted payload as Data protobuf: {parse_error}"
-            )
-            return False
+            if not decrypted_payload:
+                logging.debug(f"Decryption with key {key_index + 1} returned empty payload")
+                continue
+
+            # Try to parse the decrypted payload as a Data protobuf
+            try:
+                decoded_data = mesh_pb2.Data()
+                decoded_data.ParseFromString(decrypted_payload)
+
+                # Validate that we got a valid portnum (not UNKNOWN_APP)
+                if decoded_data.portnum == portnums_pb2.PortNum.UNKNOWN_APP:
+                    logging.debug(f"Key {key_index + 1} produced UNKNOWN_APP portnum, trying next key")
+                    continue
+
+                # Update the mesh packet with decoded data
+                mesh_packet.decoded.CopyFrom(decoded_data)
+
+                logging.info(
+                    f"✅ Successfully decrypted packet {packet_id} from {sender_id} with key {key_index + 1}/{len(keys_to_try)}: {portnums_pb2.PortNum.Name(decoded_data.portnum)}"
+                )
+                return True
+
+            except Exception as parse_error:
+                logging.debug(
+                    f"Failed to parse decrypted payload with key {key_index + 1} as Data protobuf: {parse_error}"
+                )
+                continue
+
+        logging.debug(f"Failed to decrypt packet with any of the {len(keys_to_try)} provided keys")
+        return False
 
     except Exception as e:
         logging.warning(f"Error in try_decrypt_mesh_packet: {e}")
@@ -936,20 +958,19 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
             except Exception:
                 pass
 
-            # Try decryption with primary channel key (most common case)
+            # Try decryption with primary channel keys (most common case)
             decryption_successful = try_decrypt_mesh_packet(
-                mesh_packet, channel_name="", key_base64=DEFAULT_CHANNEL_KEY
+                mesh_packet, channel_name=""
             )
 
-            # If primary channel decryption failed and we have a channel name, try with channel-specific key
+            # If primary channel decryption failed and we have a channel name, try with channel-specific keys
             if not decryption_successful and channel_name:
                 logging.debug(
-                    f"Primary key failed, trying channel-specific key for: {channel_name}"
+                    f"Primary channel decryption failed, trying channel-specific keys for: {channel_name}"
                 )
                 decryption_successful = try_decrypt_mesh_packet(
                     mesh_packet,
                     channel_name=channel_name,
-                    key_base64=DEFAULT_CHANNEL_KEY,
                 )
 
             if decryption_successful:
