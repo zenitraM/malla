@@ -6,6 +6,12 @@ This script connects to a Meshtastic MQTT broker and captures all mesh packets
 to a SQLite database for analysis and monitoring. It processes protobuf messages
 and extracts node information, telemetry, position data, and text messages.
 
+Features:
+- Automatic packet capture and storage
+- Node information caching
+- Packet decryption support for multiple channels
+- Automatic data cleanup based on retention settings
+
 Usage:
     python mqtt_to_sqlite.py
 
@@ -14,6 +20,14 @@ Configuration:
     via ``$MALLA_CONFIG_FILE``).  Keys can also be overridden with
     ``MALLA_*``-prefixed environment variables (e.g. ``MALLA_MQTT_PORT``) but
     the old unprefixed environment variables are no longer supported.
+
+Data Cleanup:
+    The tool supports automatic cleanup of old data based on the
+    ``data_retention_hours`` configuration parameter. When set to a positive
+    value, the tool will automatically delete packet_history records older than
+    the specified number of hours, and node_info records for nodes that haven't
+    been seen recently and have no packets in the packet_history table.
+    The cleanup runs every hour. Set to 0 (default) to disable cleanup.
 """
 
 import base64
@@ -63,6 +77,9 @@ DATABASE_FILE: str = _cfg.database_file
 # Supports multiple comma-separated keys
 DECRYPTION_KEYS: list[str] = _cfg.get_decryption_keys()
 
+# Data retention settings
+DATA_RETENTION_HOURS: int = _cfg.data_retention_hours
+
 # Logging configuration – falls back to INFO if an invalid level was supplied
 LOG_LEVEL = _cfg.log_level.upper()
 logging.basicConfig(
@@ -75,6 +92,8 @@ db_lock = threading.Lock()  # Thread lock for database access
 node_cache: dict[
     int, dict[str, Any]
 ] = {}  # In-memory cache: {node_id_numeric: {'hex_id': '!abc123', 'long_name': 'Name', 'short_name': 'Short', 'last_updated': timestamp}}
+cleanup_thread: threading.Thread | None = None  # Background thread for data cleanup
+stop_cleanup = threading.Event()  # Event to signal cleanup thread to stop
 
 
 # --- Decryption Functions ---
@@ -805,6 +824,81 @@ def get_packet_history(
         return rows
 
 
+def cleanup_old_data() -> None:
+    """Clean up old data from the database based on retention settings."""
+    if DATA_RETENTION_HOURS <= 0:
+        logging.debug("Data cleanup disabled (retention hours set to 0)")
+        return
+
+    logging.info("Data cleanup started for retention hours: {DATA_RETENTION_HOURS}")
+    current_time = time.time()
+    cutoff_time = current_time - (DATA_RETENTION_HOURS * 3600)
+
+    packets_deleted = 0
+    nodes_deleted = 0
+
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        try:
+            # Delete old packet history records
+            cursor.execute(
+                "DELETE FROM packet_history WHERE timestamp < ?",
+                (cutoff_time,)
+            )
+            packets_deleted = cursor.rowcount
+
+            # Delete node_info records for nodes that haven't been seen recently
+            # and have no packets in the packet_history table
+            cursor.execute(
+                """
+                DELETE FROM node_info
+                WHERE last_updated < ?
+                AND node_id NOT IN (
+                    SELECT DISTINCT from_node_id FROM packet_history WHERE from_node_id IS NOT NULL
+                    UNION
+                    SELECT DISTINCT to_node_id FROM packet_history WHERE to_node_id IS NOT NULL
+                )
+                """,
+                (cutoff_time,)
+            )
+            nodes_deleted = cursor.rowcount
+
+            conn.commit()
+
+            if packets_deleted > 0 or nodes_deleted > 0:
+                logging.info(
+                    f"🧹 Cleaned up {packets_deleted} old packets and {nodes_deleted} unused nodes "
+                    f"older than {DATA_RETENTION_HOURS} hours"
+                )
+            else:
+                logging.debug(
+                    f"No data to clean up (retention: {DATA_RETENTION_HOURS} hours)"
+                )
+
+        except Exception as e:
+            logging.error(f"Error during data cleanup: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+
+def cleanup_worker() -> None:
+    """Worker function that runs cleanup periodically in a background thread."""
+    logging.info("Cleanup worker thread started")
+
+    # Run cleanup immediately on startup
+    cleanup_old_data()
+
+    # Then run cleanup every hour
+    while not stop_cleanup.wait(3600):  # Wait for 1 hour or until stop signal
+        cleanup_old_data()
+
+    logging.info("Cleanup worker thread stopped")
+
+
 def get_node_statistics() -> dict[str, Any]:
     """Get statistics about known nodes."""
     with db_lock:
@@ -1294,6 +1388,13 @@ def main() -> None:
         f"Database stats: {stats['total_nodes']} nodes, {stats['total_packets']} packets, {stats['active_nodes_24h']} active nodes (24h)"
     )
 
+    # Start the cleanup thread
+    global cleanup_thread
+    stop_cleanup.clear()
+    cleanup_thread = threading.Thread(target=cleanup_worker, daemon=True)
+    cleanup_thread.start()
+    logging.info("Data cleanup thread started.")
+
     try:
         # Keep the main thread alive
         while True:
@@ -1305,6 +1406,16 @@ def main() -> None:
     except KeyboardInterrupt:
         logging.info("Script interrupted by user. Shutting down...")
     finally:
+        # Signal cleanup thread to stop
+        stop_cleanup.set()
+
+        # Wait for cleanup thread to finish (with timeout)
+        if cleanup_thread and cleanup_thread.is_alive():
+            logging.info("Waiting for cleanup thread to finish...")
+            cleanup_thread.join(timeout=5)
+            if cleanup_thread.is_alive():
+                logging.warning("Cleanup thread did not finish gracefully")
+
         logging.info("Stopping MQTT client loop...")
         mqtt_client.loop_stop()
         logging.info("Disconnecting from MQTT broker...")

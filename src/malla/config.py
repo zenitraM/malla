@@ -46,6 +46,10 @@ class AppConfig:
     # Logging
     log_level: str = "INFO"
 
+    # Data cleanup settings
+    # Number of hours after which to delete old data (0 = never delete)
+    data_retention_hours: int = 0
+
     # Internal attribute to remember the source file used
     _config_path: Path | None = field(default=None, repr=False, compare=False)
 

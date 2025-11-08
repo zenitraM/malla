@@ -298,8 +298,31 @@ The following keys are recognised:
 | `mqtt_topic_prefix` | str | `"msh"`                                 | MQTT topic prefix for Meshtastic messages.    | `MALLA_MQTT_TOPIC_PREFIX` |
 | `mqtt_topic_suffix` | str | `"/+/+/+/#"`                           | MQTT topic suffix pattern.                     | `MALLA_MQTT_TOPIC_SUFFIX` |
 | `default_channel_key` | str | `"1PG7OiApB1nwvP+rz05pAQ=="`         | Default channel key(s) for decryption (base64). Supports comma-separated list of keys - each will be tried in order until successful. | `MALLA_DEFAULT_CHANNEL_KEY` |
+| `data_retention_hours` | int | `0`                                     | Number of hours after which to delete old data (0 = never delete). Automatically cleans up packet_history and node_info records older than specified hours. | `MALLA_DATA_RETENTION_HOURS` |
 
-Environment variables **always override** values coming from the YAML file.
+Environment variables **always override** values coming from YAML file.
+
+### Data Cleanup
+
+Malla includes an automatic data cleanup feature to help manage database size over time. When enabled, it will:
+
+1. Delete packet_history records older than the specified number of hours
+2. Delete node_info records for nodes that haven't been seen recently and have no packets in the packet_history table
+3. Repeat the cleanup process every hour in the background
+
+To enable data cleanup, set the `data_retention_hours` configuration parameter to a positive value:
+
+```yaml
+# Keep data for 7 days (168 hours)
+data_retention_hours: 168
+```
+
+Or via environment variable:
+```bash
+export MALLA_DATA_RETENTION_HOURS=168
+```
+
+Set to `0` (default) to disable cleanup completely.
 
 ## Contributing
 
