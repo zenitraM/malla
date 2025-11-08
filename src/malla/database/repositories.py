@@ -209,12 +209,14 @@ class PacketRepository:
             # Generic exclusion filters for from/to node IDs
             if filters.get("exclude_from") is not None:
                 # Exclude packets whose sender matches the specified node ID
-                where_conditions.append("(from_node_id IS NULL OR from_node_id != ?)")
+                # Optimized: Use simple != condition to allow index usage
+                where_conditions.append("from_node_id != ?")
                 params.append(filters["exclude_from"])
 
             if filters.get("exclude_to") is not None:
                 # Exclude packets whose destination matches the specified node ID
-                where_conditions.append("(to_node_id IS NULL OR to_node_id != ?)")
+                # Optimized: Use simple != condition to allow index usage
+                where_conditions.append("to_node_id != ?")
                 params.append(filters["exclude_to"])
 
             # Search functionality
@@ -378,8 +380,8 @@ class PacketRepository:
                             p["processed_successfully"] for p in packets_in_group
                         ),
                         "timestamp_str": datetime.fromtimestamp(
-                            group_data["min_timestamp"]
-                        ).strftime("%Y-%m-%d %H:%M:%S"),
+                            group_data["min_timestamp"], UTC
+                        ).strftime("%Y-%m-%d %H:%M:%S UTC"),
                         "reception_count": len(packets_in_group),
                         "is_grouped": True,
                         "success": min(
@@ -508,8 +510,8 @@ class PacketRepository:
                     # Format timestamp if not already formatted
                     if packet["timestamp_str"] is None:
                         packet["timestamp_str"] = datetime.fromtimestamp(
-                            packet["timestamp"]
-                        ).strftime("%Y-%m-%d %H:%M:%S")
+                            packet["timestamp"], UTC
+                        ).strftime("%Y-%m-%d %H:%M:%S UTC")
 
                     # Calculate hop count if not already set
                     if (
@@ -2826,8 +2828,8 @@ class TracerouteRepository:
                     # Format timestamp if not already formatted
                     if packet["timestamp_str"] is None:
                         packet["timestamp_str"] = datetime.fromtimestamp(
-                            packet["timestamp"]
-                        ).strftime("%Y-%m-%d %H:%M:%S")
+                            packet["timestamp"], UTC
+                        ).strftime("%Y-%m-%d %H:%M:%S UTC")
 
                     # Add success indicator
                     packet["success"] = packet["processed_successfully"]

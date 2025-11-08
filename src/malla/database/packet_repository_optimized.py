@@ -4,7 +4,7 @@ Optimized PacketRepository implementation with time-windowed grouping
 
 import logging
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from . import get_db_connection
@@ -74,12 +74,13 @@ class PacketRepositoryOptimized:
                 params.append(filters["hop_count"])
 
             # Generic exclusion filters for from/to node IDs
+            # Optimized: Use simple != condition to allow index usage
             if filters.get("exclude_from") is not None:
-                where_conditions.append("(from_node_id IS NULL OR from_node_id != ?)")
+                where_conditions.append("from_node_id != ?")
                 params.append(filters["exclude_from"])
 
             if filters.get("exclude_to") is not None:
-                where_conditions.append("(to_node_id IS NULL OR to_node_id != ?)")
+                where_conditions.append("to_node_id != ?")
                 params.append(filters["exclude_to"])
 
             # Search functionality
@@ -321,8 +322,8 @@ class PacketRepositoryOptimized:
                     # Format timestamp if not already formatted
                     if packet["timestamp_str"] is None:
                         packet["timestamp_str"] = datetime.fromtimestamp(
-                            packet["timestamp"]
-                        ).strftime("%Y-%m-%d %H:%M:%S")
+                            packet["timestamp"], UTC
+                        ).strftime("%Y-%m-%d %H:%M:%S UTC")
 
                     # Calculate hop count if not already set
                     if (

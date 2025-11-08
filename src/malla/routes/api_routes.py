@@ -1370,7 +1370,7 @@ def api_packets_data():
                         1 if gateway_id and gateway_id != "Unknown" else 0
                     )
 
-            
+
             # Handle RSSI/SNR/Hops for grouped packets
             rssi_display = packet.get("rssi")
             snr_display = packet.get("snr")
@@ -1387,7 +1387,8 @@ def api_packets_data():
             # Prepare response data
             response_data = {
                 "id": packet["id"],
-                "timestamp": packet["timestamp_str"],
+                "timestamp": packet["timestamp"],  # Send raw Unix timestamp for client-side formatting
+                "timestamp_str": packet["timestamp_str"],  # Keep formatted string as fallback
                 "from_node": from_node_name,
                 "from_node_id": packet.get("from_node_id"),
                 "from_node_short": from_node_short,
@@ -1767,7 +1768,8 @@ def api_traceroute_data():
             # Prepare response data
             response_data = {
                 "id": tr["id"],
-                "timestamp": tr.get("timestamp_str", ""),
+                "timestamp": tr.get("timestamp"),  # Send raw Unix timestamp for client-side formatting
+                "timestamp_str": tr.get("timestamp_str", ""),  # Keep formatted string as fallback
                 "from_node": from_node_name,
                 "from_node_id": tr.get("from_node_id"),
                 "from_node_short": from_node_short,

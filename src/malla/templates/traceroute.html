@@ -205,9 +205,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 title: 'Timestamp',
                 sortable: true,
                 render: (value, row) => {
-                    return `<a href="/packet/${row.id}" class="text-decoration-none" title="View packet details">
-                                <small>${value}</small>
-                            </a>`;
+                    return renderTimestampColumn(row, 'timestamp', 'id', '/packet/{id}');
                 }
             },
             {

@@ -677,33 +677,38 @@ h1, .h1 {
   color: #f5c2c7 !important;
 }
 
-/* Dark mode toggle button styling */
+/* Timezone and dark mode toggle button styling */
+#timezone-toggle,
 #theme-toggle {
   border: 1px solid rgba(255, 255, 255, 0.3);
   transition: var(--bs-transition);
-  margin-left: 0.5rem;
 }
 
+#timezone-toggle:hover,
 #theme-toggle:hover {
   background-color: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.5);
   transform: translateY(-1px);
 }
 
+#timezone-toggle:focus,
 #theme-toggle:focus {
   box-shadow: 0 0 0 0.2rem rgba(255, 255, 255, 0.25);
 }
 
+#timezone-toggle i,
 #theme-toggle i {
   font-size: 0.9rem;
   transition: var(--bs-transition);
 }
 
-/* Dark mode specific adjustments for toggle button */
+/* Dark mode specific adjustments for toggle buttons */
+[data-bs-theme=dark] #timezone-toggle,
 [data-bs-theme=dark] #theme-toggle {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+[data-bs-theme=dark] #timezone-toggle:hover,
 [data-bs-theme=dark] #theme-toggle:hover {
   background-color: rgba(255, 255, 255, 0.15);
   border-color: rgba(255, 255, 255, 0.4);

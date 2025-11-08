@@ -246,8 +246,8 @@ class LocationService:
             age_hours = (current_time - location["timestamp"]) / 3600
 
             # Format timestamp string
-            timestamp_dt = datetime.fromtimestamp(location["timestamp"])
-            timestamp_str = timestamp_dt.strftime("%Y-%m-%d %H:%M:%S")
+            timestamp_dt = datetime.fromtimestamp(location["timestamp"], UTC)
+            timestamp_str = timestamp_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
             # Get network data for this node
             network_node = network_nodes.get(node_id, {})
@@ -944,8 +944,8 @@ class LocationService:
                     (now_ts - row["last_seen"]) / 3600.0 if row["last_seen"] else None
                 )
                 last_seen_str = (
-                    datetime.fromtimestamp(row["last_seen"]).strftime(
-                        "%Y-%m-%d %H:%M:%S"
+                    datetime.fromtimestamp(row["last_seen"], UTC).strftime(
+                        "%Y-%m-%d %H:%M:%S UTC"
                     )
                     if row["last_seen"]
                     else None
