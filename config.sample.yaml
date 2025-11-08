@@ -48,3 +48,6 @@ debug: false
 #   Single key:    "1PG7OiApB1nwvP+rz05pAQ=="
 #   Multiple keys: "1PG7OiApB1nwvP+rz05pAQ==,AQ4GCAwQFBgcICQoLDA0ODw=,another+base64+key=="
 # default_channel_key: "1PG7OiApB1nwvP+rz05pAQ=="
+
+# Number of hours after which to delete old data (0 = never delete)
+# data_retention_hours: 0
