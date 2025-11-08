@@ -432,6 +432,7 @@ function getRoleColor(role) {
     switch (role) {
         case 'CLIENT': return computedStyle.getPropertyValue('--bs-primary').trim(); // Blue
         case 'CLIENT_MUTE': return computedStyle.getPropertyValue('--bs-secondary').trim(); // Gray
+        case 'CLIENT_BASE': return computedStyle.getPropertyValue('--bs-secondary').trim(); // Gray
         case 'ROUTER': return computedStyle.getPropertyValue('--bs-success').trim(); // Green
         case 'ROUTER_LATE': return computedStyle.getPropertyValue('--bs-success').trim(); // Green (same as ROUTER)
         case 'REPEATER': return computedStyle.getPropertyValue('--bs-warning').trim(); // Yellow
@@ -446,6 +447,7 @@ function formatRole(role) {
     switch (role) {
         case 'CLIENT': return 'C';
         case 'CLIENT_MUTE': return 'CM';
+        case 'CLIENT_BASE': return 'CB';
         case 'ROUTER': return 'R';
         case 'ROUTER_LATE': return 'RL';
         case 'REPEATER': return 'RP';
