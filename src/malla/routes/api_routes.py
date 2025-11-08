@@ -1370,16 +1370,7 @@ def api_packets_data():
                         1 if gateway_id and gateway_id != "Unknown" else 0
                     )
 
-            # Handle size display and sorting
-            size_display = packet.get("payload_length", 0)
-            size_sort_value = size_display
-
-            if group_packets and packet.get("avg_payload_length"):
-                size_display = f"{packet['avg_payload_length']:.1f} B avg"
-                size_sort_value = packet["avg_payload_length"]
-            elif size_display:
-                size_display = f"{size_display} B"
-
+            
             # Handle RSSI/SNR/Hops for grouped packets
             rssi_display = packet.get("rssi")
             snr_display = packet.get("snr")
@@ -1409,8 +1400,6 @@ def api_packets_data():
                 "rssi": rssi_display,
                 "snr": snr_display,
                 "hops": hops_display,
-                "size": size_display,
-                "size_sort_value": size_sort_value,
                 "mesh_packet_id": packet.get("mesh_packet_id"),
                 "is_grouped": group_packets,
                 "channel": packet.get("channel_id") or "Unknown",

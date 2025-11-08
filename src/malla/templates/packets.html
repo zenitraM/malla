@@ -458,19 +458,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     return `<span class="text-muted">N/A</span>`;
                 }
             },
-            {
-                key: 'size',
-                title: 'Size',
-                sortable: true,
-                render: (value, row) => {
-                    if (row.is_grouped) {
-                        return value ? `<small class="text-info">${value}</small>` : `<span class="text-muted">N/A</span>`;
-                    } else {
-                        return value ? `<small>${value}</small>` : `<span class="text-muted">N/A</span>`;
-                    }
-                }
-            }
-        ],
+          ],
 
         // Final columns that are always at the end
         actions: [
@@ -517,7 +505,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Function to determine which default columns to exclude for specific packet types
     function getExcludedDefaultColumns(portnum) {
         const exclusions = {
-            'TEXT_MESSAGE_APP': ['size']  // Hide size column for text messages
+            // No column exclusions currently needed
         };
         return exclusions[portnum] || [];
     }
