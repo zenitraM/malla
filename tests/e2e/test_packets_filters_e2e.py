@@ -171,7 +171,7 @@ class TestPacketsFilters:
             f"Expected 'Channel' column, got: {updated_header_texts}"
         )
 
-        
+
         # Switch back to "All Types" and verify columns change back
         portnum_select.select_option("")  # All Types
 
@@ -191,7 +191,7 @@ class TestPacketsFilters:
             f"Expected 'Message' column to be hidden when not filtering text messages, got: {final_header_texts}"
         )
 
-        
+
         print("✅ Packet type column switching test passed")
 
     def test_packet_type_filter_url_column_restoration(
@@ -229,7 +229,7 @@ class TestPacketsFilters:
         channel_column_found = any("Channel" in header for header in header_texts)
         assert channel_column_found, f"Expected 'Channel' column, got: {header_texts}"
 
-        
+
         print("✅ URL parameter column restoration test passed")
 
     def test_packet_type_filter_api_consistency(self, page: Page, test_server_url: str):

@@ -3,7 +3,6 @@ E2E tests for timezone toggle functionality
 """
 
 import re
-from datetime import datetime
 
 import pytest
 from playwright.sync_api import expect
