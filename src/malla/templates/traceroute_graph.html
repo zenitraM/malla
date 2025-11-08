@@ -23,13 +23,40 @@
 
     <!-- Sidebar -->
     {% call sidebar_container("sidebar", "Network Graph", "bi bi-diagram-3", "toggleSidebar") %}
-        {{ selected_details_section("clearSelection") }}
+        <!-- Selected Details -->
+        <div class="sidebar-section" id="selectedDetails" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0"><i class="bi bi-info-circle"></i> <span id="selectedDetailsTitle">Selection</span></h6>
+                <button id="clearSelection" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div id="selectedDetailsContent"></div>
+        </div>
 
         <!-- Hover Details -->
         <div class="sidebar-section">
             <h6><i class="bi bi-eye"></i> Hover Details</h6>
             <div id="hoverDetails" class="hover-details">
                 <small class="text-muted">Hover over nodes or links for details</small>
+            </div>
+        </div>
+
+        <!-- Hop Filter (shown when node is selected) -->
+        <div class="sidebar-section" id="hopFilterSection" style="display: none;">
+            <h6><i class="bi bi-funnel"></i> Hop Distance Filter</h6>
+            <div class="mb-2">
+                <label for="hopDistance" class="form-label">Show nodes within <span id="hopDistanceValue">3</span> hops</label>
+                <input type="range" class="form-range" id="hopDistance" min="1" max="10" value="3" step="1">
+            </div>
+            <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="enableHopFilter" checked>
+                <label class="form-check-label" for="enableHopFilter">
+                    Enable hop filter
+                </label>
+            </div>
+            <div id="hopFilterStats" class="text-muted small" style="display: none;">
+                Showing <strong><span id="visibleNodeCount">0</span></strong> of <strong><span id="totalNodeCount">0</span></strong> nodes
             </div>
         </div>
 
@@ -183,6 +210,11 @@
     stroke-width: 4;
 }
 
+.node.comparison circle {
+    stroke: #28a745;
+    stroke-width: 4;
+}
+
 .link.selected {
     stroke: #007bff !important;
     stroke-width: 4 !important;
@@ -211,6 +243,12 @@ let simulation = null;
 let selectedNode = null;
 let selectedLink = null;
 let searchResults = [];
+let hopFilterEnabled = true;
+let maxHopDistance = 3;
+let visibleNodeIds = null;
+let nodeDistances = null;
+let comparisonNode = null; // Second node for path comparison
+let pathComparisonMode = false;
 
 // Make currentGraph globally accessible for debugging
 window.currentGraph = null;
@@ -300,6 +338,22 @@ function initializeInterface() {
     // Handle clear selection button
     $('#clearSelection').on('click', function() {
         clearSelection();
+    });
+
+    // Handle hop filter controls
+    $('#hopDistance').on('input', function() {
+        maxHopDistance = parseInt(this.value);
+        $('#hopDistanceValue').text(maxHopDistance);
+        if (selectedNode && hopFilterEnabled) {
+            applyHopFilter();
+        }
+    });
+
+    $('#enableHopFilter').on('change', function() {
+        hopFilterEnabled = this.checked;
+        if (selectedNode) {
+            applyHopFilter();
+        }
     });
 
     // Handle node search
@@ -452,7 +506,7 @@ function renderGraph(data) {
 
         // Now create zoom behavior that can reference g
         const zoom = d3.zoom()
-            .scaleExtent([0.1, 4])
+            .scaleExtent([0.05, 10])
             .on('zoom', (event) => {
                 g.attr('transform', event.transform);
             });
@@ -472,6 +526,10 @@ function renderGraph(data) {
         const nodesWithoutLocation = data.nodes.filter(n => !n.location);
 
         console.log(`Nodes with location: ${nodesWithLocation.length}, without: ${nodesWithoutLocation.length}`);
+
+        // Scales for geo positioning (initialized if we have location data)
+        let xScale = null;
+        let yScale = null;
 
                 if (nodesWithLocation.length > 0) {
             // Calculate geographical bounds using 80th percentile to focus on main cluster
@@ -506,10 +564,10 @@ function renderGraph(data) {
 
             // Create scales to map lat/lng to screen coordinates with better spacing
             const screenPadding = Math.min(width, height) * 0.05; // Smaller screen padding
-            const xScale = d3.scaleLinear()
+            xScale = d3.scaleLinear()
                 .domain([paddedMinLng, paddedMaxLng])
                 .range([screenPadding, width - screenPadding]);
-            const yScale = d3.scaleLinear()
+            yScale = d3.scaleLinear()
                 .domain([paddedMaxLat, paddedMinLat]) // Flip Y axis (north = up)
                 .range([screenPadding, height - screenPadding]);
 
@@ -549,20 +607,23 @@ function renderGraph(data) {
 
         // Create force simulation
         simulation = d3.forceSimulation(data.nodes)
-            .force('link', d3.forceLink(data.links).id(d => d.id).distance(d => Math.max(80, 250 - d.strength * 15)))
-            .force('charge', d3.forceManyBody().strength(-400))
+            .force('link', d3.forceLink(data.links).id(d => d.id).distance(d => Math.max(140, 360 - d.strength * 20)))
+            .force('charge', d3.forceManyBody().strength(-650))
             .force('center', d3.forceCenter(width / 2, height / 2))
-            .force('collision', d3.forceCollide().radius(d => d.size + 20));
+            .force('collision', d3.forceCollide().radius(d => d.size + 50));
 
         // If we have geographical positioning, adjust forces and release fixed positions
         if (nodesWithLocation.length > 0) {
             // Adjust forces for geographical layout
             simulation
-                .force('charge', d3.forceManyBody().strength(-200)) // Moderate repulsion
+                .force('charge', d3.forceManyBody().strength(-350)) // Stronger repulsion for more spacing
                 .force('center', null) // Remove centering force
                 .force('link', d3.forceLink(data.links).id(d => d.id)
-                    .distance(d => Math.max(100, 300 - d.strength * 20)) // Longer links for better spacing
-                    .strength(0.7)); // Moderate link strength
+                    .distance(d => Math.max(180, 420 - d.strength * 40)) // Longer links for more spacing
+                    .strength(0.6)) // Slightly softer links
+                // Gentle pull back towards geographic positions to preserve rough layout
+                .force('geoX', d3.forceX(d => d.location ? xScale(d.location.longitude) : width / 2).strength(d => d.location ? 0.12 : 0.05))
+                .force('geoY', d3.forceY(d => d.location ? yScale(d.location.latitude) : height / 2).strength(d => d.location ? 0.12 : 0.05));
 
             // Release fixed positions for nodes with location after initial layout
             // This allows small adjustments while maintaining geographical structure
@@ -588,6 +649,8 @@ function renderGraph(data) {
             .attr('stroke', d => snrColorScale(d.avg_snr))
             .attr('stroke-width', d => Math.max(1, d.strength))
             .attr('stroke-opacity', 0.8)
+            .attr('data-original-stroke', d => snrColorScale(d.avg_snr))
+            .attr('data-original-width', d => Math.max(1, d.strength))
             .style('cursor', 'pointer')
             .on('mouseover', function(event, d) {
                 showLinkHoverDetails(d);
@@ -618,6 +681,7 @@ function renderGraph(data) {
                 .attr('stroke-width', d => Math.max(1, d.strength))
                 .attr('stroke-opacity', 0.4)
                 .attr('stroke-dasharray', '5,5')
+                .attr('data-original-width', d => Math.max(1, d.strength))
                 .style('cursor', 'pointer')
                 .on('mouseover', function(event, d) {
                     showLinkHoverDetails(d);
@@ -651,17 +715,21 @@ function renderGraph(data) {
                 .on('end', dragended))
             .on('mouseover', function(event, d) {
                 showNodeHoverDetails(d);
+                // Only show hover paths if we're not in comparison mode
+                if (selectedNode && hopFilterEnabled && !pathComparisonMode && d.id !== selectedNode.id) {
+                    highlightPathToNode(d);
+                }
             })
             .on('mouseout', function() {
                 clearHoverDetails();
+                // Only clear hover paths if we're not in comparison mode
+                if (selectedNode && hopFilterEnabled && !pathComparisonMode) {
+                    clearPathHighlight();
+                }
             })
             .on('click', function(event, d) {
                 event.stopPropagation();
-                if (selectedNode && selectedNode.id === d.id) {
-                    clearSelection();
-                } else {
-                    selectNode(d);
-                }
+                handleNodeClick(d, event);
             });
 
         console.log('Created node groups');
@@ -708,18 +776,6 @@ function renderGraph(data) {
             }
 
             node.attr('transform', d => `translate(${d.x},${d.y})`);
-        });
-
-        // Auto-center the graph after initial simulation stabilizes
-        let hasAutoCentered = false;
-        simulation.on('end', () => {
-            if (!hasAutoCentered) {
-                hasAutoCentered = true;
-                setTimeout(() => {
-                    console.log('Auto-centering graph after simulation end');
-                    centerGraph();
-                }, 100);
-            }
         });
 
         console.log('Set up simulation event handlers');
@@ -857,7 +913,7 @@ function focusOnNode(targetNode) {
     }
 
     // Calculate zoom and pan to center on the node
-    const scale = 2.0;
+    const scale = 3.0;
     const translateX = graphWidth / 2 - scale * simNode.x;
     const translateY = graphHeight / 2 - scale * simNode.y;
     const translate = [translateX, translateY];
@@ -884,19 +940,118 @@ function focusOnNode(targetNode) {
         .call(window.graphZoom.transform, transform);
 }
 
+function handleNodeClick(node, event) {
+    if (!selectedNode) {
+        // First selection
+        selectNode(node);
+    } else if (selectedNode.id === node.id) {
+        // Clicking the same node - deselect
+        clearSelection();
+    } else if (comparisonNode && comparisonNode.id === node.id) {
+        // Clicking the comparison node - remove it
+        clearComparisonNode();
+    } else if (!comparisonNode) {
+        // Second selection - enter path comparison mode
+        selectComparisonNode(node);
+    } else {
+        // Already have two nodes selected, replace comparison node
+        selectComparisonNode(node);
+    }
+}
+
 function selectNode(node) {
-    clearSelection();
+    // Don't clear if we're adding a comparison node
+    if (!comparisonNode) {
+        clearSelection();
+    }
 
     selectedNode = node;
     selectedLink = null;
+    pathComparisonMode = false;
 
     // Highlight the node visually
     d3.selectAll('.node')
         .filter(d => d.id === node.id)
-        .classed('selected', true);
+        .classed('selected', true)
+        .select('circle')
+        .attr('stroke', '#007bff')
+        .attr('stroke-width', 4);
 
     // Show detailed information
     showSelectedNodeDetails(node);
+
+    // Show hop filter controls
+    document.getElementById('hopFilterSection').style.display = 'block';
+
+    // Apply hop filter if enabled
+    if (hopFilterEnabled) {
+        applyHopFilter();
+    }
+}
+
+function selectComparisonNode(node) {
+    comparisonNode = node;
+    pathComparisonMode = true;
+
+    // Highlight both nodes with different colors
+    d3.selectAll('.node').each(function(d) {
+        const isSelected = d.id === selectedNode.id;
+        const isComparison = d.id === comparisonNode.id;
+
+        if (isSelected) {
+            d3.select(this)
+                .classed('selected', true)
+                .select('circle')
+                .attr('stroke', '#007bff')
+                .attr('stroke-width', 4);
+        } else if (isComparison) {
+            d3.select(this)
+                .classed('comparison', true)
+                .select('circle')
+                .attr('stroke', '#28a745')
+                .attr('stroke-width', 4);
+        }
+    });
+
+    // Hide hop filter controls in comparison mode
+    document.getElementById('hopFilterSection').style.display = 'none';
+
+    // Show path comparison details
+    showPathComparisonDetails();
+
+    // Highlight paths between the two nodes
+    highlightPathsBetweenNodes();
+}
+
+function clearComparisonNode() {
+    if (!comparisonNode) return;
+
+    // Remove comparison node highlighting
+    d3.selectAll('.node')
+        .filter(d => d.id === comparisonNode.id)
+        .classed('comparison', false)
+        .select('circle')
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 2);
+
+    comparisonNode = null;
+    pathComparisonMode = false;
+
+    // Restore hop filter controls if node is still selected
+    if (selectedNode) {
+        document.getElementById('hopFilterSection').style.display = 'block';
+        showSelectedNodeDetails(selectedNode);
+
+        // Reapply hop filter
+        if (hopFilterEnabled) {
+            applyHopFilter();
+        } else {
+            // Reset visibility
+            d3.selectAll('.node').style('opacity', 1);
+            d3.selectAll('.link').style('opacity', 0.8);
+            d3.selectAll('.indirect-links line').style('opacity', 0.4);
+        }
+    }
 }
 
 function selectLink(link) {
@@ -917,9 +1072,17 @@ function selectLink(link) {
 function clearSelection() {
     selectedNode = null;
     selectedLink = null;
+    comparisonNode = null;
+    pathComparisonMode = false;
 
     // Clear visual highlights
-    d3.selectAll('.node').classed('selected', false);
+    d3.selectAll('.node')
+        .classed('selected', false)
+        .classed('comparison', false)
+        .select('circle')
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 2);
+
     d3.selectAll('.link').classed('selected', false);
     d3.selectAll('.node-label').classed('highlighted', false);
 
@@ -930,6 +1093,31 @@ function clearSelection() {
 
     // Hide selected details
     document.getElementById('selectedDetails').style.display = 'none';
+
+    // Hide hop filter controls
+    document.getElementById('hopFilterSection').style.display = 'none';
+
+    // Reset visibility of all nodes and links
+    d3.selectAll('.node').style('opacity', 1);
+
+    // Reset links to original colors
+    d3.selectAll('.link').each(function(d) {
+        d3.select(this)
+            .style('opacity', 0.8)
+            .attr('stroke', d3.select(this).attr('data-original-stroke'))
+            .attr('stroke-width', d3.select(this).attr('data-original-width'));
+    });
+
+    d3.selectAll('.indirect-links line').each(function(d) {
+        d3.select(this)
+            .style('opacity', 0.4)
+            .attr('stroke', '#6c757d')
+            .attr('stroke-width', d3.select(this).attr('data-original-width'));
+    });
+
+    // Clear hop filter state
+    visibleNodeIds = null;
+    nodeDistances = null;
 }
 
 function clearSearchResults() {
@@ -944,6 +1132,9 @@ function showSelectedNodeDetails(node) {
             <div class="col-12">
                 <h6>${node.name}</h6>
                 <p class="text-muted">Node ID: !${nodeIdHex}</p>
+                <div class="alert alert-info py-2 px-2 small mb-2">
+                    <i class="bi bi-lightbulb"></i> Click another node to show paths between them
+                </div>
             </div>
         </div>
         <div class="row">
@@ -968,15 +1159,225 @@ function showSelectedNodeDetails(node) {
         </div>
         <div class="row mt-2">
             <div class="col-12">
-                <a href="/node/${node.id}" class="btn btn-primary btn-sm">
+                <a href="/node/${node.id}" class="btn btn-primary btn-sm w-100">
                     <i class="bi bi-router"></i> View Node Details
                 </a>
             </div>
         </div>
     `;
 
+    document.getElementById('selectedDetailsTitle').textContent = 'Selected Node';
     document.getElementById('selectedDetailsContent').innerHTML = content;
     document.getElementById('selectedDetails').style.display = 'block';
+}
+
+function showPathComparisonDetails() {
+    if (!selectedNode || !comparisonNode) return;
+
+    // Calculate paths between the two nodes
+    const pathsData = calculatePathsBetweenNodes(selectedNode.id, comparisonNode.id);
+
+    const node1IdHex = selectedNode.id.toString(16).padStart(8, '0');
+    const node2IdHex = comparisonNode.id.toString(16).padStart(8, '0');
+
+    let pathsHtml = '';
+    if (pathsData.paths.length === 0) {
+        pathsHtml = '<div class="alert alert-warning py-2 px-2 small">No path found between these nodes</div>';
+    } else {
+        pathsHtml = `
+            <div class="mb-2">
+                <strong>${pathsData.paths.length} path${pathsData.paths.length > 1 ? 's' : ''} found</strong>
+                <small class="text-muted"> (${pathsData.distance} hop${pathsData.distance > 1 ? 's' : ''})</small>
+            </div>
+            <div class="small" style="max-height: 200px; overflow-y: auto;">
+        `;
+
+        pathsData.paths.forEach((path, idx) => {
+            const pathNames = path.map(nodeId => getNodeNameById(nodeId)).join(' → ');
+            pathsHtml += `<div class="mb-2 p-2 bg-light rounded"><strong>${idx + 1}.</strong> ${pathNames}</div>`;
+        });
+
+        pathsHtml += '</div>';
+    }
+
+    const content = `
+        <div class="mb-3">
+            <div class="d-flex align-items-center mb-2">
+                <span class="badge bg-primary me-2">1</span>
+                <div>
+                    <strong>${selectedNode.name}</strong><br>
+                    <small class="text-muted">!${node1IdHex}</small>
+                </div>
+            </div>
+            <div class="d-flex align-items-center">
+                <span class="badge bg-success me-2">2</span>
+                <div>
+                    <strong>${comparisonNode.name}</strong><br>
+                    <small class="text-muted">!${node2IdHex}</small>
+                </div>
+            </div>
+        </div>
+
+        ${pathsHtml}
+
+        <div class="alert alert-info py-2 px-2 small mt-2 mb-2">
+            <i class="bi bi-lightbulb"></i> Click a node again to deselect it, or click elsewhere to select different nodes
+        </div>
+
+        <div class="row mt-2">
+            <div class="col-6">
+                <a href="/node/${selectedNode.id}" class="btn btn-outline-primary btn-sm w-100" target="_blank">
+                    <i class="bi bi-router"></i> Node 1
+                </a>
+            </div>
+            <div class="col-6">
+                <a href="/node/${comparisonNode.id}" class="btn btn-outline-success btn-sm w-100" target="_blank">
+                    <i class="bi bi-router"></i> Node 2
+                </a>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('selectedDetailsTitle').textContent = 'Path Comparison';
+    document.getElementById('selectedDetailsContent').innerHTML = content;
+    document.getElementById('selectedDetails').style.display = 'block';
+}
+
+function calculatePathsBetweenNodes(startNodeId, endNodeId) {
+    if (!currentGraph || !currentGraph.links) {
+        return { paths: [], distance: 0 };
+    }
+
+    // Build adjacency list
+    const adjacency = new Map();
+    const allLinks = [...currentGraph.links];
+    if (currentGraph.indirect_connections) {
+        allLinks.push(...currentGraph.indirect_connections);
+    }
+
+    allLinks.forEach(link => {
+        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+
+        if (!adjacency.has(sourceId)) adjacency.set(sourceId, []);
+        if (!adjacency.has(targetId)) adjacency.set(targetId, []);
+
+        adjacency.get(sourceId).push(targetId);
+        adjacency.get(targetId).push(sourceId);
+    });
+
+    // BFS to find shortest paths
+    const visited = new Set([startNodeId]);
+    const distances = new Map([[startNodeId, 0]]);
+    const parents = new Map([[startNodeId, []]]);
+    const queue = [{nodeId: startNodeId, distance: 0}];
+    let queueIndex = 0;
+    let foundEnd = false;
+    let targetDistance = 0;
+
+    while (queueIndex < queue.length && !foundEnd) {
+        const {nodeId, distance} = queue[queueIndex++];
+
+        if (nodeId === endNodeId) {
+            foundEnd = true;
+            targetDistance = distance;
+            break;
+        }
+
+        const neighbors = adjacency.get(nodeId) || [];
+        for (const neighborId of neighbors) {
+            if (!visited.has(neighborId)) {
+                visited.add(neighborId);
+                distances.set(neighborId, distance + 1);
+                parents.set(neighborId, [nodeId]);
+                queue.push({nodeId: neighborId, distance: distance + 1});
+            } else if (distances.get(neighborId) === distance + 1) {
+                parents.get(neighborId).push(nodeId);
+            }
+        }
+    }
+
+    if (!foundEnd) {
+        return { paths: [], distance: 0 };
+    }
+
+    // Reconstruct all paths
+    const allPaths = [];
+    function buildPaths(currentId, currentPath) {
+        if (currentPath.length > 100) return;
+
+        const nodeParents = parents.get(currentId);
+        if (!nodeParents || nodeParents.length === 0) {
+            allPaths.push([currentId, ...currentPath]);
+            return;
+        }
+
+        for (const parentId of nodeParents) {
+            buildPaths(parentId, [currentId, ...currentPath]);
+        }
+    }
+
+    buildPaths(endNodeId, []);
+
+    return { paths: allPaths, distance: targetDistance };
+}
+
+function highlightPathsBetweenNodes() {
+    if (!selectedNode || !comparisonNode || !currentGraph) return;
+
+    const pathsData = calculatePathsBetweenNodes(selectedNode.id, comparisonNode.id);
+
+    if (pathsData.paths.length === 0) {
+        // No paths found - dim everything
+        d3.selectAll('.node').style('opacity', 0.2);
+        d3.selectAll('.link').style('opacity', 0.1);
+        d3.selectAll('.indirect-links line').style('opacity', 0.1);
+
+        // Keep selected nodes visible
+        d3.selectAll('.node').filter(d => d.id === selectedNode.id || d.id === comparisonNode.id)
+            .style('opacity', 1);
+        return;
+    }
+
+    // Collect all nodes and links in any path
+    const pathNodeIds = new Set();
+    const pathLinks = new Set();
+
+    pathsData.paths.forEach(path => {
+        path.forEach(nodeId => pathNodeIds.add(nodeId));
+        for (let i = 0; i < path.length - 1; i++) {
+            pathLinks.add(`${path[i]}-${path[i + 1]}`);
+            pathLinks.add(`${path[i + 1]}-${path[i]}`);
+        }
+    });
+
+    // Dim nodes not in paths
+    d3.selectAll('.node').style('opacity', d => pathNodeIds.has(d.id) ? 1 : 0.15);
+
+    // Dim links not in paths
+    d3.selectAll('.link').each(function(d) {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        const linkKey = `${sourceId}-${targetId}`;
+        const isInPath = pathLinks.has(linkKey);
+
+        d3.select(this)
+            .style('opacity', isInPath ? 0.9 : 0.1)
+            .attr('stroke', isInPath ? '#ffc107' : d3.select(this).attr('data-original-stroke'))
+            .attr('stroke-width', isInPath ? 5 : d3.select(this).attr('data-original-width'));
+    });
+
+    d3.selectAll('.indirect-links line').each(function(d) {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        const linkKey = `${sourceId}-${targetId}`;
+        const isInPath = pathLinks.has(linkKey);
+
+        d3.select(this)
+            .style('opacity', isInPath ? 0.7 : 0.1)
+            .attr('stroke', isInPath ? '#ffc107' : '#6c757d')
+            .attr('stroke-width', isInPath ? 5 : d3.select(this).attr('data-original-width'));
+    });
 }
 
 function showSelectedLinkDetails(link) {
@@ -1027,10 +1428,43 @@ function showSelectedLinkDetails(link) {
 
 function showNodeHoverDetails(node) {
     const nodeIdHex = node.id.toString(16).padStart(8, '0');
+
+    let pathInfo = '';
+    if (selectedNode && hopFilterEnabled && nodeDistances && node.id !== selectedNode.id) {
+        const distance = nodeDistances.distances.get(node.id);
+        if (distance !== undefined) {
+            const allPaths = getAllPathsToNode(node.id, nodeDistances.parents, selectedNode.id);
+
+            if (allPaths.length > 0) {
+                pathInfo = `<div class="mb-2"><strong>Hops from ${selectedNode.name}:</strong> ${distance}</div>`;
+
+                if (allPaths.length === 1) {
+                    // Single path
+                    const path = allPaths[0];
+                    const pathNames = path.map(nodeId => getNodeNameById(nodeId)).join(' → ');
+                    pathInfo += `<div class="small text-muted" style="max-height: 150px; overflow-y: auto;">${pathNames}</div>`;
+                } else {
+                    // Multiple paths
+                    pathInfo += `<div class="small"><strong>${allPaths.length} shortest paths:</strong></div>`;
+                    pathInfo += `<div class="small text-muted" style="max-height: 150px; overflow-y: auto;">`;
+
+                    allPaths.forEach((path, idx) => {
+                        const pathNames = path.map(nodeId => getNodeNameById(nodeId)).join(' → ');
+                        pathInfo += `<div class="mb-1">${idx + 1}. ${pathNames}</div>`;
+                    });
+
+                    pathInfo += `</div>`;
+                }
+            }
+        }
+    }
+
     const content = `
         <div><strong>${node.name}</strong></div>
         <div class="text-muted">!${nodeIdHex}</div>
         <hr class="my-2">
+        ${pathInfo}
+        ${pathInfo ? '<hr class="my-2">' : ''}
         <div><strong>Connections:</strong> ${node.connections}</div>
         <div><strong>Packets:</strong> ${node.packet_count}</div>
         <div><strong>Avg SNR:</strong> ${node.avg_snr ? node.avg_snr + ' dB' : 'N/A'}</div>
@@ -1208,9 +1642,10 @@ window.addEventListener('resize', function() {
                 .attr('width', width)
                 .attr('height', height);
 
-            // Update simulation center
-            simulation.force('center', d3.forceCenter(width / 2, height / 2));
-            simulation.alpha(0.3).restart();
+            // Update simulation center force (but don't restart aggressively)
+            if (simulation.force('center')) {
+                simulation.force('center', d3.forceCenter(width / 2, height / 2));
+            }
 
             // Update stored dimensions
             window.graphWidth = width;
@@ -1218,6 +1653,239 @@ window.addEventListener('resize', function() {
         }, 100);
     }
 });
+
+// Function to calculate nodes within N hops from a selected node
+// Returns both the set of visible nodes and a map of distances and parents for path reconstruction
+// Now tracks ALL parents (for multiple shortest paths) instead of just one
+function getNodesWithinHops(startNodeId, maxHops) {
+    if (!currentGraph || !currentGraph.links) {
+        return { nodeIds: new Set(), distances: new Map(), parents: new Map(), adjacency: new Map() };
+    }
+
+    // Build adjacency list from links
+    const adjacency = new Map();
+
+    // Include both direct and indirect links
+    const allLinks = [...currentGraph.links];
+    if (currentGraph.indirect_connections) {
+        allLinks.push(...currentGraph.indirect_connections);
+    }
+
+    allLinks.forEach(link => {
+        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+
+        if (!adjacency.has(sourceId)) adjacency.set(sourceId, []);
+        if (!adjacency.has(targetId)) adjacency.set(targetId, []);
+
+        adjacency.get(sourceId).push(targetId);
+        adjacency.get(targetId).push(sourceId);
+    });
+
+    // BFS to find nodes within maxHops - track ALL parents for multiple shortest paths
+    const visited = new Set([startNodeId]);
+    const distances = new Map([[startNodeId, 0]]);
+    const parents = new Map([[startNodeId, []]]); // Now stores arrays of parents
+    const queue = [{nodeId: startNodeId, distance: 0}];
+    let queueIndex = 0;
+
+    while (queueIndex < queue.length) {
+        const {nodeId, distance} = queue[queueIndex++];
+
+        if (distance < maxHops) {
+            const neighbors = adjacency.get(nodeId) || [];
+            for (const neighborId of neighbors) {
+                if (!visited.has(neighborId)) {
+                    // First time visiting this node
+                    visited.add(neighborId);
+                    distances.set(neighborId, distance + 1);
+                    parents.set(neighborId, [nodeId]);
+                    queue.push({nodeId: neighborId, distance: distance + 1});
+                } else if (distances.get(neighborId) === distance + 1) {
+                    // Found another shortest path to this node
+                    parents.get(neighborId).push(nodeId);
+                }
+            }
+        }
+    }
+
+    return { nodeIds: visited, distances, parents, adjacency };
+}
+
+// Function to find ALL shortest paths from selected node to target node
+function getAllPathsToNode(targetNodeId, parents, startNodeId) {
+    if (!parents || !parents.has(targetNodeId)) {
+        return [];
+    }
+
+    const allPaths = [];
+
+    // Recursive function to build all paths
+    function buildPaths(currentId, currentPath) {
+        if (currentPath.length > 100) {
+            console.error('Path reconstruction exceeded maximum length');
+            return;
+        }
+
+        const nodeParents = parents.get(currentId);
+        if (!nodeParents || nodeParents.length === 0) {
+            // Reached the start node
+            allPaths.push([currentId, ...currentPath]);
+            return;
+        }
+
+        // Recurse for each parent
+        for (const parentId of nodeParents) {
+            buildPaths(parentId, [currentId, ...currentPath]);
+        }
+    }
+
+    buildPaths(targetNodeId, []);
+
+    return allPaths;
+}
+
+// Helper function to get node name by ID
+function getNodeNameById(nodeId) {
+    if (!currentGraph || !currentGraph.nodes) return `!${nodeId.toString(16).padStart(8, '0')}`;
+    const node = currentGraph.nodes.find(n => n.id === nodeId);
+    return node ? node.name : `!${nodeId.toString(16).padStart(8, '0')}`;
+}
+
+// Function to highlight ALL paths from selected node to hovered node
+function highlightPathToNode(hoveredNode) {
+    if (!selectedNode || !nodeDistances || !currentGraph) {
+        return;
+    }
+
+    const allPaths = getAllPathsToNode(hoveredNode.id, nodeDistances.parents, selectedNode.id);
+    if (allPaths.length === 0) {
+        return;
+    }
+
+    // Create a set of all node IDs in any path
+    const pathNodeIds = new Set();
+    allPaths.forEach(path => {
+        path.forEach(nodeId => pathNodeIds.add(nodeId));
+    });
+
+    // Create a set of all links in any path (pairs of consecutive nodes)
+    const pathLinks = new Set();
+    allPaths.forEach(path => {
+        for (let i = 0; i < path.length - 1; i++) {
+            const id1 = path[i];
+            const id2 = path[i + 1];
+            // Store both directions since links are bidirectional
+            pathLinks.add(`${id1}-${id2}`);
+            pathLinks.add(`${id2}-${id1}`);
+        }
+    });
+
+    // Highlight nodes in any path (except already selected node)
+    d3.selectAll('.node').each(function(d) {
+        const isInPath = pathNodeIds.has(d.id) && d.id !== selectedNode.id;
+        d3.select(this).select('circle')
+            .attr('stroke', isInPath ? '#ffc107' : '#fff')
+            .attr('stroke-width', isInPath ? 4 : 2);
+    });
+
+    // Highlight links in any path
+    d3.selectAll('.link').each(function(d) {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        const linkKey = `${sourceId}-${targetId}`;
+        const isInPath = pathLinks.has(linkKey);
+
+        d3.select(this)
+            .attr('stroke', isInPath ? '#ffc107' : d3.select(this).attr('data-original-stroke'))
+            .attr('stroke-width', isInPath ? 5 : d3.select(this).attr('data-original-width'));
+    });
+
+    d3.selectAll('.indirect-links line').each(function(d) {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        const linkKey = `${sourceId}-${targetId}`;
+        const isInPath = pathLinks.has(linkKey);
+
+        d3.select(this)
+            .attr('stroke', isInPath ? '#ffc107' : '#6c757d')
+            .attr('stroke-width', isInPath ? 5 : d3.select(this).attr('data-original-width'));
+    });
+}
+
+// Function to clear path highlighting
+function clearPathHighlight() {
+    // Reset node strokes (except the selected node which should remain highlighted)
+    d3.selectAll('.node').each(function(d) {
+        if (!selectedNode || d.id !== selectedNode.id) {
+            d3.select(this).select('circle')
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 2);
+        }
+    });
+
+    // Reset link colors to their original values
+    d3.selectAll('.link').each(function(d) {
+        d3.select(this)
+            .attr('stroke', d3.select(this).attr('data-original-stroke'))
+            .attr('stroke-width', d3.select(this).attr('data-original-width'));
+    });
+
+    d3.selectAll('.indirect-links line').each(function(d) {
+        d3.select(this)
+            .attr('stroke', '#6c757d')
+            .attr('stroke-width', d3.select(this).attr('data-original-width'));
+    });
+}
+
+// Function to apply hop filter to the graph
+function applyHopFilter() {
+    if (!selectedNode || !currentGraph) {
+        return;
+    }
+
+    if (!hopFilterEnabled) {
+        // Reset all visibility
+        d3.selectAll('.node').style('opacity', 1);
+        d3.selectAll('.link').style('opacity', 0.8);
+        d3.selectAll('.indirect-links line').style('opacity', 0.4);
+        document.getElementById('hopFilterStats').style.display = 'none';
+        visibleNodeIds = null;
+        nodeDistances = null;
+        return;
+    }
+
+    // Get nodes within hop distance with path information
+    const result = getNodesWithinHops(selectedNode.id, maxHopDistance);
+    visibleNodeIds = result.nodeIds;
+    nodeDistances = { distances: result.distances, parents: result.parents, adjacency: result.adjacency };
+
+    console.log(`Filtering to ${visibleNodeIds.size} nodes within ${maxHopDistance} hops of ${selectedNode.name}`);
+
+    // Update stats display
+    const totalNodes = currentGraph.nodes.length;
+    document.getElementById('visibleNodeCount').textContent = visibleNodeIds.size;
+    document.getElementById('totalNodeCount').textContent = totalNodes;
+    document.getElementById('hopFilterStats').style.display = 'block';
+
+    // Update node visibility
+    d3.selectAll('.node').style('opacity', d => {
+        return visibleNodeIds.has(d.id) ? 1 : 0.1;
+    });
+
+    // Update link visibility - show only links where both endpoints are visible
+    d3.selectAll('.link').style('opacity', d => {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        return (visibleNodeIds.has(sourceId) && visibleNodeIds.has(targetId)) ? 0.8 : 0.05;
+    });
+
+    d3.selectAll('.indirect-links line').style('opacity', d => {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        return (visibleNodeIds.has(sourceId) && visibleNodeIds.has(targetId)) ? 0.4 : 0.05;
+    });
+}
 
 async function loadPrimaryChannels() {
     try {
