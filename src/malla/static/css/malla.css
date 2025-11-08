@@ -273,7 +273,7 @@ h1, .h1 {
 .modern-table tbody td {
   padding: 0.5rem;
   font-size: 0.875rem;
-  line-height: 1.3;
+  line-height: 1;
 }
 
 /* Form elements in tables */

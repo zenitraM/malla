@@ -1158,7 +1158,7 @@ def api_packets_data():
     try:
         # Get parameters
         page = request.args.get("page", type=int, default=1)
-        limit = request.args.get("limit", type=int, default=25)
+        limit = request.args.get("limit", type=int, default=100)
         search = request.args.get("search", default="")
         sort_by = request.args.get("sort_by", default="timestamp")
         sort_order = request.args.get("sort_order", default="desc")
@@ -1455,7 +1455,7 @@ def api_nodes_data():
     try:
         # Get parameters
         page = request.args.get("page", type=int, default=1)
-        limit = request.args.get("limit", type=int, default=25)
+        limit = request.args.get("limit", type=int, default=100)
         search = request.args.get("search", default="")
         sort_by = request.args.get("sort_by", default="last_packet_time")
         sort_order = request.args.get("sort_order", default="desc")
@@ -1539,7 +1539,7 @@ def api_traceroute_data():
     try:
         # Get parameters
         page = request.args.get("page", type=int, default=1)
-        limit = request.args.get("limit", type=int, default=25)
+        limit = request.args.get("limit", type=int, default=100)
         search = request.args.get("search", default="")
         sort_by = request.args.get("sort_by", default="timestamp")
         sort_order = request.args.get("sort_order", default="desc")
