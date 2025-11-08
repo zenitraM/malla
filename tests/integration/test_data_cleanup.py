@@ -9,7 +9,6 @@ import os
 import sqlite3
 import tempfile
 import time
-from unittest.mock import patch
 
 import pytest
 
@@ -83,10 +82,10 @@ class TestDataCleanup:
                 cursor = conn.cursor()
 
                 cursor.execute("SELECT COUNT(*) FROM packet_history")
-                initial_packets = cursor.fetchone()[0]
+                cursor.fetchone()[0]
 
                 cursor.execute("SELECT COUNT(*) FROM node_info")
-                initial_nodes = cursor.fetchone()[0]
+                cursor.fetchone()[0]
 
                 conn.close()
 
