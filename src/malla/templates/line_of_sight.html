@@ -537,7 +537,7 @@ function checkAnalyzeButton() {
 function initializeMap() {
     map = L.map('line-of-sight-map').setView([40.4168, -3.7038], 6); // Default to Spain
 
-    // OpenTopoMap - Shows terrain, contours, and elevation
+    // Stamen Terrain (via Stadia Maps) - Shows terrain, contours, and elevation
     L.tileLayer('https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}{r}.{ext}', {
 	    minZoom: 0,
         maxZoom: 18,
