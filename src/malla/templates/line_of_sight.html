@@ -868,17 +868,6 @@ function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltit
     const endElevation = useNodeElevation ? (toAltitude || toTerrainElevation) : toTerrainElevation;
     const totalDistance = geoPoints[geoPoints.length - 1].distanceFromOriginMeters;
 
-    console.log('Chart elevation calculation:');
-    console.log('  useNodeElevation:', useNodeElevation);
-    console.log('  fromAltitude (node reported):', fromAltitude);
-    console.log('  fromTerrainElevation (API):', fromTerrainElevation);
-    console.log('  toAltitude (node reported):', toAltitude);
-    console.log('  toTerrainElevation (API):', toTerrainElevation);
-    console.log('  startElevation (used):', startElevation);
-    console.log('  endElevation (used):', endElevation);
-    console.log('  First terrain point:', geoPoints[0].elevation);
-    console.log('  Last terrain point:', geoPoints[geoPoints.length - 1].elevation);
-
     // Prepare data with x,y coordinates for linear scale
     const terrainData = geoPoints.map(p => ({
         x: p.distanceFromOriginMeters / 1000, // Convert to km
