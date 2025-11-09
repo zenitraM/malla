@@ -39,7 +39,9 @@ class TestLineOfSight:
         ), "Line of Sight functionality should be available in the map page"
 
         # Verify the icon class is used
-        assert "bi-bezier" in page_content, "Line of Sight icon should be defined"
+        assert "bi-bezier" in page_content, (
+            "Line of Sight icon should be defined"
+        )
 
     @pytest.mark.e2e
     def test_line_of_sight_route_exists(self, page: Page, test_server_url):

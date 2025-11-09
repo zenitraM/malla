@@ -22,7 +22,7 @@ class TestDataCleanup:
     def test_cleanup_functionality(self):
         """Test that data cleanup correctly removes old records."""
         # Create a temporary database file
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as temp_db:
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as temp_db:
             temp_db_path = temp_db.name
 
         try:
@@ -44,54 +44,33 @@ class TestDataCleanup:
                 # Insert old packet history records
                 cursor.execute(
                     "INSERT INTO packet_history (timestamp, topic, from_node_id, to_node_id, portnum, portnum_name) VALUES (?, ?, ?, ?, ?, ?)",
-                    (old_time, "test/topic", 123456, 654321, 1, "TEXT_MESSAGE_APP"),
+                    (old_time, "test/topic", 123456, 654321, 1, "TEXT_MESSAGE_APP")
                 )
                 cursor.execute(
                     "INSERT INTO packet_history (timestamp, topic, from_node_id, to_node_id, portnum, portnum_name) VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        old_time + 3600,
-                        "test/topic2",
-                        123457,
-                        654322,
-                        1,
-                        "TEXT_MESSAGE_APP",
-                    ),
+                    (old_time + 3600, "test/topic2", 123457, 654322, 1, "TEXT_MESSAGE_APP")
                 )
 
                 # Insert recent packet history records
                 cursor.execute(
                     "INSERT INTO packet_history (timestamp, topic, from_node_id, to_node_id, portnum, portnum_name) VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        current_time - 3600,
-                        "test/topic3",
-                        123458,
-                        654323,
-                        1,
-                        "TEXT_MESSAGE_APP",
-                    ),
+                    (current_time - 3600, "test/topic3", 123458, 654323, 1, "TEXT_MESSAGE_APP")
                 )
 
                 # Insert old node info records
                 cursor.execute(
                     "INSERT INTO node_info (node_id, hex_id, long_name, short_name, first_seen, last_updated) VALUES (?, ?, ?, ?, ?, ?)",
-                    (123456, "!123456", "Old Node 1", "ON1", old_time, old_time),
+                    (123456, "!123456", "Old Node 1", "ON1", old_time, old_time)
                 )
                 cursor.execute(
                     "INSERT INTO node_info (node_id, hex_id, long_name, short_name, first_seen, last_updated) VALUES (?, ?, ?, ?, ?, ?)",
-                    (123457, "!123457", "Old Node 2", "ON2", old_time, old_time),
+                    (123457, "!123457", "Old Node 2", "ON2", old_time, old_time)
                 )
 
                 # Insert recent node info records
                 cursor.execute(
                     "INSERT INTO node_info (node_id, hex_id, long_name, short_name, first_seen, last_updated) VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        123458,
-                        "!123458",
-                        "Recent Node",
-                        "RN",
-                        current_time - 3600,
-                        current_time - 3600,
-                    ),
+                    (123458, "!123458", "Recent Node", "RN", current_time - 3600, current_time - 3600)
                 )
 
                 conn.commit()
@@ -130,34 +109,20 @@ class TestDataCleanup:
                     remaining_nodes = cursor.fetchone()[0]
 
                     # Check that old packets were deleted but recent ones remain
-                    cursor.execute(
-                        "SELECT COUNT(*) FROM packet_history WHERE timestamp < ?",
-                        (current_time - 24 * 3600,),
-                    )
+                    cursor.execute("SELECT COUNT(*) FROM packet_history WHERE timestamp < ?", (current_time - 24 * 3600,))
                     old_packets_remaining = cursor.fetchone()[0]
 
                     # Check that old nodes were deleted but recent ones remain
-                    cursor.execute(
-                        "SELECT COUNT(*) FROM node_info WHERE last_updated < ?",
-                        (current_time - 24 * 3600,),
-                    )
+                    cursor.execute("SELECT COUNT(*) FROM node_info WHERE last_updated < ?", (current_time - 24 * 3600,))
                     old_nodes_remaining = cursor.fetchone()[0]
 
                     conn.close()
 
                 # Verify results
-                assert remaining_packets == 1, (
-                    f"Expected 1 packet to remain, got {remaining_packets}"
-                )
-                assert remaining_nodes == 1, (
-                    f"Expected 1 node to remain, got {remaining_nodes}"
-                )
-                assert old_packets_remaining == 0, (
-                    f"Expected 0 old packets to remain, got {old_packets_remaining}"
-                )
-                assert old_nodes_remaining == 0, (
-                    f"Expected 0 old nodes to remain, got {old_nodes_remaining}"
-                )
+                assert remaining_packets == 1, f"Expected 1 packet to remain, got {remaining_packets}"
+                assert remaining_nodes == 1, f"Expected 1 node to remain, got {remaining_nodes}"
+                assert old_packets_remaining == 0, f"Expected 0 old packets to remain, got {old_packets_remaining}"
+                assert old_nodes_remaining == 0, f"Expected 0 old nodes to remain, got {old_nodes_remaining}"
 
             finally:
                 # Restore original retention hours
@@ -175,7 +140,7 @@ class TestDataCleanup:
     def test_cleanup_disabled(self):
         """Test that cleanup is disabled when retention hours is 0."""
         # Create a temporary database file
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as temp_db:
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as temp_db:
             temp_db_path = temp_db.name
 
         try:
@@ -197,13 +162,13 @@ class TestDataCleanup:
                 # Insert old packet history records
                 cursor.execute(
                     "INSERT INTO packet_history (timestamp, topic, from_node_id, to_node_id, portnum, portnum_name) VALUES (?, ?, ?, ?, ?, ?)",
-                    (old_time, "test/topic", 123456, 654321, 1, "TEXT_MESSAGE_APP"),
+                    (old_time, "test/topic", 123456, 654321, 1, "TEXT_MESSAGE_APP")
                 )
 
                 # Insert old node info records
                 cursor.execute(
                     "INSERT INTO node_info (node_id, hex_id, long_name, short_name, first_seen, last_updated) VALUES (?, ?, ?, ?, ?, ?)",
-                    (123456, "!123456", "Old Node 1", "ON1", old_time, old_time),
+                    (123456, "!123456", "Old Node 1", "ON1", old_time, old_time)
                 )
 
                 conn.commit()
@@ -244,12 +209,8 @@ class TestDataCleanup:
                     conn.close()
 
                 # Verify results
-                assert remaining_packets == initial_packets, (
-                    f"Expected {initial_packets} packets to remain, got {remaining_packets}"
-                )
-                assert remaining_nodes == initial_nodes, (
-                    f"Expected {initial_nodes} nodes to remain, got {remaining_nodes}"
-                )
+                assert remaining_packets == initial_packets, f"Expected {initial_packets} packets to remain, got {remaining_packets}"
+                assert remaining_nodes == initial_nodes, f"Expected {initial_nodes} nodes to remain, got {remaining_nodes}"
 
             finally:
                 # Restore original retention hours

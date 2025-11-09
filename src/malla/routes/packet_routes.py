@@ -55,9 +55,9 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
         packet = dict(packet_row)
 
         # Add derived fields
-        packet["timestamp_str"] = datetime.fromtimestamp(
-            packet["timestamp"], UTC
-        ).strftime("%Y-%m-%d %H:%M:%S UTC")
+        packet["timestamp_str"] = datetime.fromtimestamp(packet["timestamp"], UTC).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
         packet["hop_count"] = (
             (packet["hop_start"] - packet["hop_limit"])
             if packet["hop_start"] is not None and packet["hop_limit"] is not None

@@ -171,6 +171,7 @@ class TestPacketsFilters:
             f"Expected 'Channel' column, got: {updated_header_texts}"
         )
 
+
         # Switch back to "All Types" and verify columns change back
         portnum_select.select_option("")  # All Types
 
@@ -189,6 +190,7 @@ class TestPacketsFilters:
         assert "Message" not in final_header_texts, (
             f"Expected 'Message' column to be hidden when not filtering text messages, got: {final_header_texts}"
         )
+
 
         print("✅ Packet type column switching test passed")
 
@@ -226,6 +228,7 @@ class TestPacketsFilters:
         # Should have "Channel" column (always visible)
         channel_column_found = any("Channel" in header for header in header_texts)
         assert channel_column_found, f"Expected 'Channel' column, got: {header_texts}"
+
 
         print("✅ URL parameter column restoration test passed")
 
@@ -309,10 +312,7 @@ class TestPacketsFilters:
         )
 
         # Navigate with URL parameter
-        page.goto(
-            f"{test_server_url}/packets?portnum={test_portnum}",
-            wait_until="networkidle",
-        )
+        page.goto(f"{test_server_url}/packets?portnum={test_portnum}", wait_until="networkidle")
 
         # Wait for page to load
         page.wait_for_selector("#packetsTable", timeout=10000)
@@ -336,7 +336,7 @@ class TestPacketsFilters:
                        !firstRow.textContent.includes('No data');
             }
             """,
-            timeout=10000,
+            timeout=10000
         )
 
         # Wait a bit more for any final rendering
@@ -350,17 +350,13 @@ class TestPacketsFilters:
         frontend_rows = page.locator("#packetsTable tbody tr")
         frontend_row_count = frontend_rows.count()
 
-        print(
-            f"Frontend shows {frontend_row_count} rows, API returned {filtered_packet_count} rows"
-        )
+        print(f"Frontend shows {frontend_row_count} rows, API returned {filtered_packet_count} rows")
 
         # The frontend should show the same number as the filtered API call
         # Since we're using the same filters and limit, they should match
         # Allow reasonable tolerance for timing/rendering differences or potential grouping/filtering differences
         # Use a larger tolerance to account for potential frontend filtering or grouping that might reduce row count
-        tolerance = max(
-            10, int(filtered_packet_count * 0.3)
-        )  # 30% tolerance, minimum 10 rows
+        tolerance = max(10, int(filtered_packet_count * 0.3))  # 30% tolerance, minimum 10 rows
         assert abs(frontend_row_count - filtered_packet_count) <= tolerance, (
             f"ISSUE FOUND: Frontend table shows {frontend_row_count} rows but filtered API returns {filtered_packet_count} rows "
             f"(difference: {abs(frontend_row_count - filtered_packet_count)}, tolerance: {tolerance}). "
@@ -368,9 +364,7 @@ class TestPacketsFilters:
         )
 
         # Also verify that frontend shows at least some rows (to ensure filtering is working)
-        assert frontend_row_count > 0, (
-            "Frontend should show at least some filtered rows"
-        )
+        assert frontend_row_count > 0, "Frontend should show at least some filtered rows"
 
         # Most importantly: verify that the visible rows actually match the filter
         # This is the real test - the count might differ slightly, but the data should be correct

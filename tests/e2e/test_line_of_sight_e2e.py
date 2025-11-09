@@ -129,9 +129,9 @@ class TestLineOfSightE2E:
         error_visible = page.locator("#errorState").is_visible()
 
         # One of these should be true
-        assert loading_visible or results_visible or error_visible, (
-            "No feedback shown after clicking analyze"
-        )
+        assert (
+            loading_visible or results_visible or error_visible
+        ), "No feedback shown after clicking analyze"
 
     def test_line_of_sight_elevation_toggle(self, page: Page, test_server_url):
         """Test that the elevation mode toggle is present."""
@@ -189,9 +189,7 @@ class TestLineOfSightE2E:
 
         # Get the href to verify
         href = los_link.get_attribute("href")
-        assert href == "/line-of-sight", (
-            "Line of Sight link should point to /line-of-sight"
-        )
+        assert href == "/line-of-sight", "Line of Sight link should point to /line-of-sight"
 
         # Navigate to the link
         page.goto(f"{test_server_url}/line-of-sight")
@@ -232,9 +230,7 @@ class TestLineOfSightE2E:
         # Check if it's either visible or at least has content
         hint_display = hint.evaluate("el => window.getComputedStyle(el).display")
         # Either it should be visible with distance, or hidden (if nodes don't have locations)
-        assert hint_display in ["block", "inline", "none"], (
-            "Distance hint should have valid display state"
-        )
+        assert hint_display in ["block", "inline", "none"], "Distance hint should have valid display state"
 
     def test_line_of_sight_error_handling(self, page: Page, test_server_url):
         """Test error handling when elevation API fails."""

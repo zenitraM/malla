@@ -368,9 +368,7 @@ class LocationService:
                     "success_rate": success_rate,
                     "avg_snr": link.get("avg_snr"),
                     "age_hours": round(age_hours, 2),
-                    "last_seen": link[
-                        "last_seen"
-                    ],  # Raw Unix timestamp for client-side formatting
+                    "last_seen": link["last_seen"],  # Raw Unix timestamp for client-side formatting
                     "last_seen_str": last_seen_str,
                     "is_bidirectional": True,  # Network graph links are bidirectional by design
                     "total_hops_seen": link["packet_count"],
