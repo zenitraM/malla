@@ -53,7 +53,9 @@ def test_debug_node_picker_interaction(page: Page, test_server_url: str):
     print(f"Picker state after click: {picker_state}")
 
     # Type search text
-    search_input = page.locator("#exclude_from").locator("..").locator("input[type='text']")
+    search_input = (
+        page.locator("#exclude_from").locator("..").locator("input[type='text']")
+    )
     print("=== TYPING SEARCH TEXT ===")
     search_input.fill("Test Gateway Alpha")
     page.wait_for_timeout(2000)  # Give extra time for search
@@ -74,7 +76,7 @@ def test_debug_node_picker_interaction(page: Page, test_server_url: str):
     }""")
     print(f"Search results: {search_results}")
 
-    if search_results['itemCount'] > 0:
+    if search_results["itemCount"] > 0:
         print("=== CLICKING FIRST SEARCH RESULT ===")
         # Try to click the first result using a more robust selector
         exclude_from_container = page.locator("#exclude_from").locator("..")
@@ -96,7 +98,7 @@ def test_debug_node_picker_interaction(page: Page, test_server_url: str):
         }""")
         print(f"Final state after selection: {final_state}")
 
-        if final_state['hiddenInputValue'] != 'NONE':
+        if final_state["hiddenInputValue"] != "NONE":
             print("=== SUCCESS: Hidden input was set correctly ===")
 
             # Now try applying the filter
@@ -119,6 +121,8 @@ def test_debug_node_picker_interaction(page: Page, test_server_url: str):
     else:
         print("=== FAILURE: No search results found ===")
 
+
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v", "-s"])

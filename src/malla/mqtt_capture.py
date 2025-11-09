@@ -225,10 +225,14 @@ def try_decrypt_mesh_packet(
             key = derive_key_from_channel_name(channel_name, key_base64)
 
             # Decrypt the payload
-            decrypted_payload = decrypt_packet(encrypted_payload, packet_id, sender_id, key)
+            decrypted_payload = decrypt_packet(
+                encrypted_payload, packet_id, sender_id, key
+            )
 
             if not decrypted_payload:
-                logging.debug(f"Decryption with key {key_index + 1} returned empty payload")
+                logging.debug(
+                    f"Decryption with key {key_index + 1} returned empty payload"
+                )
                 continue
 
             # Try to parse the decrypted payload as a Data protobuf
@@ -238,7 +242,9 @@ def try_decrypt_mesh_packet(
 
                 # Validate that we got a valid portnum (not UNKNOWN_APP)
                 if decoded_data.portnum == portnums_pb2.PortNum.UNKNOWN_APP:
-                    logging.debug(f"Key {key_index + 1} produced UNKNOWN_APP portnum, trying next key")
+                    logging.debug(
+                        f"Key {key_index + 1} produced UNKNOWN_APP portnum, trying next key"
+                    )
                     continue
 
                 # Update the mesh packet with decoded data
@@ -255,7 +261,9 @@ def try_decrypt_mesh_packet(
                 )
                 continue
 
-        logging.debug(f"Failed to decrypt packet with any of the {len(keys_to_try)} provided keys")
+        logging.debug(
+            f"Failed to decrypt packet with any of the {len(keys_to_try)} provided keys"
+        )
         return False
 
     except Exception as e:
@@ -845,8 +853,7 @@ def cleanup_old_data() -> None:
         try:
             # Delete old packet history records
             cursor.execute(
-                "DELETE FROM packet_history WHERE timestamp < ?",
-                (cutoff_time,)
+                "DELETE FROM packet_history WHERE timestamp < ?", (cutoff_time,)
             )
             packets_deleted = cursor.rowcount
 
@@ -862,7 +869,7 @@ def cleanup_old_data() -> None:
                     SELECT DISTINCT to_node_id FROM packet_history WHERE to_node_id IS NOT NULL
                 )
                 """,
-                (cutoff_time,)
+                (cutoff_time,),
             )
             nodes_deleted = cursor.rowcount
 

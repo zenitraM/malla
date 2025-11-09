@@ -149,7 +149,7 @@ class TestExcludeFiltersURLHandling:
         # Navigate with URL parameters
         page.goto(
             f"{test_server_url}/packets?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}",
-            wait_until="networkidle"
+            wait_until="networkidle",
         )
         page.wait_for_selector("#packetsTable", timeout=10000)
 
@@ -172,7 +172,7 @@ class TestExcludeFiltersURLHandling:
                        !firstRow.textContent.includes('No data');
             }
             """,
-            timeout=10000
+            timeout=10000,
         )
 
         # Wait a bit more for any final rendering
@@ -182,12 +182,16 @@ class TestExcludeFiltersURLHandling:
         ui_rows = page.locator("#packetsTable tbody tr")
         ui_packet_count = ui_rows.count()
 
-        print(f"UI results: {ui_packet_count} packets displayed, API: {api_packet_count}")
+        print(
+            f"UI results: {ui_packet_count} packets displayed, API: {api_packet_count}"
+        )
 
         # UI should match API results
         # Allow reasonable tolerance for timing/rendering differences or potential grouping/filtering differences
         # Use a larger tolerance to account for potential frontend filtering or grouping that might reduce row count
-        tolerance = max(10, int(api_packet_count * 0.3))  # 30% tolerance, minimum 10 rows
+        tolerance = max(
+            10, int(api_packet_count * 0.3)
+        )  # 30% tolerance, minimum 10 rows
         assert abs(ui_packet_count - api_packet_count) <= tolerance, (
             f"UI packet count ({ui_packet_count}) should match API count ({api_packet_count}) "
             f"(difference: {abs(ui_packet_count - api_packet_count)}, tolerance: {tolerance})"
