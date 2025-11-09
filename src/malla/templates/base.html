@@ -166,7 +166,7 @@
 
                     <!-- Tools dropdown -->
                     <li class="nav-item dropdown">
-                        {% set tools_active = request.endpoint in ['traceroute.traceroute_hops', 'gateway.gateway_compare', 'main.longest_links'] %}
+                        {% set tools_active = request.endpoint in ['traceroute.traceroute_hops', 'gateway.gateway_compare', 'main.longest_links', 'main.line_of_sight'] %}
                         <a class="nav-link dropdown-toggle {{ 'active' if tools_active }}" href="#" id="toolsDropdown" role="button" data-bs-toggle="dropdown">
                             <i class="bi bi-tools"></i> Tools
                         </a>
@@ -184,6 +184,11 @@
                             <li>
                                 <a class="dropdown-item" href="{{ url_for('main.longest_links') }}">
                                     <i class="bi bi-rulers"></i> Longest Links
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item" href="{{ url_for('main.line_of_sight') }}">
+                                    <i class="bi bi-bezier"></i> Line of Sight
                                 </a>
                             </li>
                         </ul>

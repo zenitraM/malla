@@ -194,6 +194,65 @@
     {% endcall %}
 </div>
 
+<!-- Line of Sight Modal -->
+<div class="modal fade" id="lineOfSightModal" tabindex="-1" aria-labelledby="lineOfSightModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="lineOfSightModalLabel">
+                    <i class="bi bi-graph-up"></i> Line of Sight Analysis
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="losLoadingSpinner" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading elevation data...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Fetching terrain elevation data...</p>
+                </div>
+                <div id="losContent" style="display: none;">
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <h6>Link Information</h6>
+                            <div id="losLinkInfo"></div>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Line of Sight Analysis</h6>
+                            <div id="losAnalysisInfo"></div>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Elevation Mode</h6>
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="useNodeElevationToggle" checked>
+                                <label class="form-check-label" for="useNodeElevationToggle">
+                                    Use node altitude
+                                </label>
+                            </div>
+                            <small class="text-muted">
+                                <div id="elevationModeDescription"></div>
+                            </small>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <canvas id="elevationChart" style="max-height: 400px;"></canvas>
+                    </div>
+                    <div class="alert alert-info" id="losAttribution">
+                        <small><strong>Data Source:</strong> <span id="losDataSource"></span></small>
+                    </div>
+                </div>
+                <div id="losError" style="display: none;" class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <span id="losErrorMessage"></span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Hide the footer for this page -->
 <style>
 .footer {
@@ -414,6 +473,8 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!-- Leaflet MarkerCluster JS -->
 <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+<!-- Chart.js for elevation profiles -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
 <script>
 let map;
@@ -1580,6 +1641,11 @@ function createLinkPopupContent(link) {
         ? formatTimestamp(link.last_seen)
         : (link.last_seen_str || 'Unknown');
 
+    // Check if both nodes have locations for line-of-sight analysis
+    const hasLocations = fromNode && toNode &&
+                         fromNode.latitude && fromNode.longitude &&
+                         toNode.latitude && toNode.longitude;
+
     return `
         <div class="traceroute-link-info">
             <div class="fw-bold mb-2">${link.link_type === 'packet' ? 'Direct Packet Link' : 'Traceroute RF Hop'}</div>
@@ -1590,10 +1656,15 @@ function createLinkPopupContent(link) {
             <div><strong>Last Seen:</strong> ${formattedTime}</div>
             ${link.avg_snr ? `<div><strong>Avg SNR:</strong> ${link.avg_snr.toFixed(1)} dB</div>` : ''}
             ${link.avg_rssi ? `<div><strong>Avg RSSI:</strong> ${link.avg_rssi.toFixed(0)} dBm</div>` : ''}
-            <div class="mt-2">
+            <div class="mt-2 d-flex gap-1">
                 <button class="btn btn-sm btn-primary" onclick="showTracerouteHistory(${link.from_node_id}, ${link.to_node_id})">
                     View History
                 </button>
+                ${hasLocations ? `
+                <a href="/line-of-sight?from=${link.from_node_id}&to=${link.to_node_id}" target="_blank" class="btn btn-sm btn-success">
+                    <i class="bi bi-mountains"></i> Line of Sight <i class="bi bi-box-arrow-up-right"></i>
+                </a>
+                ` : ''}
             </div>
         </div>
     `;
@@ -1735,6 +1806,275 @@ function drawHopNetwork(skipFit = false) {
 
     // Restore original data for other operations
     nodeData = originalNodeData;
+}
+
+// ==================== Line of Sight Analysis ====================
+
+let elevationChart = null;
+let currentLOSData = null; // Store current data for recalculation on toggle
+
+// Show line of sight analysis for a link between two nodes (redirects to new page)
+function showLineOfSight(fromNodeId, toNodeId) {
+    window.open(`/line-of-sight?from=${fromNodeId}&to=${toNodeId}`, '_blank');
+}
+
+// Fetch elevation data from the Elevation API
+async function fetchElevationData(lat1, lon1, lat2, lon2) {
+    const url = `https://api.elevationapi.com/api/Elevation/line/${lat1},${lon1}/${lat2},${lon2}`;
+
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`API returned status ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data;
+}
+
+// Calculate Fresnel zone clearance
+function calculateFresnelZone(distance, frequency = 915) {
+    // Fresnel zone radius at midpoint (in meters)
+    // frequency in MHz, distance in meters
+    // Formula: r = 17.32 * sqrt(d / (4 * f))
+    // For simplicity, we use 60% of first Fresnel zone
+    const wavelength = 299792458 / (frequency * 1000000); // c / f
+    const fresnelRadius = 0.6 * Math.sqrt((wavelength * distance) / 4);
+    return fresnelRadius;
+}
+
+// Check if line of sight is clear
+function checkLineOfSight(geoPoints, fromAltitude, toAltitude, useNodeElevation) {
+    if (!geoPoints || geoPoints.length < 2) {
+        return { clear: false, obstacles: [] };
+    }
+
+    const startPoint = geoPoints[0];
+    const endPoint = geoPoints[geoPoints.length - 1];
+
+    // Calculate start and end elevations based on mode
+    let startElevation, endElevation;
+    if (useNodeElevation) {
+        // Use node altitude as the actual elevation (altitude above sea level)
+        startElevation = fromAltitude || startPoint.elevation;
+        endElevation = toAltitude || endPoint.elevation;
+    } else {
+        // Use terrain elevation at the node locations
+        startElevation = startPoint.elevation;
+        endElevation = endPoint.elevation;
+    }
+
+    const totalDistance = endPoint.distanceFromOriginMeters;
+
+    const obstacles = [];
+    let minClearance = Infinity;
+
+    for (let i = 1; i < geoPoints.length - 1; i++) {
+        const point = geoPoints[i];
+        const distanceRatio = point.distanceFromOriginMeters / totalDistance;
+
+        // Calculate line-of-sight elevation at this point
+        const losElevation = startElevation + (endElevation - startElevation) * distanceRatio;
+
+        // Calculate required Fresnel zone clearance
+        const fresnelClearance = calculateFresnelZone(
+            point.distanceFromOriginMeters * (1 - distanceRatio)
+        );
+
+        // Check clearance
+        const clearance = losElevation - point.elevation;
+        minClearance = Math.min(minClearance, clearance);
+
+        if (clearance < fresnelClearance) {
+            obstacles.push({
+                distance: point.distanceFromOriginMeters,
+                elevation: point.elevation,
+                losElevation: losElevation,
+                clearance: clearance,
+                requiredClearance: fresnelClearance
+            });
+        }
+    }
+
+    return {
+        clear: obstacles.length === 0,
+        obstacles: obstacles,
+        minClearance: minClearance
+    };
+}
+
+// Display line of sight results
+function displayLineOfSightResults(fromNode, toNode, elevationData) {
+    // Destroy existing chart
+    if (elevationChart) {
+        elevationChart.destroy();
+        elevationChart = null;
+    }
+
+    const fromName = fromNode.display_name || `!${fromNode.node_id.toString(16).padStart(8, '0')}`;
+    const toName = toNode.display_name || `!${toNode.node_id.toString(16).padStart(8, '0')}`;
+
+    // Get node altitudes
+    const fromAltitude = fromNode.altitude || 0;
+    const toAltitude = toNode.altitude || 0;
+
+    // Get terrain elevations at node locations
+    const geoPoints = elevationData.geoPoints;
+    const fromTerrainElevation = geoPoints[0].elevation;
+    const toTerrainElevation = geoPoints[geoPoints.length - 1].elevation;
+
+    // Check if using node elevation or terrain elevation
+    const useNodeElevation = document.getElementById('useNodeElevationToggle').checked;
+
+    // Display link information
+    const distanceKm = (elevationData.metrics.distance / 1000).toFixed(2);
+    document.getElementById('losLinkInfo').innerHTML = `
+        <div><strong>From:</strong> ${fromName}</div>
+        <div><strong>To:</strong> ${toName}</div>
+        <div><strong>Distance:</strong> ${distanceKm} km</div>
+        <div><strong>From Node Alt:</strong> ${fromAltitude.toFixed(0)} m</div>
+        <div><strong>To Node Alt:</strong> ${toAltitude.toFixed(0)} m</div>
+        <div class="text-muted"><small>From Terrain: ${fromTerrainElevation.toFixed(0)} m</small></div>
+        <div class="text-muted"><small>To Terrain: ${toTerrainElevation.toFixed(0)} m</small></div>
+    `;
+
+    // Update elevation mode description
+    const startElev = useNodeElevation ? (fromAltitude || fromTerrainElevation) : fromTerrainElevation;
+    const endElev = useNodeElevation ? (toAltitude || toTerrainElevation) : toTerrainElevation;
+    document.getElementById('elevationModeDescription').innerHTML = useNodeElevation
+        ? `Using node altitudes (${startElev.toFixed(0)}m → ${endElev.toFixed(0)}m) as elevation above sea level.`
+        : `Using terrain elevation (${startElev.toFixed(0)}m → ${endElev.toFixed(0)}m) at node locations.`;
+
+    // Analyze line of sight
+    const losAnalysis = checkLineOfSight(elevationData.geoPoints, fromAltitude, toAltitude, useNodeElevation);
+
+    const losStatus = losAnalysis.clear
+        ? '<span class="text-success"><i class="bi bi-check-circle-fill"></i> Clear line of sight</span>'
+        : '<span class="text-warning"><i class="bi bi-exclamation-triangle-fill"></i> Potential obstructions</span>';
+
+    document.getElementById('losAnalysisInfo').innerHTML = `
+        <div class="mb-2">${losStatus}</div>
+        <div><strong>Min Clearance:</strong> ${losAnalysis.minClearance.toFixed(1)} m</div>
+        <div><strong>Terrain Rise:</strong> ${elevationData.metrics.climb.toFixed(0)} m</div>
+        <div><strong>Terrain Fall:</strong> ${Math.abs(elevationData.metrics.descent).toFixed(0)} m</div>
+        <div><strong>Min Elevation:</strong> ${elevationData.metrics.minElevation.toFixed(0)} m</div>
+        <div><strong>Max Elevation:</strong> ${elevationData.metrics.maxElevation.toFixed(0)} m</div>
+        ${!losAnalysis.clear ? `<div class="text-warning mt-2"><small>${losAnalysis.obstacles.length} potential obstacle(s) detected</small></div>` : ''}
+    `;
+
+    // Display data source attribution
+    const dataSet = elevationData.dataSet;
+    document.getElementById('losDataSource').innerHTML = `
+        ${dataSet.description} (${dataSet.resolutionMeters}m resolution)
+        ${dataSet.publicUrl ? `- <a href="${dataSet.publicUrl}" target="_blank">More info</a>` : ''}
+    `;
+
+    // Prepare chart data
+    const labels = geoPoints.map(p => (p.distanceFromOriginMeters / 1000).toFixed(2));
+    const terrainElevations = geoPoints.map(p => p.elevation);
+
+    // Calculate line of sight elevations based on mode
+    const startElevation = useNodeElevation ? (fromAltitude || fromTerrainElevation) : fromTerrainElevation;
+    const endElevation = useNodeElevation ? (toAltitude || toTerrainElevation) : toTerrainElevation;
+    const totalDistance = geoPoints[geoPoints.length - 1].distanceFromOriginMeters;
+
+    const lineOfSightElevations = geoPoints.map(p => {
+        const ratio = p.distanceFromOriginMeters / totalDistance;
+        return startElevation + (endElevation - startElevation) * ratio;
+    });
+
+    // Calculate Fresnel zone boundaries (60% of first Fresnel zone)
+    const fresnelUpper = geoPoints.map((p, i) => {
+        const distanceFromStart = p.distanceFromOriginMeters;
+        const distanceFromEnd = totalDistance - distanceFromStart;
+        const fresnelRadius = calculateFresnelZone(Math.min(distanceFromStart, distanceFromEnd));
+        return lineOfSightElevations[i] - fresnelRadius;
+    });
+
+    // Create elevation profile chart
+    const ctx = document.getElementById('elevationChart').getContext('2d');
+    elevationChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Terrain Elevation',
+                    data: terrainElevations,
+                    borderColor: 'rgb(101, 67, 33)',
+                    backgroundColor: 'rgba(101, 67, 33, 0.3)',
+                    fill: 'origin',
+                    tension: 0.1,
+                    pointRadius: 1
+                },
+                {
+                    label: 'Line of Sight',
+                    data: lineOfSightElevations,
+                    borderColor: 'rgb(13, 110, 253)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    borderDash: [5, 5]
+                },
+                {
+                    label: 'Fresnel Zone (60%)',
+                    data: fresnelUpper,
+                    borderColor: 'rgba(255, 193, 7, 0.5)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1,
+                    pointRadius: 0,
+                    borderDash: [2, 2]
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            aspectRatio: 2.5,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: `Elevation Profile: ${fromName} → ${toName}`
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) {
+                                label += ': ';
+                            }
+                            if (context.parsed.y !== null) {
+                                label += context.parsed.y.toFixed(1) + ' m';
+                            }
+                            return label;
+                        }
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'top'
+                }
+            },
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Distance (km)'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Elevation (m)'
+                    },
+                    beginAtZero: false
+                }
+            }
+        }
+    });
 }
 </script>
 {% endblock %}
