@@ -807,17 +807,14 @@ function updateMap(fromNode, toNode, geoPoints, obstacles) {
 
     // Draw line between nodes using the elevation profile points
     const linePoints = geoPoints.map(p => [p.latitude, p.longitude]);
-    console.log('Drawing line with', linePoints.length, 'points');
-    console.log('First point:', linePoints[0], 'Last point:', linePoints[linePoints.length - 1]);
+
+
 
     chartLine = L.polyline(linePoints, {
         color: '#0d6efd',
         weight: 4,
         opacity: 0.8
     }).addTo(map);
-
-    console.log('Line added to map');
-
     // Add obstacle markers
     obstacles.forEach((obstacle, index) => {
         L.circleMarker([obstacle.latitude, obstacle.longitude], {
