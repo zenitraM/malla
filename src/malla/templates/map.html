@@ -1580,6 +1580,11 @@ function createLinkPopupContent(link) {
         ? formatTimestamp(link.last_seen)
         : (link.last_seen_str || 'Unknown');
 
+    // Check if both nodes have locations for line-of-sight analysis
+    const hasLocations = fromNode && toNode &&
+                         fromNode.latitude && fromNode.longitude &&
+                         toNode.latitude && toNode.longitude;
+
     return `
         <div class="traceroute-link-info">
             <div class="fw-bold mb-2">${link.link_type === 'packet' ? 'Direct Packet Link' : 'Traceroute RF Hop'}</div>
@@ -1590,10 +1595,15 @@ function createLinkPopupContent(link) {
             <div><strong>Last Seen:</strong> ${formattedTime}</div>
             ${link.avg_snr ? `<div><strong>Avg SNR:</strong> ${link.avg_snr.toFixed(1)} dB</div>` : ''}
             ${link.avg_rssi ? `<div><strong>Avg RSSI:</strong> ${link.avg_rssi.toFixed(0)} dBm</div>` : ''}
-            <div class="mt-2">
+            <div class="mt-2 d-flex gap-1">
                 <button class="btn btn-sm btn-primary" onclick="showTracerouteHistory(${link.from_node_id}, ${link.to_node_id})">
                     View History
                 </button>
+                ${hasLocations ? `
+                <button class="btn btn-sm btn-success" onclick="showLineOfSight(${link.from_node_id}, ${link.to_node_id})">
+                    <i class="bi bi-bezier"></i> Line of Sight
+                </button>
+                ` : ''}
             </div>
         </div>
     `;
@@ -1736,6 +1746,14 @@ function drawHopNetwork(skipFit = false) {
     // Restore original data for other operations
     nodeData = originalNodeData;
 }
+
+// ==================== Line of Sight Analysis ====================
+
+// Show line of sight analysis for a link between two nodes (redirects to new page)
+function showLineOfSight(fromNodeId, toNodeId) {
+    window.open(`/line-of-sight?from=${fromNodeId}&to=${toNodeId}`, '_blank');
+}
+
 </script>
 {% endblock %}
 

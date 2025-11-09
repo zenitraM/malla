@@ -1,0 +1,1165 @@
+{% extends "base.html" %}
+{% from "macros.html" import node_picker %}
+
+{% block title %}Line of Sight Analysis - Malla{% endblock %}
+
+{% block extra_css %}
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""/>
+
+<link rel="stylesheet" href="{{ url_for('static', filename='css/node-picker.css') }}">
+<style>
+    #line-of-sight-map {
+        height: 500px;
+        border-radius: 8px;
+        border: 1px solid var(--bs-border-color);
+        z-index: 1;
+        position: relative;
+    }
+
+    /* Ensure node picker dropdown appears above map */
+    .card.mb-4 {
+        position: relative;
+        z-index: 1100;
+    }
+
+    .node-picker-dropdown {
+        z-index: 1200 !important;
+    }
+
+    .elevation-chart-container {
+        height: 500px;
+        position: relative;
+    }
+
+    .info-section {
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 8px;
+        padding: 1.5rem;
+        height: 100%;
+    }
+
+    .attribution-box {
+        background-color: var(--bs-light);
+        border-left: 4px solid #0d6efd;
+        padding: 1rem;
+    }
+
+    .attribution-box h6 {
+        color: #0d6efd;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+    }
+
+    .status-badge {
+        font-size: 1rem;
+        padding: 0.5rem 1rem;
+    }
+
+    .link-info-table {
+        margin-bottom: 0;
+    }
+
+    .link-info-table th,
+    .link-info-table td {
+        padding: 0.75rem;
+        border-bottom: 1px solid var(--bs-border-color);
+    }
+
+    .link-info-table td:first-child {
+        font-weight: 600;
+        background-color: var(--bs-light);
+    }
+
+    .link-info-table thead th {
+        background-color: var(--bs-secondary-bg);
+        font-weight: 600;
+    }
+
+    .analysis-metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+
+    .metric-card {
+        text-align: center;
+        padding: 1rem;
+        background: var(--bs-light);
+        border-radius: 0.5rem;
+    }
+
+    .metric-value {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: var(--bs-primary);
+    }
+
+    .metric-label {
+        font-size: 0.875rem;
+        color: var(--bs-secondary);
+        margin-top: 0.25rem;
+    }
+
+    /* Chart tooltip styling */
+    .chart-crosshair {
+        position: absolute;
+        border-left: 2px dashed rgba(255, 0, 0, 0.5);
+        pointer-events: none;
+        z-index: 10;
+    }
+
+    /* Map marker pulse */
+    .map-marker-pulse {
+        animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1><i class="bi bi-bezier"></i> Line of Sight Analysis</h1>
+        <p class="text-muted">Analyze RF line-of-sight and Fresnel zone clearance between two nodes using terrain elevation data</p>
+    </div>
+</div>
+
+<!-- Node Selection -->
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title mb-3"><i class="bi bi-sliders"></i> Node Selection</h5>
+        <div class="row g-3">
+            <div class="col-md-5">
+                {{ node_picker('from_node', field_id='fromNode', label='From Node',
+                              placeholder='Search by name, short name, or ID...',
+                              selected_value=from_node_id or '',
+                              required=true) }}
+            </div>
+            <div class="col-md-5">
+                {{ node_picker('to_node', field_id='toNode', label='To Node',
+                              placeholder='Search by name, short name, or ID...',
+                              selected_value=to_node_id or '',
+                              required=true) }}
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button id="analyzeBtn" class="btn btn-primary w-100" disabled>
+                    <i class="bi bi-play-fill"></i> Analyze
+                </button>
+            </div>
+        </div>
+        <div class="row mt-2">
+            <div class="col-12">
+                <small class="text-muted" id="distanceHint" style="display: none;"></small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading State -->
+<div id="loadingState" class="card mb-4" style="display: none;">
+    <div class="card-body text-center py-5">
+        <div class="spinner-border text-primary mb-3" role="status">
+            <span class="visually-hidden">Loading elevation data...</span>
+        </div>
+        <h5>Fetching Terrain Elevation Data</h5>
+        <p class="text-muted mb-0">Querying DEM Net Elevation API for elevation profile...</p>
+    </div>
+</div>
+
+<!-- Error State -->
+<div id="errorState" class="alert alert-danger" style="display: none;">
+    <i class="bi bi-exclamation-triangle"></i>
+    <strong>Error:</strong> <span id="errorMessage"></span>
+</div>
+
+<!-- Results -->
+<div id="resultsContainer" style="display: none;">
+    <!-- Map and Chart Side by Side -->
+    <div class="row mb-4">
+        <div class="col-lg-6">
+            <div class="card info-section">
+                <h5 class="mb-3"><i class="bi bi-map"></i> Location Map</h5>
+                <div id="line-of-sight-map"></div>
+                <p class="text-muted small mt-2 mb-0">
+                    <i class="bi bi-info-circle"></i> Hover over the elevation chart to see the corresponding location on the map
+                </p>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card info-section">
+                <h5 class="mb-3"><i class="bi bi-bar-chart-line"></i> Elevation Profile</h5>
+                <div class="elevation-chart-container">
+                    <canvas id="elevationChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Link Information and Analysis - Single unified table -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card info-section">
+                <h5 class="mb-3"><i class="bi bi-info-circle"></i> Link Information & Analysis</h5>
+                <table class="table table-sm link-info-table">
+                    <thead>
+                        <tr id="linkInfoHeader"></tr>
+                    </thead>
+                    <tbody id="linkInfoTable"></tbody>
+                </table>
+
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <h5 class="mb-3"><i class="bi bi-gear"></i> Elevation Mode</h5>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="useNodeElevationToggle" checked>
+                            <label class="form-check-label" for="useNodeElevationToggle">
+                                <strong>Use node altitude</strong>
+                            </label>
+                        </div>
+                        <p class="text-muted small mb-0">
+                            <span id="elevationModeDescription"></span>
+                        </p>
+                    </div>
+                    <div class="col-md-6">
+                        <h5 class="mb-3"><i class="bi bi-bezier"></i> Analysis Result</h5>
+                        <div id="analysisStatusBadge" class="mb-3"></div>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <div class="analysis-metrics" id="analysisMetrics"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Attribution -->
+    <div class="row">
+        <div class="col-12">
+            <div class="attribution-box">
+                <h6><i class="bi bi-award"></i> Data Attribution</h6>
+                <div id="dataSourceAttribution" class="mb-2"></div>
+                <hr>
+                <p class="mb-2"><strong>Data sources:</strong></p>
+                <ul class="mb-2 small">
+                    <li><strong>DEM Net Elevation API</strong> - <a href="https://elevationapi.com" target="_blank" rel="noopener">elevationapi.com</a></li>
+                    <li id="demDataSource"></li>
+                    <li><strong>Map Tiles</strong> - © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors,
+                        © <a href="https://www.stadiamaps.com/" target="_blank" rel="noopener">Stadia Maps</a>,
+                        © <a href="https://www.stamen.com/" target="_blank" rel="noopener">Stamen Design</a>,
+                        © <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a></li>
+                    <li><strong>Terrain Data</strong> - SRTM (Shuttle Radar Topography Mission)</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""></script>
+
+<!-- Chart.js for elevation profiles -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<!-- Node Picker and Location Cache -->
+<script src="{{ url_for('static', filename='js/location-cache.js') }}"></script>
+<script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
+
+<script>
+let map = null;
+let elevationChart = null;
+let currentData = null;
+let fromNodePicker = null;
+let toNodePicker = null;
+let chartHoverMarker = null;
+let chartLine = null;
+
+// Haversine formula to calculate distance between two points
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', async function() {
+    // Load caches in parallel
+    await Promise.all([
+        window.NodeCache.load(),
+        window.LocationCache.load()
+    ]);
+
+    // Initialize map
+    initializeMap();
+
+    // Initialize node pickers
+    const fromContainer = document.querySelector('#fromNode').closest('.node-picker-container');
+    const toContainer = document.querySelector('#toNode').closest('.node-picker-container');
+
+    fromNodePicker = new NodePicker(fromContainer);
+    toNodePicker = new NodePicker(toContainer);
+
+    // Listen for node selection changes
+    document.getElementById('fromNode_value').addEventListener('change', handleNodeSelection);
+    document.getElementById('toNode_value').addEventListener('change', handleNodeSelection);
+
+    // Setup analyze button
+    document.getElementById('analyzeBtn').addEventListener('click', performAnalysis);
+
+    // Setup elevation toggle
+    document.getElementById('useNodeElevationToggle').addEventListener('change', () => {
+        if (currentData) {
+            displayResults(currentData);
+        }
+    });
+
+    // Check if pre-loaded from URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const fromNodeId = urlParams.get('from');
+    const toNodeId = urlParams.get('to');
+
+    if (fromNodeId && toNodeId) {
+        // Set values and trigger analysis
+        await setNodePickerValues(fromNodeId, toNodeId);
+    }
+});
+
+// Set node picker values from URL params
+async function setNodePickerValues(fromNodeId, toNodeId) {
+    try {
+        const fromNode = await window.NodeCache.getNode(parseInt(fromNodeId));
+        const toNode = await window.NodeCache.getNode(parseInt(toNodeId));
+
+        if (fromNode && toNode) {
+            // Set from node
+            document.getElementById('fromNode_value').value = fromNode.node_id;
+            document.getElementById('fromNode').value = fromNode.long_name || fromNode.short_name || fromNode.hex_id;
+            fromNodePicker.clearButton.style.display = 'block';
+
+            // Set to node
+            document.getElementById('toNode_value').value = toNode.node_id;
+            document.getElementById('toNode').value = toNode.long_name || toNode.short_name || toNode.hex_id;
+            toNodePicker.clearButton.style.display = 'block';
+
+            // Enable button and perform analysis
+            checkAnalyzeButton();
+            await updateDistanceHint();
+            setTimeout(() => performAnalysis(), 100);
+        }
+    } catch (error) {
+        console.error('Error setting node picker values:', error);
+    }
+}
+
+// Handle node selection change
+async function handleNodeSelection(event) {
+    checkAnalyzeButton();
+    await updateDistanceHint();
+    updateURL();
+
+    // If from node was selected, sort the "to" node list by distance
+    if (event && event.target.id === 'fromNode_value') {
+        const fromNodeId = parseInt(event.target.value);
+        if (fromNodeId) {
+            await sortToNodesByDistance(fromNodeId);
+        }
+    }
+}
+
+// Update URL with selected nodes
+function updateURL() {
+    const fromNodeId = document.getElementById('fromNode_value').value;
+    const toNodeId = document.getElementById('toNode_value').value;
+
+    const url = new URL(window.location);
+
+    if (fromNodeId) {
+        url.searchParams.set('from', fromNodeId);
+    } else {
+        url.searchParams.delete('from');
+    }
+
+    if (toNodeId) {
+        url.searchParams.set('to', toNodeId);
+    } else {
+        url.searchParams.delete('to');
+    }
+
+    // Update URL without reloading the page
+    window.history.replaceState({}, '', url);
+}
+
+// Sort "to" nodes by distance from "from" node
+async function sortToNodesByDistance(fromNodeId) {
+    try {
+        // Get from node location from cache
+        const fromLoc = await window.LocationCache.getLocation(fromNodeId);
+
+        if (!fromLoc || !fromLoc.latitude || !fromLoc.longitude) {
+            return; // Can't sort without location
+        }
+
+        // Store from location for use in render
+        toNodePicker._fromLocation = fromLoc;
+
+        // Only override methods if they haven't been overridden already
+        if (!toNodePicker._originalSearchNodes) {
+            toNodePicker._originalSearchNodes = toNodePicker.searchNodes.bind(toNodePicker);
+        }
+        if (!toNodePicker._originalRenderResults) {
+            toNodePicker._originalRenderResults = toNodePicker.renderResults.bind(toNodePicker);
+        }
+
+        // Override the toNodePicker's search function to sort by distance
+        toNodePicker.searchNodes = async function(query) {
+            await this._originalSearchNodes(query);
+
+            // Sort results by distance from fromNode
+            const nodeIds = this.nodes.map(n => n.node_id);
+            const locations = await window.LocationCache.getLocations(nodeIds);
+            const locationMap = {};
+            locations.forEach(loc => {
+                locationMap[loc.node_id] = loc;
+            });
+
+            this.nodes = this.nodes.map(node => {
+                const nodeLoc = locationMap[node.node_id];
+                if (nodeLoc && nodeLoc.latitude && nodeLoc.longitude) {
+                    const distance = calculateDistance(
+                        fromLoc.latitude, fromLoc.longitude,
+                        nodeLoc.latitude, nodeLoc.longitude
+                    );
+                    return { ...node, _distance: distance, _location: nodeLoc };
+                }
+                return { ...node, _distance: Infinity, _location: null };
+            }).sort((a, b) => a._distance - b._distance);
+
+            this.renderResults();
+        };
+
+        // Override the renderResults to show distance (only once!)
+        toNodePicker.renderResults = function() {
+            this._originalRenderResults();
+
+            // Add distance info to each item (check if not already added)
+            const items = this.resultsContainer.querySelectorAll('.node-picker-item');
+            items.forEach((item, index) => {
+                const node = this.nodes[index];
+                if (node && node._distance !== undefined && node._distance !== Infinity) {
+                    const details = item.querySelector('.node-picker-item-details');
+                    if (details && !details.querySelector('.distance-info')) {
+                        const distanceSpan = document.createElement('span');
+                        distanceSpan.className = 'ms-2 distance-info';
+                        distanceSpan.style.color = 'var(--bs-success)';
+                        distanceSpan.innerHTML = `📍 ${node._distance.toFixed(1)} km`;
+                        details.appendChild(distanceSpan);
+                    }
+                }
+            });
+        };
+
+        // Trigger a refresh if the dropdown is open
+        if (toNodePicker.isOpen) {
+            const currentValue = toNodePicker.input.value;
+            await toNodePicker.searchNodes(currentValue);
+        }
+    } catch (error) {
+        console.error('Error sorting nodes by distance:', error);
+    }
+}
+
+// Update distance hint when both nodes selected
+async function updateDistanceHint() {
+    const fromNodeId = parseInt(document.getElementById('fromNode_value').value);
+    const toNodeId = parseInt(document.getElementById('toNode_value').value);
+    const hintElement = document.getElementById('distanceHint');
+
+    if (fromNodeId && toNodeId && fromNodeId !== toNodeId) {
+        try {
+            // Get locations from cache
+            const fromLoc = await window.LocationCache.getLocation(fromNodeId);
+            const toLoc = await window.LocationCache.getLocation(toNodeId);
+
+            if (fromLoc && toLoc && fromLoc.latitude && fromLoc.longitude && toLoc.latitude && toLoc.longitude) {
+                const distance = calculateDistance(
+                    fromLoc.latitude, fromLoc.longitude,
+                    toLoc.latitude, toLoc.longitude
+                );
+                hintElement.textContent = `Distance: ${distance.toFixed(2)} km`;
+                hintElement.style.display = 'block';
+            } else {
+                hintElement.style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Error calculating distance:', error);
+            hintElement.style.display = 'none';
+        }
+    } else {
+        hintElement.style.display = 'none';
+    }
+}
+
+// Check if both nodes are selected
+function checkAnalyzeButton() {
+    const fromNode = document.getElementById('fromNode_value').value;
+    const toNode = document.getElementById('toNode_value').value;
+    const analyzeBtn = document.getElementById('analyzeBtn');
+
+    if (fromNode && toNode && fromNode !== toNode) {
+        analyzeBtn.disabled = false;
+    } else {
+        analyzeBtn.disabled = true;
+    }
+}
+
+// Initialize map with terrain-aware tiles
+function initializeMap() {
+    map = L.map('line-of-sight-map').setView([40.4168, -3.7038], 6); // Default to Spain
+
+    // Stamen Terrain (via Stadia Maps) - Shows terrain, contours, and elevation
+    L.tileLayer('https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}{r}.{ext}', {
+        minZoom: 0,
+        maxZoom: 18,
+        attribution: '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://www.stamen.com/" target="_blank">Stamen Design</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        ext: 'png'
+    }).addTo(map);
+}
+
+// Perform line of sight analysis
+async function performAnalysis() {
+    const fromNodeId = parseInt(document.getElementById('fromNode_value').value);
+    const toNodeId = parseInt(document.getElementById('toNode_value').value);
+
+    // Get location data from cache
+    try {
+        const fromLoc = await window.LocationCache.getLocation(fromNodeId);
+        const toLoc = await window.LocationCache.getLocation(toNodeId);
+
+        if (!fromLoc || !toLoc || !fromLoc.latitude || !fromLoc.longitude || !toLoc.latitude || !toLoc.longitude) {
+            showError('One or both selected nodes do not have location data');
+            return;
+        }
+
+        const fromNode = {
+            node_id: fromLoc.node_id,
+            hex_id: fromLoc.node_id_hex || fromLoc.hex_id,
+            long_name: fromLoc.long_name,
+            short_name: fromLoc.short_name,
+            latitude: fromLoc.latitude,
+            longitude: fromLoc.longitude,
+            altitude: fromLoc.altitude || 0
+        };
+
+        const toNode = {
+            node_id: toLoc.node_id,
+            hex_id: toLoc.node_id_hex || toLoc.hex_id,
+            long_name: toLoc.long_name,
+            short_name: toLoc.short_name,
+            latitude: toLoc.latitude,
+            longitude: toLoc.longitude,
+            altitude: toLoc.altitude || 0
+        };
+
+        // Show loading state
+        document.getElementById('loadingState').style.display = 'block';
+        document.getElementById('resultsContainer').style.display = 'none';
+        document.getElementById('errorState').style.display = 'none';
+
+        // Fetch elevation data
+        const elevationData = await fetchElevationData(
+            fromNode.latitude, fromNode.longitude,
+            toNode.latitude, toNode.longitude
+        );
+
+        // Store current data
+        currentData = { fromNode, toNode, elevationData };
+
+        // Display results
+        displayResults(currentData);
+
+        // Hide loading, show results
+        document.getElementById('loadingState').style.display = 'none';
+        document.getElementById('resultsContainer').style.display = 'block';
+    } catch (error) {
+        console.error('Error:', error);
+        document.getElementById('loadingState').style.display = 'none';
+        showError('Failed to fetch elevation data: ' + error.message);
+    }
+}
+
+// Fetch elevation data from API
+async function fetchElevationData(lat1, lon1, lat2, lon2) {
+    const url = `https://api.elevationapi.com/api/Elevation/line/${lat1},${lon1}/${lat2},${lon2}`;
+
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`API returned status ${response.status}`);
+    }
+
+    return await response.json();
+}
+
+// Calculate Fresnel zone radius
+function calculateFresnelZone(distance, frequency = 915) {
+    const wavelength = 299792458 / (frequency * 1000000);
+    const fresnelRadius = 0.6 * Math.sqrt((wavelength * distance) / 4);
+    return fresnelRadius;
+}
+
+// Check line of sight clearance
+function checkLineOfSight(geoPoints, fromAltitude, toAltitude, useNodeElevation) {
+    if (!geoPoints || geoPoints.length < 2) {
+        return { clear: false, obstacles: [], minClearance: 0 };
+    }
+
+    const startPoint = geoPoints[0];
+    const endPoint = geoPoints[geoPoints.length - 1];
+
+    let startElevation, endElevation;
+    if (useNodeElevation) {
+        startElevation = fromAltitude || startPoint.elevation;
+        endElevation = toAltitude || endPoint.elevation;
+    } else {
+        startElevation = startPoint.elevation;
+        endElevation = endPoint.elevation;
+    }
+
+    const totalDistance = endPoint.distanceFromOriginMeters;
+    const obstacles = [];
+    let minClearance = Infinity;
+
+    for (let i = 1; i < geoPoints.length - 1; i++) {
+        const point = geoPoints[i];
+        const distanceRatio = point.distanceFromOriginMeters / totalDistance;
+        const losElevation = startElevation + (endElevation - startElevation) * distanceRatio;
+        const fresnelClearance = calculateFresnelZone(point.distanceFromOriginMeters * (1 - distanceRatio));
+        const clearance = losElevation - point.elevation;
+
+        minClearance = Math.min(minClearance, clearance);
+
+        if (clearance < fresnelClearance) {
+            obstacles.push({
+                distance: point.distanceFromOriginMeters,
+                elevation: point.elevation,
+                losElevation: losElevation,
+                clearance: clearance,
+                requiredClearance: fresnelClearance,
+                latitude: point.latitude,
+                longitude: point.longitude
+            });
+        }
+    }
+
+    return {
+        clear: obstacles.length === 0,
+        obstacles: obstacles,
+        minClearance: minClearance
+    };
+}
+
+// Display analysis results
+function displayResults(data) {
+    const { fromNode, toNode, elevationData } = data;
+    const geoPoints = elevationData.geoPoints;
+
+    const fromName = fromNode.long_name || fromNode.short_name || fromNode.hex_id;
+    const toName = toNode.long_name || toNode.short_name || toNode.hex_id;
+
+    const fromAltitude = fromNode.altitude || 0;
+    const toAltitude = toNode.altitude || 0;
+    const fromTerrainElevation = geoPoints[0].elevation;
+    const toTerrainElevation = geoPoints[geoPoints.length - 1].elevation;
+
+    const useNodeElevation = document.getElementById('useNodeElevationToggle').checked;
+
+    // Analyze line of sight first (needed for table)
+    const losAnalysis = checkLineOfSight(geoPoints, fromAltitude, toAltitude, useNodeElevation);
+
+    // Display link information as table with node names as columns and info as rows
+    const distanceKm = (elevationData.metrics.distance / 1000).toFixed(2);
+    document.getElementById('linkInfoHeader').innerHTML = `
+        <th style="width: 25%; border-bottom: 2px solid var(--bs-border-color);"></th>
+        <th class="text-center" style="width: 37.5%; border-bottom: 2px solid var(--bs-border-color);">
+            <i class="bi bi-geo-alt-fill text-success"></i> ${fromName}
+        </th>
+        <th class="text-center" style="width: 37.5%; border-bottom: 2px solid var(--bs-border-color);">
+            <i class="bi bi-geo-alt-fill text-danger"></i> ${toName}
+        </th>
+    `;
+    document.getElementById('linkInfoTable').innerHTML = `
+        <tr>
+            <td><strong>Node Altitude</strong></td>
+            <td class="text-center">${fromAltitude.toFixed(0)} m</td>
+            <td class="text-center">${toAltitude.toFixed(0)} m</td>
+        </tr>
+        <tr>
+            <td><strong>Terrain Elevation</strong></td>
+            <td class="text-center text-muted">${fromTerrainElevation.toFixed(0)} m</td>
+            <td class="text-center text-muted">${toTerrainElevation.toFixed(0)} m</td>
+        </tr>
+        <tr style="border-top: 2px solid var(--bs-border-color);">
+            <td><strong>Distance</strong></td>
+            <td colspan="2" class="text-center" style="font-size: 1.2rem; font-weight: bold; color: var(--bs-primary);">
+                ${distanceKm} km
+            </td>
+        </tr>
+        <tr>
+            <td><strong>Min Clearance</strong></td>
+            <td colspan="2" class="text-center">${losAnalysis.minClearance.toFixed(1)} m</td>
+        </tr>
+        <tr>
+            <td><strong>Obstacles</strong></td>
+            <td colspan="2" class="text-center">${losAnalysis.obstacles.length}</td>
+        </tr>
+        <tr>
+            <td><strong>Terrain Rise</strong></td>
+            <td colspan="2" class="text-center">${elevationData.metrics.climb.toFixed(0)} m</td>
+        </tr>
+        <tr>
+            <td><strong>Terrain Fall</strong></td>
+            <td colspan="2" class="text-center">${Math.abs(elevationData.metrics.descent).toFixed(0)} m</td>
+        </tr>
+    `;
+
+    // Update elevation mode description
+    const startElev = useNodeElevation ? (fromAltitude || fromTerrainElevation) : fromTerrainElevation;
+    const endElev = useNodeElevation ? (toAltitude || toTerrainElevation) : toTerrainElevation;
+    document.getElementById('elevationModeDescription').innerHTML = useNodeElevation
+        ? `Using node altitudes (${startElev.toFixed(0)}m → ${endElev.toFixed(0)}m) as elevation above sea level.`
+        : `Using terrain elevation (${startElev.toFixed(0)}m → ${endElev.toFixed(0)}m) at node locations. Use this when node altitude values are incorrect.`;
+
+    const statusBadge = losAnalysis.clear
+        ? '<span class="badge bg-success status-badge"><i class="bi bi-check-circle-fill"></i> Clear Line of Sight</span>'
+        : '<span class="badge bg-warning text-dark status-badge"><i class="bi bi-exclamation-triangle-fill"></i> Potential Obstructions</span>';
+
+    document.getElementById('analysisStatusBadge').innerHTML = statusBadge;
+
+    // Clear metrics display (now integrated into the table)
+    document.getElementById('analysisMetrics').innerHTML = '';
+
+    // Update map
+    updateMap(fromNode, toNode, geoPoints, losAnalysis.obstacles);
+
+    // Update elevation chart
+    updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltitude, fromTerrainElevation, toTerrainElevation, useNodeElevation);
+
+    // Update attribution
+    const dataSet = elevationData.dataSet;
+    document.getElementById('dataSourceAttribution').innerHTML = `
+        <p class="mb-1"><strong>Elevation Data:</strong> ${dataSet.description} (${dataSet.resolutionMeters}m resolution)</p>
+        ${dataSet.publicUrl ? `<p class="mb-0"><a href="${dataSet.publicUrl}" target="_blank" rel="noopener">More information about this dataset <i class="bi bi-box-arrow-up-right"></i></a></p>` : ''}
+    `;
+    document.getElementById('demDataSource').innerHTML = `<strong>Elevation Data Provider</strong> - ${dataSet.description}`;
+}
+
+// Update map with line and obstacles
+function updateMap(fromNode, toNode, geoPoints, obstacles) {
+
+    // Clear existing layers (except the base tile layer)
+    map.eachLayer(layer => {
+        if (layer instanceof L.Marker || layer instanceof L.Polyline || layer instanceof L.CircleMarker) {
+            map.removeLayer(layer);
+        }
+    });
+
+    // Add start and end markers
+    const startMarker = L.marker([fromNode.latitude, fromNode.longitude], {
+        icon: L.divIcon({
+            className: 'custom-marker',
+            html: '<div style="background-color: #28a745; color: white; border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"><i class="bi bi-geo-alt-fill"></i></div>',
+            iconSize: [30, 30]
+        })
+    }).addTo(map);
+
+    const endMarker = L.marker([toNode.latitude, toNode.longitude], {
+        icon: L.divIcon({
+            className: 'custom-marker',
+            html: '<div style="background-color: #dc3545; color: white; border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"><i class="bi bi-geo-alt-fill"></i></div>',
+            iconSize: [30, 30]
+        })
+    }).addTo(map);
+
+    startMarker.bindPopup(`<strong>From:</strong> ${fromNode.long_name || fromNode.short_name || fromNode.hex_id}`);
+    endMarker.bindPopup(`<strong>To:</strong> ${toNode.long_name || toNode.short_name || toNode.hex_id}`);
+
+    // Draw line between nodes using the elevation profile points
+    const linePoints = geoPoints.map(p => [p.latitude, p.longitude]);
+    // Find min and max elevation for color mapping
+    const elevations = geoPoints.map(p => p.elevation);
+    const minElev = Math.min(...elevations);
+    const maxElev = Math.max(...elevations);
+    const elevRange = maxElev - minElev;
+
+    // Helper function to get color based on elevation (green=low, yellow=mid, red=high)
+    function getElevationColor(elevation) {
+        if (elevRange === 0) return '#0d6efd'; // Default blue if no elevation change
+
+        const normalized = (elevation - minElev) / elevRange; // 0 to 1
+
+        // Create gradient: green -> yellow -> orange -> red
+        if (normalized < 0.33) {
+            // Green to yellow
+            const r = Math.round(normalized * 3 * 255);
+            const g = 255;
+            const b = 0;
+            return `rgb(${r}, ${g}, ${b})`;
+        } else if (normalized < 0.67) {
+            // Yellow to orange
+            const r = 255;
+            const g = Math.round(255 - (normalized - 0.33) * 3 * 128);
+            const b = 0;
+            return `rgb(${r}, ${g}, ${b})`;
+        } else {
+            // Orange to red
+            const r = 255;
+            const g = Math.round(127 - (normalized - 0.67) * 3 * 127);
+            const b = 0;
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+    }
+
+    // Draw colored segments and store them for hover detection
+    const lineSegments = [];
+    for (let i = 0; i < geoPoints.length - 1; i++) {
+        const p1 = geoPoints[i];
+        const p2 = geoPoints[i + 1];
+        const avgElevation = (p1.elevation + p2.elevation) / 2;
+        const color = getElevationColor(avgElevation);
+
+        const segment = L.polyline(
+            [[p1.latitude, p1.longitude], [p2.latitude, p2.longitude]],
+            {
+                color: color,
+                weight: 4,
+                opacity: 0.8
+            }
+        ).addTo(map);
+
+        // Add hover interaction for each segment
+        segment._segmentIndex = i;
+        segment.on('mouseover', function(e) {
+            // Highlight this segment
+            this.setStyle({ weight: 6, opacity: 1.0 });
+
+            // Update chart to show this point
+            if (elevationChart && geoPoints[i]) {
+                const point = geoPoints[i];
+                const distanceKm = point.distanceFromOriginMeters / 1000;
+
+                // Show hover marker on chart
+                updateChartCrosshair(distanceKm);
+            }
+        });
+
+        segment.on('mouseout', function(e) {
+            // Reset segment style
+            this.setStyle({ weight: 4, opacity: 0.8 });
+
+            // Remove chart crosshair
+            removeChartCrosshair();
+        });
+
+        lineSegments.push(segment);
+    }
+
+    // Store segments for later reference
+    chartLine = { segments: lineSegments, geoPoints: geoPoints };
+
+    // Add obstacle markers
+    obstacles.forEach((obstacle, index) => {
+        L.circleMarker([obstacle.latitude, obstacle.longitude], {
+            radius: 6,
+            fillColor: '#ffc107',
+            color: '#dc3545',
+            weight: 2,
+            fillOpacity: 0.9
+        }).addTo(map).bindPopup(`
+            <strong>Obstacle ${index + 1}</strong><br>
+            Distance: ${(obstacle.distance / 1000).toFixed(2)} km<br>
+            Elevation: ${obstacle.elevation.toFixed(0)} m<br>
+            Clearance: ${obstacle.clearance.toFixed(1)} m<br>
+            Required: ${obstacle.requiredClearance.toFixed(1)} m
+        `);
+    });
+
+    // Fit map to bounds using all points along the line (not just the nodes)
+    // This ensures we show the entire path, including any intermediate points
+    const bounds = L.latLngBounds(linePoints);
+
+    const fitBoundsOptions = {
+        padding: [100, 100],  // Increased padding for better context
+        maxZoom: 13  // Limit maximum zoom to prevent zooming in too close
+    };
+
+    map.fitBounds(bounds, fitBoundsOptions);
+
+
+    // Force map to invalidate size and refit bounds (fixes rendering issues)
+    setTimeout(() => {
+        map.invalidateSize();
+        // Reapply the bounds after invalidateSize to ensure correct view
+        map.fitBounds(bounds, fitBoundsOptions);
+    }, 100);
+
+    // Initialize hover marker (hidden by default)
+    if (!chartHoverMarker) {
+        chartHoverMarker = L.circleMarker([0, 0], {
+            radius: 8,
+            fillColor: '#ff0000',
+            color: '#ffffff',
+            weight: 2,
+            fillOpacity: 0.8,
+            className: 'map-marker-pulse'
+        });
+    }
+}
+
+// Update elevation chart with hover integration
+function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltitude, fromTerrainElevation, toTerrainElevation, useNodeElevation) {
+    // Destroy existing chart
+    if (elevationChart) {
+        elevationChart.destroy();
+    }
+
+    const startElevation = useNodeElevation ? (fromAltitude || fromTerrainElevation) : fromTerrainElevation;
+    const endElevation = useNodeElevation ? (toAltitude || toTerrainElevation) : toTerrainElevation;
+    const totalDistance = geoPoints[geoPoints.length - 1].distanceFromOriginMeters;
+
+    // Prepare data with x,y coordinates for linear scale
+    const terrainData = geoPoints.map(p => ({
+        x: p.distanceFromOriginMeters / 1000, // Convert to km
+        y: p.elevation
+    }));
+
+    const lineOfSightData = geoPoints.map(p => {
+        const ratio = p.distanceFromOriginMeters / totalDistance;
+        return {
+            x: p.distanceFromOriginMeters / 1000, // Convert to km
+            y: startElevation + (endElevation - startElevation) * ratio
+        };
+    });
+
+    const fresnelData = geoPoints.map((p, i) => {
+        const distanceFromStart = p.distanceFromOriginMeters;
+        const distanceFromEnd = totalDistance - distanceFromStart;
+        const fresnelRadius = calculateFresnelZone(Math.min(distanceFromStart, distanceFromEnd));
+        const ratio = p.distanceFromOriginMeters / totalDistance;
+        const losElev = startElevation + (endElevation - startElevation) * ratio;
+        return {
+            x: p.distanceFromOriginMeters / 1000, // Convert to km
+            y: losElev - fresnelRadius
+        };
+    });
+
+    const ctx = document.getElementById('elevationChart').getContext('2d');
+    elevationChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            datasets: [
+                {
+                    label: 'Terrain Elevation',
+                    data: terrainData,
+                    borderColor: 'rgb(101, 67, 33)',
+                    backgroundColor: 'rgba(101, 67, 33, 0.3)',
+                    fill: 'origin',
+                    tension: 0,
+                    pointRadius: 0,
+                    pointHoverRadius: 5
+                },
+                {
+                    label: 'Line of Sight',
+                    data: lineOfSightData,
+                    borderColor: 'rgb(13, 110, 253)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    borderDash: [5, 5],
+                    tension: 0
+                },
+                {
+                    label: 'Fresnel Zone (60%)',
+                    data: fresnelData,
+                    borderColor: 'rgba(255, 193, 7, 0.5)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1,
+                    pointRadius: 0,
+                    borderDash: [2, 2],
+                    tension: 0
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            aspectRatio: 2,
+            interaction: {
+                mode: 'nearest',
+                intersect: false,
+                axis: 'x'
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: `Elevation Profile: ${fromName} → ${toName}`
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) {
+                                label += ': ';
+                            }
+                            if (context.parsed.y !== null) {
+                                label += context.parsed.y.toFixed(1) + ' m';
+                            }
+                            return label;
+                        },
+                        title: function(context) {
+                            return 'Distance: ' + context[0].parsed.x.toFixed(2) + ' km';
+                        }
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'top'
+                }
+            },
+            scales: {
+                x: {
+                    type: 'linear',
+                    title: {
+                        display: true,
+                        text: 'Distance (km)'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return value.toFixed(1);
+                        }
+                    }
+                },
+                y: {
+                    type: 'linear',
+                    title: {
+                        display: true,
+                        text: 'Elevation (m)'
+                    },
+                    beginAtZero: false
+                }
+            },
+            onHover: (event, activeElements) => {
+                if (activeElements && activeElements.length > 0 && geoPoints && chartLine) {
+                    const element = activeElements[0];
+                    const datasetIndex = element.datasetIndex;
+                    const dataset = elevationChart.data.datasets[datasetIndex];
+                    const dataPoint = dataset.data[element.index];
+
+                    // Find the corresponding geoPoint by distance
+                    const distanceKm = dataPoint.x;
+                    const point = geoPoints.find(p =>
+                        Math.abs((p.distanceFromOriginMeters / 1000) - distanceKm) < 0.01
+                    );
+
+                    if (point && point.latitude && point.longitude) {
+                        // Update marker position
+                        chartHoverMarker.setLatLng([point.latitude, point.longitude]);
+
+                        // Add to map if not already added
+                        if (!map.hasLayer(chartHoverMarker)) {
+                            chartHoverMarker.addTo(map);
+                        }
+
+                        // Pan to show the marker if it's out of view
+                        if (!map.getBounds().contains(chartHoverMarker.getLatLng())) {
+                            map.panTo(chartHoverMarker.getLatLng(), { animate: true, duration: 0.25 });
+                        }
+                    }
+                } else {
+                    // Remove hover marker when not hovering
+                    if (chartHoverMarker && map.hasLayer(chartHoverMarker)) {
+                        map.removeLayer(chartHoverMarker);
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Chart crosshair helpers for map hover
+let chartCrosshairPlugin = null;
+
+function updateChartCrosshair(distanceKm) {
+    if (!elevationChart) return;
+
+    // Remove existing crosshair plugin if any
+    removeChartCrosshair();
+
+    // Create a custom plugin for the crosshair
+    chartCrosshairPlugin = {
+        id: 'crosshair',
+        afterDraw: (chart) => {
+            const ctx = chart.ctx;
+            const xScale = chart.scales.x;
+            const yScale = chart.scales.y;
+
+            // Convert distance to pixel position
+            const xPos = xScale.getPixelForValue(distanceKm);
+
+            if (xPos >= xScale.left && xPos <= xScale.right) {
+                // Draw vertical line
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(xPos, yScale.top);
+                ctx.lineTo(xPos, yScale.bottom);
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
+                ctx.setLineDash([5, 5]);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+    };
+
+    elevationChart.options.plugins.crosshair = chartCrosshairPlugin;
+    Chart.register(chartCrosshairPlugin);
+    elevationChart.update('none');
+}
+
+function removeChartCrosshair() {
+    if (chartCrosshairPlugin && elevationChart) {
+        Chart.unregister(chartCrosshairPlugin);
+        delete elevationChart.options.plugins.crosshair;
+        chartCrosshairPlugin = null;
+        elevationChart.update('none');
+    }
+}
+
+// Show error message
+function showError(message) {
+    document.getElementById('errorMessage').textContent = message;
+    document.getElementById('errorState').style.display = 'block';
+    document.getElementById('resultsContainer').style.display = 'none';
+    document.getElementById('loadingState').style.display = 'none';
+}
+</script>
+{% endblock %}

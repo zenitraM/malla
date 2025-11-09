@@ -18,8 +18,8 @@ class TestMapLayout:
         """Test that the map page loads without errors."""
         page.goto(f"{test_server_url}/map")
 
-        # Wait for the page to load
-        expect(page.locator("h5")).to_contain_text("Network Map")
+        # Wait for the page to load - check for sidebar header specifically
+        expect(page.locator("#sidebar h5")).to_contain_text("Network Map")
 
         # Check that the map container is present
         expect(page.locator("#map")).to_be_visible()

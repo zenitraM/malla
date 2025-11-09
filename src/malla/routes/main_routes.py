@@ -4,7 +4,7 @@ Main routes for the Meshtastic Mesh Health Web UI
 
 import logging
 
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, request
 
 # Import from the new modular architecture
 from ..database.repositories import (
@@ -64,3 +64,20 @@ def longest_links():
     except Exception as e:
         logger.error(f"Error in longest links route: {e}")
         return f"Longest links error: {e}", 500
+
+
+@main_bp.route("/line-of-sight")
+def line_of_sight():
+    """Line of sight analysis tool page."""
+    logger.info("Line of sight tool route accessed")
+    try:
+        # Get optional query parameters for pre-loading analysis
+        from_node_id = request.args.get("from")
+        to_node_id = request.args.get("to")
+
+        return render_template(
+            "line_of_sight.html", from_node_id=from_node_id, to_node_id=to_node_id
+        )
+    except Exception as e:
+        logger.error(f"Error in line of sight route: {e}")
+        return f"Line of sight error: {e}", 500

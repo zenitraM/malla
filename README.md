@@ -43,6 +43,7 @@ Check out some instances with running data from community MQTT servers:
 ![hop_analysis](.screenshots/hop_analysis.jpg)
 ![gateway_compare](.screenshots/gateway_compare.jpg)
 ![longest_links](.screenshots/longest_links.jpg)
+![line_of_sight](.screenshots/line_of_sight.jpg)
 <!-- screenshots:end -->
 
 ## Prerequisites
