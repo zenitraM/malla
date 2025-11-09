@@ -39,7 +39,7 @@ class TestLineOfSight:
         ), "Line of Sight functionality should be available in the map page"
 
         # Verify the icon class is used
-        assert "bi-bezier" in page_content or "bi-bezier" in page_content, (
+        assert "bi-bezier" in page_content, (
             "Line of Sight icon should be defined"
         )
 
