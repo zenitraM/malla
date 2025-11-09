@@ -46,14 +46,13 @@
             if (_loaded) return Promise.resolve(_locations || {});
             if (_loadPromise) return _loadPromise;
 
-            _loadPromise = new Promise(async (resolve) => {
+            _loadPromise = (async () => {
                 // Try localStorage first
                 const cached = _restoreFromLocalStorage();
                 if (cached) {
                     _locations = cached;
                     _loaded = true;
-                    resolve(_locations);
-                    return;
+                    return _locations;
                 }
 
                 // Fetch from API
@@ -79,8 +78,8 @@
                 }
 
                 _loaded = true;
-                resolve(_locations);
-            });
+                return _locations;
+            })();
 
             return _loadPromise;
         },

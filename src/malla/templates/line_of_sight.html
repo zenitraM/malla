@@ -423,10 +423,17 @@ async function sortToNodesByDistance(fromNodeId) {
         // Store from location for use in render
         toNodePicker._fromLocation = fromLoc;
 
+        // Only override methods if they haven't been overridden already
+        if (!toNodePicker._originalSearchNodes) {
+            toNodePicker._originalSearchNodes = toNodePicker.searchNodes.bind(toNodePicker);
+        }
+        if (!toNodePicker._originalRenderResults) {
+            toNodePicker._originalRenderResults = toNodePicker.renderResults.bind(toNodePicker);
+        }
+
         // Override the toNodePicker's search function to sort by distance
-        const originalSearchNodes = toNodePicker.searchNodes.bind(toNodePicker);
         toNodePicker.searchNodes = async function(query) {
-            await originalSearchNodes(query);
+            await this._originalSearchNodes(query);
 
             // Sort results by distance from fromNode
             const nodeIds = this.nodes.map(n => n.node_id);
@@ -452,9 +459,8 @@ async function sortToNodesByDistance(fromNodeId) {
         };
 
         // Override the renderResults to show distance (only once!)
-        const originalRenderResults = toNodePicker.renderResults.bind(toNodePicker);
         toNodePicker.renderResults = function() {
-            originalRenderResults();
+            this._originalRenderResults();
 
             // Add distance info to each item (check if not already added)
             const items = this.resultsContainer.querySelectorAll('.node-picker-item');

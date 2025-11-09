@@ -4,7 +4,7 @@ Main routes for the Meshtastic Mesh Health Web UI
 
 import logging
 
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, request
 
 # Import from the new modular architecture
 from ..database.repositories import (
@@ -71,8 +71,6 @@ def line_of_sight():
     """Line of sight analysis tool page."""
     logger.info("Line of sight tool route accessed")
     try:
-        from flask import request
-
         # Get optional query parameters for pre-loading analysis
         from_node_id = request.args.get("from")
         to_node_id = request.args.get("to")
