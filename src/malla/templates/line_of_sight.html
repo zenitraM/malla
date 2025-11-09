@@ -34,6 +34,21 @@
         position: relative;
     }
 
+    /* Responsive chart height for mobile devices */
+    @media (max-width: 768px) {
+        .elevation-chart-container {
+            height: 400px;
+            min-height: 350px;
+        }
+    }
+
+    @media (max-width: 576px) {
+        .elevation-chart-container {
+            height: 350px;
+            min-height: 300px;
+        }
+    }
+
     .info-section {
         background: var(--bs-body-bg);
         border: 1px solid var(--bs-border-color);
@@ -973,6 +988,11 @@ function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltit
     });
 
     const ctx = document.getElementById('elevationChart').getContext('2d');
+    
+    // Determine aspect ratio based on screen width
+    const isMobile = window.innerWidth <= 768;
+    const aspectRatio = isMobile ? 1.2 : 2;
+
     elevationChart = new Chart(ctx, {
         type: 'line',
         data: {
@@ -1011,8 +1031,7 @@ function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltit
         },
         options: {
             responsive: true,
-            maintainAspectRatio: true,
-            aspectRatio: 2,
+            maintainAspectRatio: false,
             interaction: {
                 mode: 'nearest',
                 intersect: false,

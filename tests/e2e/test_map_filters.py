@@ -329,7 +329,9 @@ class TestMapFilters:
 
         # Check that the default value is 24 hours
         selected_value = age_filter.input_value()
-        assert selected_value == "24", f"Default max age should be 24 hours, but got {selected_value}"
+        assert selected_value == "24", (
+            f"Default max age should be 24 hours, but got {selected_value}"
+        )
 
         # Also verify the selected option
         selected_option = age_filter.locator("option[selected]")
@@ -350,12 +352,16 @@ class TestMapFilters:
         age_filter = page.locator("#maxAge")
         expect(age_filter).to_be_visible()
         selected_value = age_filter.input_value()
-        assert selected_value == "24", f"Default max age should be 24 hours, but got {selected_value}"
+        assert selected_value == "24", (
+            f"Default max age should be 24 hours, but got {selected_value}"
+        )
 
         # Check that the start date input is populated based on the default maxAge
         start_date_input = page.locator("#startDateTime")
         start_value = start_date_input.input_value()
-        assert start_value != "", "Start date should be populated based on default maxAge"
+        assert start_value != "", (
+            "Start date should be populated based on default maxAge"
+        )
 
         # Check that the end date input is empty (maxAge only sets start date)
         end_date_input = page.locator("#endDateTime")
@@ -374,9 +380,13 @@ class TestMapFilters:
         """)
 
         # Allow for small variations due to rounding
-        assert 23.5 <= hours_ago <= 24.5, f"Start date should be approximately 24 hours ago, but got {hours_ago} hours"
+        assert 23.5 <= hours_ago <= 24.5, (
+            f"Start date should be approximately 24 hours ago, but got {hours_ago} hours"
+        )
 
         # Check that minContacts has the default value of 1
         min_contacts_input = page.locator("#minContacts")
         min_contacts_value = min_contacts_input.input_value()
-        assert min_contacts_value == "1", f"Default min contacts should be 1, but got {min_contacts_value}"
+        assert min_contacts_value == "1", (
+            f"Default min contacts should be 1, but got {min_contacts_value}"
+        )

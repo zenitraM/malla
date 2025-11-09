@@ -36,7 +36,9 @@ class TestTimezoneToggleE2E:
         assert has_timezone_utils, "Timezone utility functions not loaded"
 
         # Check that timezone toggle is initialized
-        has_timezone_toggle = page.evaluate("typeof window.timezoneToggle !== 'undefined'")
+        has_timezone_toggle = page.evaluate(
+            "typeof window.timezoneToggle !== 'undefined'"
+        )
         assert has_timezone_toggle, "Timezone toggle not initialized"
 
     def test_timezone_toggle_changes_preference(self, page, test_server_url):
@@ -44,7 +46,9 @@ class TestTimezoneToggleE2E:
         page.goto(f"{test_server_url}/packets")
 
         # Get initial preference
-        initial_pref = page.evaluate("localStorage.getItem('malla-timezone-preference') || 'local'")
+        initial_pref = page.evaluate(
+            "localStorage.getItem('malla-timezone-preference') || 'local'"
+        )
 
         # Click timezone toggle button
         page.click("#timezone-toggle")
@@ -55,7 +59,7 @@ class TestTimezoneToggleE2E:
         # Check that preference changed
         new_pref = page.evaluate("localStorage.getItem('malla-timezone-preference')")
         assert new_pref != initial_pref, "Timezone preference should change"
-        assert new_pref in ['local', 'utc'], f"Invalid timezone preference: {new_pref}"
+        assert new_pref in ["local", "utc"], f"Invalid timezone preference: {new_pref}"
 
     def test_timezone_toggle_updates_timestamps_in_table(self, page, test_server_url):
         """Test that timezone toggle updates timestamps in packet table."""
@@ -65,10 +69,14 @@ class TestTimezoneToggleE2E:
         page.wait_for_selector(".modern-table tbody tr", timeout=10000)
 
         # Get first timestamp
-        first_timestamp = page.locator(".modern-table tbody tr:first-child td:first-child small").text_content()
+        first_timestamp = page.locator(
+            ".modern-table tbody tr:first-child td:first-child small"
+        ).text_content()
 
         # Should show time with or without UTC suffix depending on current preference
-        assert first_timestamp is not None and len(first_timestamp) > 0, "No timestamp found"
+        assert first_timestamp is not None and len(first_timestamp) > 0, (
+            "No timestamp found"
+        )
 
         # Click timezone toggle
         page.click("#timezone-toggle")
@@ -78,15 +86,14 @@ class TestTimezoneToggleE2E:
         page.wait_for_selector(".modern-table tbody tr", timeout=10000)
 
         # Get timestamp after toggle
-        new_timestamp = page.locator(".modern-table tbody tr:first-child td:first-child small").text_content()
+        new_timestamp = page.locator(
+            ".modern-table tbody tr:first-child td:first-child small"
+        ).text_content()
 
         # Toggling the timezone should either change the timestamp value or change format (presence/absence of 'UTC').
-        assert (
-            new_timestamp != first_timestamp
-            or ("UTC" in new_timestamp) != ("UTC" in first_timestamp)
-        ), (
-            "Timestamp should change value or format (UTC suffix) after timezone toggle"
-        )
+        assert new_timestamp != first_timestamp or ("UTC" in new_timestamp) != (
+            "UTC" in first_timestamp
+        ), "Timestamp should change value or format (UTC suffix) after timezone toggle"
 
     def test_local_timezone_displays_without_utc_suffix(self, page, test_server_url):
         """Test that local timezone displays timestamps without UTC suffix."""
@@ -99,10 +106,14 @@ class TestTimezoneToggleE2E:
         page.wait_for_selector(".modern-table tbody tr", timeout=10000)
 
         # Get first timestamp
-        first_timestamp = page.locator(".modern-table tbody tr:first-child td:first-child small").text_content()
+        first_timestamp = page.locator(
+            ".modern-table tbody tr:first-child td:first-child small"
+        ).text_content()
 
         # Should NOT have UTC suffix in local mode
-        assert "UTC" not in first_timestamp, f"Local timezone should not show UTC: {first_timestamp}"
+        assert "UTC" not in first_timestamp, (
+            f"Local timezone should not show UTC: {first_timestamp}"
+        )
 
     def test_utc_timezone_displays_with_utc_suffix(self, page, test_server_url):
         """Test that UTC timezone displays timestamps with UTC suffix."""
@@ -115,10 +126,14 @@ class TestTimezoneToggleE2E:
         page.wait_for_selector(".modern-table tbody tr", timeout=10000)
 
         # Get first timestamp
-        first_timestamp = page.locator(".modern-table tbody tr:first-child td:first-child small").text_content()
+        first_timestamp = page.locator(
+            ".modern-table tbody tr:first-child td:first-child small"
+        ).text_content()
 
         # Should have UTC suffix in UTC mode
-        assert "UTC" in first_timestamp, f"UTC timezone should show UTC: {first_timestamp}"
+        assert "UTC" in first_timestamp, (
+            f"UTC timezone should show UTC: {first_timestamp}"
+        )
 
     def test_timezone_persists_across_page_navigation(self, page, test_server_url):
         """Test that timezone preference persists when navigating to different pages."""
@@ -133,7 +148,7 @@ class TestTimezoneToggleE2E:
 
         # Check preference is still UTC
         pref = page.evaluate("localStorage.getItem('malla-timezone-preference')")
-        assert pref == 'utc', "Timezone preference should persist across pages"
+        assert pref == "utc", "Timezone preference should persist across pages"
 
         # Navigate to traceroute page
         page.goto(f"{test_server_url}/traceroute")
@@ -141,7 +156,7 @@ class TestTimezoneToggleE2E:
 
         # Check preference is still UTC
         pref = page.evaluate("localStorage.getItem('malla-timezone-preference')")
-        assert pref == 'utc', "Timezone preference should persist across pages"
+        assert pref == "utc", "Timezone preference should persist across pages"
 
     def test_packet_detail_page_respects_timezone(self, page, test_server_url):
         """Test that packet detail page respects timezone setting."""
@@ -158,19 +173,27 @@ class TestTimezoneToggleE2E:
         timestamp_elements = page.locator("[data-timestamp]").all()
 
         # Should have at least one timestamp element
-        assert len(timestamp_elements) > 0, "No timestamp elements found on packet detail page"
+        assert len(timestamp_elements) > 0, (
+            "No timestamp elements found on packet detail page"
+        )
 
         # Get current timezone preference
-        pref = page.evaluate("localStorage.getItem('malla-timezone-preference') || 'local'")
+        pref = page.evaluate(
+            "localStorage.getItem('malla-timezone-preference') || 'local'"
+        )
 
         # Check that timestamp is formatted according to preference
         for element in timestamp_elements[:3]:  # Check first 3 timestamps
             text = element.text_content()
             if text and len(text) > 5:  # Skip empty or very short text
-                if pref == 'utc':
-                    assert "UTC" in text, f"UTC mode should show UTC in timestamp: {text}"
+                if pref == "utc":
+                    assert "UTC" in text, (
+                        f"UTC mode should show UTC in timestamp: {text}"
+                    )
                 else:
-                    assert "UTC" not in text, f"Local mode should not show UTC in timestamp: {text}"
+                    assert "UTC" not in text, (
+                        f"Local mode should not show UTC in timestamp: {text}"
+                    )
 
     def test_nodes_page_respects_timezone(self, page, test_server_url):
         """Test that nodes page respects timezone setting."""
@@ -183,7 +206,9 @@ class TestTimezoneToggleE2E:
         page.wait_for_selector(".modern-table tbody tr", timeout=10000)
 
         # Find "Last Seen" timestamps
-        last_seen_cells = page.locator(".modern-table tbody td:has(.timestamp-display)").all()
+        last_seen_cells = page.locator(
+            ".modern-table tbody td:has(.timestamp-display)"
+        ).all()
 
         if len(last_seen_cells) > 0:
             # Check first timestamp
@@ -202,11 +227,15 @@ class TestTimezoneToggleE2E:
         page.wait_for_selector(".modern-table tbody tr", timeout=10000)
 
         # Get first timestamp
-        first_timestamp = page.locator(".modern-table tbody tr:first-child td:first-child small").text_content()
+        first_timestamp = page.locator(
+            ".modern-table tbody tr:first-child td:first-child small"
+        ).text_content()
 
         if first_timestamp:
             # Should have UTC suffix
-            assert "UTC" in first_timestamp, f"UTC mode should show UTC: {first_timestamp}"
+            assert "UTC" in first_timestamp, (
+                f"UTC mode should show UTC: {first_timestamp}"
+            )
 
     def test_datetime_inputs_work_with_timezone_toggle(self, page, test_server_url):
         """Test that datetime-local inputs work correctly regardless of timezone setting."""
@@ -234,7 +263,9 @@ class TestTimezoneToggleE2E:
         page.fill("#start_time", "2025-01-02T14:30")
 
         value = page.input_value("#start_time")
-        assert value == "2025-01-02T14:30", "Datetime input should work after timezone toggle"
+        assert value == "2025-01-02T14:30", (
+            "Datetime input should work after timezone toggle"
+        )
 
     def test_node_detail_page_respects_timezone(self, page, test_server_url):
         """Test that node detail page timestamps respect timezone setting."""
@@ -250,19 +281,27 @@ class TestTimezoneToggleE2E:
         timestamp_elements = page.locator("[data-timestamp]").all()
 
         # Should have at least one timestamp element (last_seen)
-        assert len(timestamp_elements) > 0, "No timestamp elements found on node detail page"
+        assert len(timestamp_elements) > 0, (
+            "No timestamp elements found on node detail page"
+        )
 
         # Get current timezone preference
-        pref = page.evaluate("localStorage.getItem('malla-timezone-preference') || 'local'")
+        pref = page.evaluate(
+            "localStorage.getItem('malla-timezone-preference') || 'local'"
+        )
 
         # Check that timestamps are formatted according to preference
         for element in timestamp_elements[:2]:  # Check first 2 timestamps
             text = element.text_content()
             if text and len(text) > 5:  # Skip empty or very short text
-                if pref == 'utc':
-                    assert "UTC" in text, f"UTC mode should show UTC in timestamp: {text}"
+                if pref == "utc":
+                    assert "UTC" in text, (
+                        f"UTC mode should show UTC in timestamp: {text}"
+                    )
                 else:
-                    assert "UTC" not in text, f"Local mode should not show UTC in timestamp: {text}"
+                    assert "UTC" not in text, (
+                        f"Local mode should not show UTC in timestamp: {text}"
+                    )
 
     def test_map_page_link_timestamps_respect_timezone(self, page, test_server_url):
         """Test that map page link popups respect timezone setting."""
@@ -277,4 +316,6 @@ class TestTimezoneToggleE2E:
 
         # Check that formatTimestamp function is available
         has_format_function = page.evaluate("typeof formatTimestamp === 'function'")
-        assert has_format_function, "formatTimestamp function should be available on map page"
+        assert has_format_function, (
+            "formatTimestamp function should be available on map page"
+        )
