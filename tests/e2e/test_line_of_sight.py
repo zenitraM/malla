@@ -39,7 +39,7 @@ class TestLineOfSight:
         ), "Line of Sight functionality should be available in the map page"
 
         # Verify the icon class is used
-        assert "bi-mountains" in page_content or "bi-graph" in page_content, (
+        assert "bi-bezier" in page_content or "bi-bezier" in page_content, (
             "Line of Sight icon should be defined"
         )
 
@@ -61,6 +61,3 @@ class TestLineOfSight:
 
         # Should still load without error
         expect(page.locator("h1")).to_contain_text("Line of Sight Analysis")
-
-    # Note: The following tests are removed because Line of Sight now opens in a separate page
-    # instead of a modal. The functionality is tested in test_line_of_sight_e2e.py instead.
