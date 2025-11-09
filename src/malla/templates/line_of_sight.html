@@ -775,8 +775,6 @@ function displayResults(data) {
 
 // Update map with line and obstacles
 function updateMap(fromNode, toNode, geoPoints, obstacles) {
-    console.log('Updating map with nodes:', fromNode, toNode);
-    console.log('GeoPoints count:', geoPoints.length);
 
     // Clear existing layers (except the base tile layer)
     map.eachLayer(layer => {
@@ -807,14 +805,87 @@ function updateMap(fromNode, toNode, geoPoints, obstacles) {
 
     // Draw line between nodes using the elevation profile points
     const linePoints = geoPoints.map(p => [p.latitude, p.longitude]);
+    // Find min and max elevation for color mapping
+    const elevations = geoPoints.map(p => p.elevation);
+    const minElev = Math.min(...elevations);
+    const maxElev = Math.max(...elevations);
+    const elevRange = maxElev - minElev;
 
+    // Helper function to get color based on elevation (green=low, yellow=mid, red=high)
+    function getElevationColor(elevation) {
+        if (elevRange === 0) return '#0d6efd'; // Default blue if no elevation change
 
+        const normalized = (elevation - minElev) / elevRange; // 0 to 1
 
-    chartLine = L.polyline(linePoints, {
-        color: '#0d6efd',
-        weight: 4,
-        opacity: 0.8
-    }).addTo(map);
+        // Create gradient: green -> yellow -> orange -> red
+        if (normalized < 0.33) {
+            // Green to yellow
+            const r = Math.round(normalized * 3 * 255);
+            const g = 255;
+            const b = 0;
+            return `rgb(${r}, ${g}, ${b})`;
+        } else if (normalized < 0.67) {
+            // Yellow to orange
+            const r = 255;
+            const g = Math.round(255 - (normalized - 0.33) * 3 * 128);
+            const b = 0;
+            return `rgb(${r}, ${g}, ${b})`;
+        } else {
+            // Orange to red
+            const r = 255;
+            const g = Math.round(127 - (normalized - 0.67) * 3 * 127);
+            const b = 0;
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+    }
+
+    // Draw colored segments and store them for hover detection
+    const lineSegments = [];
+    for (let i = 0; i < geoPoints.length - 1; i++) {
+        const p1 = geoPoints[i];
+        const p2 = geoPoints[i + 1];
+        const avgElevation = (p1.elevation + p2.elevation) / 2;
+        const color = getElevationColor(avgElevation);
+
+        const segment = L.polyline(
+            [[p1.latitude, p1.longitude], [p2.latitude, p2.longitude]],
+            {
+                color: color,
+                weight: 4,
+                opacity: 0.8
+            }
+        ).addTo(map);
+
+        // Add hover interaction for each segment
+        segment._segmentIndex = i;
+        segment.on('mouseover', function(e) {
+            // Highlight this segment
+            this.setStyle({ weight: 6, opacity: 1.0 });
+
+            // Update chart to show this point
+            if (elevationChart && geoPoints[i]) {
+                const point = geoPoints[i];
+                const distanceKm = point.distanceFromOriginMeters / 1000;
+
+                // Show hover marker on chart
+                updateChartCrosshair(distanceKm);
+            }
+        });
+
+        segment.on('mouseout', function(e) {
+            // Reset segment style
+            this.setStyle({ weight: 4, opacity: 0.8 });
+
+            // Remove chart crosshair
+            removeChartCrosshair();
+        });
+
+        lineSegments.push(segment);
+    }
+
+    // Store segments for later reference
+    chartLine = { segments: lineSegments, geoPoints: geoPoints };
+
     // Add obstacle markers
     obstacles.forEach((obstacle, index) => {
         L.circleMarker([obstacle.latitude, obstacle.longitude], {
@@ -832,13 +903,23 @@ function updateMap(fromNode, toNode, geoPoints, obstacles) {
         `);
     });
 
-    // Fit map to bounds with some padding
-    const bounds = L.latLngBounds([[fromNode.latitude, fromNode.longitude], [toNode.latitude, toNode.longitude]]);
-    map.fitBounds(bounds, { padding: [50, 50] });
+    // Fit map to bounds using all points along the line (not just the nodes)
+    // This ensures we show the entire path, including any intermediate points
+    const bounds = L.latLngBounds(linePoints);
 
-    // Force map to invalidate size (fixes rendering issues)
+    const fitBoundsOptions = {
+        padding: [100, 100],  // Increased padding for better context
+        maxZoom: 13  // Limit maximum zoom to prevent zooming in too close
+    };
+
+    map.fitBounds(bounds, fitBoundsOptions);
+
+
+    // Force map to invalidate size and refit bounds (fixes rendering issues)
     setTimeout(() => {
         map.invalidateSize();
+        // Reapply the bounds after invalidateSize to ensure correct view
+        map.fitBounds(bounds, fitBoundsOptions);
     }, 100);
 
     // Initialize hover marker (hidden by default)
@@ -1022,6 +1103,55 @@ function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltit
             }
         }
     });
+}
+
+// Chart crosshair helpers for map hover
+let chartCrosshairPlugin = null;
+
+function updateChartCrosshair(distanceKm) {
+    if (!elevationChart) return;
+
+    // Remove existing crosshair plugin if any
+    removeChartCrosshair();
+
+    // Create a custom plugin for the crosshair
+    chartCrosshairPlugin = {
+        id: 'crosshair',
+        afterDraw: (chart) => {
+            const ctx = chart.ctx;
+            const xScale = chart.scales.x;
+            const yScale = chart.scales.y;
+
+            // Convert distance to pixel position
+            const xPos = xScale.getPixelForValue(distanceKm);
+
+            if (xPos >= xScale.left && xPos <= xScale.right) {
+                // Draw vertical line
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(xPos, yScale.top);
+                ctx.lineTo(xPos, yScale.bottom);
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
+                ctx.setLineDash([5, 5]);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+    };
+
+    elevationChart.options.plugins.crosshair = chartCrosshairPlugin;
+    Chart.register(chartCrosshairPlugin);
+    elevationChart.update('none');
+}
+
+function removeChartCrosshair() {
+    if (chartCrosshairPlugin && elevationChart) {
+        Chart.unregister(chartCrosshairPlugin);
+        delete elevationChart.options.plugins.crosshair;
+        chartCrosshairPlugin = null;
+        elevationChart.update('none');
+    }
 }
 
 // Show error message
