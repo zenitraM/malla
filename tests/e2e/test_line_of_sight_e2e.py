@@ -229,8 +229,6 @@ class TestLineOfSightE2E:
         # Distance hint should now be visible (if nodes have locations)
         # Check if it's either visible or at least has content
         hint_display = hint.evaluate("el => window.getComputedStyle(el).display")
-        hint_text = hint.text_content()
-
         # Either it should be visible with distance, or hidden (if nodes don't have locations)
         assert hint_display in ["block", "inline", "none"], "Distance hint should have valid display state"
 
