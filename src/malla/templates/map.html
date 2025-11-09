@@ -1751,9 +1751,6 @@ function drawHopNetwork(skipFit = false) {
 
 // ==================== Line of Sight Analysis ====================
 
-let elevationChart = null;
-let currentLOSData = null; // Store current data for recalculation on toggle
-
 // Show line of sight analysis for a link between two nodes (redirects to new page)
 function showLineOfSight(fromNodeId, toNodeId) {
     window.open(`/line-of-sight?from=${fromNodeId}&to=${toNodeId}`, '_blank');
