@@ -78,6 +78,7 @@ PAGES: list[tuple[str, str]] = [
     ("/traceroute-hops", "hop_analysis.jpg"),
     ("/gateway/compare", "gateway_compare.jpg"),
     ("/longest-links", "longest_links.jpg"),
+    ("/line-of-sight", "line_of_sight.jpg"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -727,6 +728,97 @@ def _capture_screenshots(base_url: str, out_dir: Path) -> list[Path]:
                             )
                         except Exception:
                             pass  # Continue if table doesn't populate
+
+                elif route == "/line-of-sight":
+                    # Line of Sight Analysis - set nodes and trigger analysis
+                    try:
+                        # Wait for node pickers to be ready
+                        page.wait_for_selector("#fromNode", timeout=5000)
+                        page.wait_for_selector("#toNode", timeout=5000)
+                        page.wait_for_timeout(2000)  # Wait for caches to load
+
+                        # Use JavaScript to set node values directly (avoids dropdown z-index issues)
+                        page.evaluate("""
+                            () => {
+                                // Set from node (Tomate Base)
+                                document.getElementById('fromNode_value').value = '1819569748';
+                                document.getElementById('fromNode').value = 'Tomate Base';
+                                document.getElementById('fromNode_value').dispatchEvent(new Event('change'));
+
+                                // Set to node (Central Hub Node)
+                                document.getElementById('toNode_value').value = '2147483647';
+                                document.getElementById('toNode').value = 'Central Hub Node';
+                                document.getElementById('toNode_value').dispatchEvent(new Event('change'));
+                            }
+                        """)
+
+                        # Wait for handlers to process
+                        page.wait_for_timeout(1000)
+
+                        # Wait for analyze button to be enabled
+                        page.wait_for_function(
+                            "() => !document.getElementById('analyzeBtn').disabled",
+                            timeout=3000,
+                        )
+
+                        # Click analyze button
+                        analyze_btn = page.query_selector("#analyzeBtn")
+                        if analyze_btn and not analyze_btn.is_disabled():
+                            _LOG.info("Triggering line-of-sight analysis")
+                            analyze_btn.click()
+
+                            # Wait for results to appear
+                            try:
+                                page.wait_for_selector(
+                                    "#resultsContainer", timeout=15000
+                                )
+                                page.wait_for_function(
+                                    "() => document.getElementById('resultsContainer').style.display !== 'none'",
+                                    timeout=10000,
+                                )
+
+                                # Wait for map to render
+                                page.wait_for_selector(
+                                    "#line-of-sight-map", timeout=5000
+                                )
+
+                                # Wait for chart to render
+                                page.wait_for_selector("#elevationChart", timeout=5000)
+
+                                # Wait for Chart.js to finish rendering
+                                page.wait_for_function(
+                                    """() => {
+                                        if (typeof Chart === 'undefined') return false;
+                                        const charts = Object.values(Chart.instances || {});
+                                        return charts.length > 0 && charts.every(chart =>
+                                            chart.canvas &&
+                                            chart.canvas.width > 0 &&
+                                            chart.canvas.height > 0 &&
+                                            chart.isReady !== false
+                                        );
+                                    }""",
+                                    timeout=10000,
+                                )
+
+                                # Wait for map tiles to load
+                                page.wait_for_function(
+                                    "() => document.querySelectorAll('.leaflet-tile-loaded').length > 0",
+                                    timeout=8000,
+                                )
+
+                                _LOG.info("Line-of-sight analysis results loaded")
+
+                                # Additional wait for stability
+                                page.wait_for_timeout(2000)
+
+                            except Exception as results_e:
+                                _LOG.warning(
+                                    f"Line-of-sight results didn't load: {results_e}"
+                                )
+
+                    except Exception as e:
+                        _LOG.warning(f"Line-of-sight setup failed: {e}")
+                        pass  # Continue with screenshot even if analysis fails
 
                 elif route in ["/traceroute", "/packets", "/nodes"]:
                     # Table pages - wait for content to load
