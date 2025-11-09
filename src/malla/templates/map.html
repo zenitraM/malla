@@ -194,65 +194,6 @@
     {% endcall %}
 </div>
 
-<!-- Line of Sight Modal -->
-<div class="modal fade" id="lineOfSightModal" tabindex="-1" aria-labelledby="lineOfSightModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="lineOfSightModalLabel">
-                    <i class="bi bi-graph-up"></i> Line of Sight Analysis
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <div id="losLoadingSpinner" class="text-center py-5">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading elevation data...</span>
-                    </div>
-                    <p class="mt-2 text-muted">Fetching terrain elevation data...</p>
-                </div>
-                <div id="losContent" style="display: none;">
-                    <div class="row mb-3">
-                        <div class="col-md-4">
-                            <h6>Link Information</h6>
-                            <div id="losLinkInfo"></div>
-                        </div>
-                        <div class="col-md-4">
-                            <h6>Line of Sight Analysis</h6>
-                            <div id="losAnalysisInfo"></div>
-                        </div>
-                        <div class="col-md-4">
-                            <h6>Elevation Mode</h6>
-                            <div class="form-check form-switch mb-2">
-                                <input class="form-check-input" type="checkbox" id="useNodeElevationToggle" checked>
-                                <label class="form-check-label" for="useNodeElevationToggle">
-                                    Use node altitude
-                                </label>
-                            </div>
-                            <small class="text-muted">
-                                <div id="elevationModeDescription"></div>
-                            </small>
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <canvas id="elevationChart" style="max-height: 400px;"></canvas>
-                    </div>
-                    <div class="alert alert-info" id="losAttribution">
-                        <small><strong>Data Source:</strong> <span id="losDataSource"></span></small>
-                    </div>
-                </div>
-                <div id="losError" style="display: none;" class="alert alert-danger">
-                    <i class="bi bi-exclamation-triangle"></i>
-                    <span id="losErrorMessage"></span>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!-- Hide the footer for this page -->
 <style>
 .footer {
@@ -1661,9 +1602,9 @@ function createLinkPopupContent(link) {
                     View History
                 </button>
                 ${hasLocations ? `
-                <a href="/line-of-sight?from=${link.from_node_id}&to=${link.to_node_id}" target="_blank" class="btn btn-sm btn-success">
-                    <i class="bi bi-mountains"></i> Line of Sight <i class="bi bi-box-arrow-up-right"></i>
-                </a>
+                <button class="btn btn-sm btn-success" onclick="showLineOfSightModal(${link.from_node_id}, ${link.to_node_id})">
+                    <i class="bi bi-graph-up"></i> Line of Sight
+                </button>
                 ` : ''}
             </div>
         </div>
