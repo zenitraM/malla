@@ -1417,9 +1417,9 @@ async function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocation
             for (const reception of otherReceptions) {
                 if (reception.relay_candidates && reception.relay_candidates.length > 0 &&
                     reception.gateway_id && gatewayLocations[reception.gateway_id]) {
-                    
+
                     const gatewayLocation = gatewayLocations[reception.gateway_id];
-                    
+
                     reception.relay_candidates.forEach(candidate => {
                         const location = allLocationsData.locations.find(loc => loc.node_id === candidate.node_id);
                         if (location) {
