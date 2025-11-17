@@ -50,6 +50,7 @@
                         <th>RSSI</th>
                         <th>SNR</th>
                         <th>Hops</th>
+                        <th>Relay</th>
                         <th>Channel</th>
                         <th>Timestamp</th>
                         <th>Actions</th>
@@ -90,6 +91,19 @@
                                 <span class="hop-badge">{{ packet.hop_count }}</span>
                             {% else %}
                                 <span class="text-muted">Unknown</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if packet.relay_hex %}
+                                <code>{{ packet.relay_hex }}</code>
+                                {% if packet.relay_candidates %}
+                                    <i class="bi bi-arrow-right"></i>
+                                    {% for candidate in packet.relay_candidates %}
+                                        {{ node_link(candidate.node_id, candidate.node_name, candidate.short_name) }}{% if not loop.last %}, {% endif %}
+                                    {% endfor %}
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">-</span>
                             {% endif %}
                         </td>
                         <td>
@@ -147,6 +161,19 @@
                             {% endif %}
                         </td>
                         <td>
+                            {% if reception.relay_hex %}
+                                <code>{{ reception.relay_hex }}</code>
+                                {% if reception.relay_candidates %}
+                                    <i class="bi bi-arrow-right"></i>
+                                    {% for candidate in reception.relay_candidates %}
+                                        {{ node_link(candidate.node_id, candidate.node_name, candidate.short_name) }}{% if not loop.last %}, {% endif %}
+                                    {% endfor %}
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
                             <span class="channel-badge">{{ reception.channel_id or "Unknown" }}</span>
                         </td>
                         <td>
@@ -162,7 +189,7 @@
 
                     {% if not other_receptions %}
                     <tr>
-                        <td colspan="8" class="text-center text-muted">
+                        <td colspan="9" class="text-center text-muted">
                             <i class="bi bi-info-circle"></i>
                             No other receptions found within ±2 seconds
                         </td>

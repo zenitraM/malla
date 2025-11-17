@@ -11,11 +11,9 @@ from flask import Blueprint, render_template, request
 from ..database.connection import get_db_connection
 
 # Import from the new modular architecture
-from ..database.repositories import LocationRepository
+from ..database.repositories import LocationRepository, NodeRepository
 from ..models.traceroute import TraceroutePacket
-from ..utils.node_utils import (
-    get_bulk_node_names,
-)
+from ..utils.node_utils import convert_node_id, get_bulk_node_names
 from ..utils.traceroute_graph import build_combined_traceroute_graph
 
 logger = logging.getLogger(__name__)
@@ -86,6 +84,39 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
         packet["from_node_name"] = node_names.get(packet["from_node_id"], "Unknown")
         packet["to_node_name"] = node_names.get(packet["to_node_id"], "Unknown")
 
+        # Process relay_node information for the main packet
+
+        packet_relay_node = packet.get("relay_node")
+        if packet_relay_node and packet_relay_node != 0:
+            packet["relay_hex"] = f"{packet_relay_node & 0xFF:02x}"
+            relay_last_byte = packet_relay_node & 0xFF
+
+            # Get candidates from the perspective of the gateway that received this packet
+            if packet.get("gateway_id") and packet["gateway_id"].startswith("!"):
+                try:
+                    gateway_node_id = convert_node_id(packet["gateway_id"])
+                    # Use the efficient helper method to get candidates for just this relay_node
+                    packet["relay_candidates"] = (
+                        NodeRepository.get_relay_node_candidates(
+                            gateway_node_id, relay_last_byte
+                        )
+                    )
+                except ValueError as e:
+                    logger.warning(
+                        f"Failed to get relay candidates for packet gateway {packet.get('gateway_id')}: {e}"
+                    )
+                    packet["relay_candidates"] = []
+                except Exception as e:
+                    logger.exception(
+                        f"Unexpected error while getting relay candidates for packet gateway {packet.get('gateway_id')}: {e}"
+                    )
+                    raise
+            else:
+                packet["relay_candidates"] = []
+        else:
+            packet["relay_hex"] = None
+            packet["relay_candidates"] = []
+
         # Find all receptions of the same packet using mesh_packet_id (preferred) or fallback to time-based
         receptions = []
 
@@ -96,7 +127,7 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
                 SELECT
                     id, timestamp, gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
                     payload_length, processed_successfully,
-                    raw_payload, from_node_id, to_node_id, portnum, portnum_name
+                    raw_payload, from_node_id, to_node_id, portnum, portnum_name, relay_node
                 FROM packet_history
                 WHERE mesh_packet_id = ?
                 AND id != ?
@@ -116,7 +147,7 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
                 SELECT
                     id, timestamp, gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
                     payload_length, processed_successfully,
-                    raw_payload, from_node_id, to_node_id, portnum, portnum_name
+                    raw_payload, from_node_id, to_node_id, portnum, portnum_name, relay_node
                 FROM packet_history
                 WHERE from_node_id = ?
                 AND timestamp BETWEEN ? AND ?
@@ -154,6 +185,38 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
             # Collect gateway IDs for name resolution
             if reception["gateway_id"] and reception["gateway_id"].startswith("!"):
                 gateway_ids.add(reception["gateway_id"])
+
+        # Process relay_node information for each reception
+
+        for reception in receptions:
+            relay_node = reception.get("relay_node")
+            if relay_node and relay_node != 0:
+                # Format relay_node as last byte in hex
+                reception["relay_hex"] = f"{relay_node & 0xFF:02x}"
+                relay_last_byte = relay_node & 0xFF
+
+                # Get candidates for this relay_node from the perspective of the gateway
+                if reception.get("gateway_id") and reception["gateway_id"].startswith(
+                    "!"
+                ):
+                    try:
+                        gateway_node_id = convert_node_id(reception["gateway_id"])
+                        # Use the efficient helper method to get candidates for just this relay_node
+                        reception["relay_candidates"] = (
+                            NodeRepository.get_relay_node_candidates(
+                                gateway_node_id, relay_last_byte
+                            )
+                        )
+                    except (ValueError, Exception) as e:
+                        logger.warning(
+                            f"Failed to get relay candidates for gateway {reception.get('gateway_id')}: {e}"
+                        )
+                        reception["relay_candidates"] = []
+                else:
+                    reception["relay_candidates"] = []
+            else:
+                reception["relay_hex"] = None
+                reception["relay_candidates"] = []
 
         # Get recent packets from the same node for context
         cursor.execute(

@@ -1,0 +1,43 @@
+<!-- Relay Node Analysis Component -->
+<div class="card mb-4" id="relay-node-analysis-card" style="display: none;">
+    <div class="card-header">
+        <h5><i class="bi bi-arrow-repeat"></i> Relay Node Analysis</h5>
+        <small class="text-muted">
+            Last hop relay nodes from packets reported by this gateway, with candidate source nodes based on 0-hop direct receptions
+        </small>
+    </div>
+    <div class="card-body">
+        <!-- Loading indicator -->
+        <div id="relay-node-analysis-loading" class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2 text-muted">Loading relay node analysis...</p>
+        </div>
+
+        <!-- Table content (initially hidden) -->
+        <div id="relay-node-analysis-content" style="display: none;">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover" id="relay-node-analysis-table">
+                    <thead>
+                        <tr>
+                            <th>Relay</th>
+                            <th>Count</th>
+                            <th>Avg RSSI</th>
+                            <th>Avg SNR</th>
+                            <th>Candidates (0-hop matches)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+            <small class="text-muted">
+                <i class="bi bi-info-circle"></i>
+                Candidates are nodes whose packets this gateway has received directly (0 hops), where the last byte of their node ID matches the relay_node value.
+                Note: There may be collisions where multiple nodes share the same last byte.
+            </small>
+        </div>
+    </div>
+</div>

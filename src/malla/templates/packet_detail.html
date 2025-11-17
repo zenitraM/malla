@@ -262,6 +262,24 @@
                                         {% endif %}
                                     </td>
                                 </tr>
+                                <tr>
+                                    <th>Relay Node:</th>
+                                    <td>
+                                        {% if packet.relay_node is not none and packet.relay_node != 0 %}
+                                            {% set relay_last_byte = packet.relay_node % 256 %}
+                                            <code>{{ "%02x"|format(relay_last_byte) }}</code>
+                                            {% if packet.relay_candidates %}
+                                                <i class="bi bi-arrow-right"></i>
+                                                {% for candidate in packet.relay_candidates %}
+                                                    {{ node_link(candidate.node_id, candidate.node_name, candidate.short_name) }}{% if not loop.last %}, {% endif %}
+                                                {% endfor %}
+                                            {% endif %}
+                                            <br><small class="text-muted">Last byte of the last hop that relayed this packet{% if packet.relay_candidates %} - Candidate source node(s) based on 0-hop direct receptions{% endif %}</small>
+                                        {% else %}
+                                            <span class="text-muted">None</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
                             </table>
                         </div>
                     </div>
@@ -881,7 +899,9 @@ window.packetData = {{ {
     'primaryGateway': packet.gateway_id,
     'otherReceptions': other_receptions,
     'gatewayLocations': gateway_locations,
-    'routeNodes': payload_info.data.route_nodes if payload_info and payload_info.data and payload_info.data.route_nodes else None
+    'routeNodes': payload_info.data.route_nodes if payload_info and payload_info.data and payload_info.data.route_nodes else None,
+    'relayCandidates': packet.relay_candidates if packet.relay_candidates else None,
+    'relayHex': packet.relay_hex if packet.relay_hex else None
 } | tojson }};
 
 // Initialize maps if data exists
@@ -1128,6 +1148,54 @@ async function loadTracerouteMap(routeNodes) {
             }).addTo(map);
         }
 
+        // Add relay candidate arrow if there's exactly one candidate
+        if (window.packetData.relayCandidates && window.packetData.relayCandidates.length === 1) {
+            const relayCandidate = window.packetData.relayCandidates[0];
+            const relayCandidateId = relayCandidate.node_id;
+
+            // Find the relay candidate location
+            const relayCandidateLocation = data.locations.find(loc => loc.node_id === relayCandidateId);
+
+            // Find the destination (last node in route)
+            const destinationLocation = routeLocations[routeLocations.length - 1];
+
+            if (relayCandidateLocation && destinationLocation) {
+                // Draw dashed arrow from relay candidate to destination
+                const relayArrow = L.polyline(
+                    [[relayCandidateLocation.latitude, relayCandidateLocation.longitude],
+                     [destinationLocation.latitude, destinationLocation.longitude]],
+                    {
+                        color: '#ff6b35',
+                        weight: 2,
+                        opacity: 0.6,
+                        dashArray: '5, 10'
+                    }
+                ).addTo(map);
+
+                // Add marker for relay candidate
+                const relayMarker = L.circleMarker([relayCandidateLocation.latitude, relayCandidateLocation.longitude], {
+                    radius: 7,
+                    fillColor: '#ff6b35',
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.8
+                }).addTo(map);
+
+                // Add popup for relay candidate
+                relayMarker.bindPopup(`
+                    <div>
+                        <strong>${relayCandidateLocation.display_name || relayCandidate.hex_id}</strong><br>
+                        <span class="badge" style="background-color: #ff6b35;">Relay Candidate (0x${window.packetData.relayHex})</span>
+                        <br><small>Last hop that likely relayed this packet</small>
+                    </div>
+                `);
+
+                // Update bounds to include relay candidate
+                routeCoords.push([relayCandidateLocation.latitude, relayCandidateLocation.longitude]);
+            }
+        }
+
         // Fit map to show all markers
         const bounds = L.latLngBounds(routeCoords);
         map.fitBounds(bounds, { padding: [20, 20] });
@@ -1138,7 +1206,7 @@ async function loadTracerouteMap(routeNodes) {
     }
 }
 
-function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocations) {
+async function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocations) {
     try {
         // Collect all gateway locations that have position data
         const gatewayMapData = [];
@@ -1185,6 +1253,42 @@ function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocations) {
         }
 
         console.log('Gateway map data:', gatewayMapData);
+
+        // Fetch location data for all relay candidates (primary + other receptions)
+        let allLocationsData = null;
+        let relayLocations = [];
+
+        // Check if we need to fetch locations for relay candidates
+        const needsLocations = (window.packetData.relayCandidates && window.packetData.relayCandidates.length > 0) ||
+                               (otherReceptions && otherReceptions.some(r => r.relay_candidates && r.relay_candidates.length > 0));
+
+        if (needsLocations) {
+            try {
+                const response = await fetch('/api/locations');
+                allLocationsData = await response.json();
+
+                if (!allLocationsData.error && window.packetData.relayCandidates) {
+                    // Find locations for primary gateway's relay candidates
+                    window.packetData.relayCandidates.forEach(candidate => {
+                        const location = allLocationsData.locations.find(loc => loc.node_id === candidate.node_id);
+                        if (location) {
+                            relayLocations.push({
+                                node_id: candidate.node_id,
+                                hex_id: candidate.hex_id,
+                                node_name: candidate.node_name,
+                                short_name: candidate.short_name,
+                                latitude: location.latitude,
+                                longitude: location.longitude,
+                                display_name: location.display_name,
+                                timestamp_str: location.timestamp_str
+                            });
+                        }
+                    });
+                }
+            } catch (error) {
+                console.warn('Failed to fetch relay candidate locations:', error);
+            }
+        }
 
         // Initialize map
         const map = L.map('receptions-map').setView([
@@ -1261,8 +1365,107 @@ function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocations) {
             }
         });
 
-        // Fit map to show all markers
+        // Initialize coords array for map bounds
         const coords = gatewayMapData.map(gw => [gw.latitude, gw.longitude]);
+
+        // Add relay candidate markers and arrows for primary gateway
+        if (relayLocations.length > 0 && primaryGateway && gatewayLocations[primaryGateway]) {
+            const primaryLocation = gatewayLocations[primaryGateway];
+
+            relayLocations.forEach(relay => {
+                // Draw dashed arrow from relay to primary gateway
+                const arrow = L.polyline(
+                    [[relay.latitude, relay.longitude],
+                     [primaryLocation.latitude, primaryLocation.longitude]],
+                    {
+                        color: '#ff6b35',
+                        weight: 2,
+                        opacity: 0.6,
+                        dashArray: '5, 10'
+                    }
+                ).addTo(map);
+
+                // Add relay marker (smaller, dashed circle)
+                const relayMarker = L.circleMarker([relay.latitude, relay.longitude], {
+                    radius: 6,
+                    fillColor: '#ff6b35',
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.7,
+                    dashArray: '3, 3'
+                }).addTo(map);
+
+                // Add popup for relay candidate
+                relayMarker.bindPopup(`
+                    <div>
+                        <strong>${relay.display_name || relay.node_name}</strong><br>
+                        <span class="badge" style="background-color: #ff6b35;">Relay Candidate</span>
+                        <br><small>Node: ${relay.short_name} (0x${window.packetData.relayHex})</small>
+                        <br><small>Last hop that likely relayed this packet</small>
+                        <br><small>Location: ${relay.timestamp_str}</small>
+                    </div>
+                `);
+
+                // Add relay location to coords for bounds
+                coords.push([relay.latitude, relay.longitude]);
+            });
+        }
+
+        // Add relay candidate markers and arrows for other receptions
+        if (allLocationsData && !allLocationsData.error && otherReceptions && otherReceptions.length > 0) {
+            for (const reception of otherReceptions) {
+                if (reception.relay_candidates && reception.relay_candidates.length > 0 &&
+                    reception.gateway_id && gatewayLocations[reception.gateway_id]) {
+
+                    const gatewayLocation = gatewayLocations[reception.gateway_id];
+
+                    reception.relay_candidates.forEach(candidate => {
+                        const location = allLocationsData.locations.find(loc => loc.node_id === candidate.node_id);
+                        if (location) {
+                            // Draw dashed arrow from relay to this gateway
+                            const arrow = L.polyline(
+                                [[location.latitude, location.longitude],
+                                 [gatewayLocation.latitude, gatewayLocation.longitude]],
+                                {
+                                    color: '#ff6b35',
+                                    weight: 2,
+                                    opacity: 0.6,
+                                    dashArray: '5, 10'
+                                }
+                            ).addTo(map);
+
+                            // Add relay marker (smaller, dashed circle)
+                            const relayMarker = L.circleMarker([location.latitude, location.longitude], {
+                                radius: 6,
+                                fillColor: '#ff6b35',
+                                color: '#fff',
+                                weight: 2,
+                                opacity: 1,
+                                fillOpacity: 0.7,
+                                dashArray: '3, 3'
+                            }).addTo(map);
+
+                            // Add popup for relay candidate
+                            relayMarker.bindPopup(`
+                                <div>
+                                    <strong>${location.display_name || candidate.node_name}</strong><br>
+                                    <span class="badge" style="background-color: #ff6b35;">Relay Candidate</span>
+                                    <br><small>Node: ${candidate.short_name} (0x${reception.relay_hex})</small>
+                                    <br><small>Relayed to: ${gatewayLocation.display_name}</small>
+                                    <br><small>Location: ${location.timestamp_str}</small>
+                                </div>
+                            `);
+
+                            // Add relay location to coords for bounds
+                            coords.push([location.latitude, location.longitude]);
+                        }
+                    });
+                }
+            }
+        }
+
+        // Fit map to show all markers (including relay candidates)
         const bounds = L.latLngBounds(coords);
         map.fitBounds(bounds, { padding: [20, 20] });
 
