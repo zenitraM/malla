@@ -355,9 +355,7 @@ class PacketRepository:
                     # Aggregate relay_node values with counts
                     relay_node_counts = {}
                     for p in packets_in_group:
-                        relay_node = (
-                            p["relay_node"] if "relay_node" in p.keys() else None
-                        )
+                        relay_node = p.get("relay_node")
                         if relay_node is not None and relay_node != 0:
                             relay_node_counts[relay_node] = (
                                 relay_node_counts.get(relay_node, 0) + 1
