@@ -37,8 +37,9 @@ class TestRelayNodeAnalysis:
             node_id = node["node_id"]
             try:
                 node_details = NodeRepository.get_node_details(node_id)
-            except Exception:
+            except Exception as e:
                 # Skip nodes that cause errors (e.g., due to database schema issues)
+                print(f"Skipping node {node_id} due to error: {e}")
                 continue
 
             if node_details and node_details.get("relay_node_stats"):
