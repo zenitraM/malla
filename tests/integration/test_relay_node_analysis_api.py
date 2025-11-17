@@ -179,7 +179,7 @@ class TestRelayNodeAnalysisFixtures:
         )
 
         # We expect at least the three scenarios: 0x88, 0x98, 0xCC
-        relay_hexes = {stat["relay_hex"] for stat in data["relay_node_stats"]}
+        {stat["relay_hex"] for stat in data["relay_node_stats"]}
 
         # Should have 0x88 with 20 packets
         assert any(

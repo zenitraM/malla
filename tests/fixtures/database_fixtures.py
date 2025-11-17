@@ -768,11 +768,11 @@ class DatabaseFixtures:
         # 2. Multi-hop packets WITH relay_node values (gateway reports them)
         # 3. Bidirectional 0-hop packets (other gateways receive from test gateway)
         # ======================================================================
-        
+
         # Gateway that will report relay_node packets
         gateway_node_id = 1128074276  # Test Gateway Alpha
         gateway_hex = f"!{gateway_node_id:08x}"  # !433d0c24
-        
+
         # Create some nodes with specific last bytes for testing
         relay_test_nodes = [
             {"node_id": 0x12345688, "last_byte": 0x88},  # Node with last byte 0x88
@@ -780,9 +780,9 @@ class DatabaseFixtures:
             {"node_id": 0x34567898, "last_byte": 0x98},  # Node with last byte 0x98
             {"node_id": 0x456789CC, "last_byte": 0xCC},  # Node with last byte 0xCC
         ]
-        
+
         relay_packet_id = 1000
-        
+
         # Create 0-hop packets received directly by the gateway
         # These establish that gateway can receive directly from these nodes
         for node in relay_test_nodes:
@@ -802,7 +802,7 @@ class DatabaseFixtures:
                 )
                 packets.append(packet)
                 relay_packet_id += 1
-        
+
         # Create multi-hop packets WITH relay_node values reported by gateway
         # These packets came through relays, and relay_node indicates last hop
         relay_scenarios = [
@@ -813,12 +813,12 @@ class DatabaseFixtures:
             # Few packets with relay_node 0xCC
             {"relay_last_byte": 0xCC, "count": 5, "from_node": 0xCAFEBABE},
         ]
-        
+
         for scenario in relay_scenarios:
             for j in range(scenario["count"]):
                 # relay_node is a full node ID, but we care about last byte matching
                 relay_node_value = 0x11223300 + scenario["relay_last_byte"]
-                
+
                 packet = self.create_test_packet(
                     packet_id=relay_packet_id,
                     from_node_id=scenario["from_node"] + j,
@@ -836,13 +836,13 @@ class DatabaseFixtures:
                 packet["relay_node"] = relay_node_value
                 packets.append(packet)
                 relay_packet_id += 1
-        
+
         # Create bidirectional test: Test Mobile Beta receives 0-hop from Test Gateway Alpha
         # But Test Gateway Alpha doesn't receive from Test Mobile Beta directly
         # This tests the bidirectional candidate finding
         other_gateway_id = 1128074277  # Test Mobile Beta
         other_gateway_hex = f"!{other_gateway_id:08x}"
-        
+
         for j in range(8):
             packet = self.create_test_packet(
                 packet_id=relay_packet_id,
@@ -859,7 +859,7 @@ class DatabaseFixtures:
             )
             packets.append(packet)
             relay_packet_id += 1
-        
+
         # ======================================================================
         # End of Relay Node Test Data
         # ======================================================================
