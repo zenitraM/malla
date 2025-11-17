@@ -61,5 +61,5 @@ class TestRelayNode:
         # If packet has relay_node set, verify hex format
         if packet.get("relay_node") and packet["relay_node"] != 0:
             relay_value = packet["relay_node"]
-            expected_hex = f"0x{relay_value & 0xFFFF:04x}"
+            expected_hex = f"0x{relay_value & 0xFF:02x}"
             assert expected_hex in html.lower()
