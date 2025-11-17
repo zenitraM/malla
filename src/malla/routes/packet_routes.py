@@ -104,11 +104,16 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
                             gateway_node_id, relay_last_byte
                         )
                     )
-                except (ValueError, Exception) as e:
+                except ValueError as e:
                     logger.warning(
                         f"Failed to get relay candidates for packet gateway {packet.get('gateway_id')}: {e}"
                     )
                     packet["relay_candidates"] = []
+                except Exception as e:
+                    logger.exception(
+                        f"Unexpected error while getting relay candidates for packet gateway {packet.get('gateway_id')}: {e}"
+                    )
+                    raise
             else:
                 packet["relay_candidates"] = []
         else:
