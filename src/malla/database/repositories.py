@@ -453,7 +453,7 @@ class PacketRepository:
                         )
                         relay_parts = []
                         for relay_node_val, count in sorted_relay:
-                            # Format as last 2 bytes in hex
+                            # Format as last byte in hex
                             relay_hex = f"{relay_node_val & 0xFF:02x}"
                             if count > 1:
                                 relay_parts.append(f"{relay_hex}*{count}")
