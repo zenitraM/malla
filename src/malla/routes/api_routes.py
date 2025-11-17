@@ -798,7 +798,7 @@ def api_node_relay_node_analysis(node_id):
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
-        logger.error(f"Error in API relay node analysis: {e}")
+        logger.exception(f"Error in API relay node analysis: {e}")
         return jsonify({"error": str(e)}), 500
 
 
