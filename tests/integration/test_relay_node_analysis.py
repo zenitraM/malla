@@ -24,8 +24,6 @@ class TestRelayNodeAnalysis:
         # relay_node_stats should NOT be in node_details anymore (moved to separate API)
         assert "relay_node_stats" not in node_details
 
-    def test_relay_node_stats_structure(self, test_client, temp_database):
-# Removed test_relay_node_stats_structure as relay_node_stats is no longer present in node_details.
     def test_relay_node_display_in_page(self, test_client, temp_database):
         """Test that relay_node analysis is displayed in the node detail page."""
         # Get a node
