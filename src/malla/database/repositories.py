@@ -1177,9 +1177,7 @@ class NodeRepository:
                     "short_name": node_info_row["short_name"],
                     "hw_model": node_info_row["hw_model"],
                     "role": node_info_row["role"],
-                    "primary_channel": node_info_row["primary_channel"]
-                    if "primary_channel" in node_info_row.keys()
-                    else None,
+                    "primary_channel": node_info_row.get("primary_channel"),
                     "total_packets": 0,
                     "last_seen": None,
                     "first_seen": None,
