@@ -287,6 +287,8 @@ class PacketRepository:
                         id, timestamp, from_node_id, to_node_id, portnum, portnum_name,
                         gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_limit, hop_start,
                         payload_length, processed_successfully, raw_payload,
+                        via_mqtt, want_ack, priority, delayed, channel_index, rx_time,
+                        pki_encrypted, next_hop, relay_node, tx_after,
                         datetime(timestamp, 'unixepoch') as timestamp_str,
                         (hop_start - hop_limit) as hop_count
                     FROM packet_history
@@ -349,6 +351,17 @@ class PacketRepository:
                         for p in packets_in_group
                         if p["payload_length"] is not None
                     ]
+
+                    # Aggregate relay_node values with counts
+                    relay_node_counts = {}
+                    for p in packets_in_group:
+                        relay_node = (
+                            p["relay_node"] if "relay_node" in p.keys() else None
+                        )
+                        if relay_node is not None and relay_node != 0:
+                            relay_node_counts[relay_node] = (
+                                relay_node_counts.get(relay_node, 0) + 1
+                            )
 
                     # Use the earliest packet as the representative
                     representative_packet = min(
@@ -431,6 +444,24 @@ class PacketRepository:
                             )
                     else:
                         packet["snr_range"] = None
+
+                    # Format relay_node as grouped string (e.g., "0x12, 0x34*2, 0x56*3")
+                    if relay_node_counts:
+                        # Sort by count (descending) then by relay_node value
+                        sorted_relay = sorted(
+                            relay_node_counts.items(), key=lambda x: (-x[1], x[0])
+                        )
+                        relay_parts = []
+                        for relay_node_val, count in sorted_relay:
+                            # Format as last 2 bytes in hex
+                            relay_hex = f"{relay_node_val & 0xFF:02x}"
+                            if count > 1:
+                                relay_parts.append(f"{relay_hex}*{count}")
+                            else:
+                                relay_parts.append(relay_hex)
+                        packet["relay_node_grouped"] = ", ".join(relay_parts)
+                    else:
+                        packet["relay_node_grouped"] = None
 
                     packets.append(packet)
 
@@ -1148,7 +1179,9 @@ class NodeRepository:
                     "short_name": node_info_row["short_name"],
                     "hw_model": node_info_row["hw_model"],
                     "role": node_info_row["role"],
-                    "primary_channel": node_info_row.get("primary_channel"),
+                    "primary_channel": node_info_row["primary_channel"]
+                    if "primary_channel" in node_info_row.keys()
+                    else None,
                     "total_packets": 0,
                     "last_seen": None,
                     "first_seen": None,
@@ -1842,6 +1875,153 @@ class NodeRepository:
 
         except Exception as e:
             logger.error(f"Error getting node details for {node_id}: {e}")
+            raise
+
+    @staticmethod
+    def get_relay_node_analysis(node_id: int, limit: int = 50) -> list[dict[str, Any]]:
+        """Get relay node analysis for packets reported by this gateway.
+
+        Analyzes relay_node values from packets where this node acted as a gateway,
+        and finds candidate source nodes based on 0-hop direct receptions.
+
+        Args:
+            node_id: Integer node ID to analyze (should be a gateway node).
+            limit: Maximum number of relay_node entries to return. Defaults to 50.
+
+        Returns:
+            List of dictionaries containing relay_node stats and candidate nodes.
+            Each dict contains: relay_node, relay_hex, count, and candidates list.
+        """
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            relay_node_stats = []
+
+            # Query to get relay_node values with counts and signal stats for packets reported by this gateway
+            relay_query = """
+            SELECT
+                relay_node,
+                COUNT(*) as count,
+                AVG(rssi) as avg_rssi,
+                AVG(snr) as avg_snr,
+                MIN(rssi) as min_rssi,
+                MAX(rssi) as max_rssi,
+                MIN(snr) as min_snr,
+                MAX(snr) as max_snr
+            FROM packet_history
+            WHERE gateway_id = ?
+                AND relay_node IS NOT NULL
+                AND relay_node != 0
+            GROUP BY relay_node
+            ORDER BY count DESC
+            LIMIT ?
+            """
+
+            # Convert node_id to gateway hex format
+            gateway_hex = f"!{node_id:08x}"
+            cursor.execute(relay_query, (gateway_hex, limit))
+            relay_rows = cursor.fetchall()
+
+            # For each relay_node, find candidate nodes (0-hop direct receptions)
+            # Match based on last byte of node ID matching last byte of relay_node
+            for relay_row in relay_rows:
+                relay_value = relay_row["relay_node"]
+                relay_count = relay_row["count"]
+                relay_last_byte = relay_value & 0xFF
+
+                # Find all nodes with 0-hop direct links to/from this gateway:
+                # 1. Packets this gateway received directly (0 hops) from other nodes
+                # 2. Packets this node sent that were received directly (0 hops) by other gateways
+
+                # Part 1: Packets this gateway received directly
+                candidates_query_part1 = """
+                SELECT DISTINCT p.from_node_id as node_id
+                FROM packet_history p
+                WHERE p.gateway_id = ?
+                    AND p.from_node_id IS NOT NULL
+                    AND (p.hop_start - p.hop_limit) = 0
+                    AND (p.from_node_id & 0xFF) = ?
+                """
+
+                cursor.execute(candidates_query_part1, (gateway_hex, relay_last_byte))
+                part1_results = cursor.fetchall()
+
+                # Part 2: Packets from this node received directly by other gateways
+                candidates_query_part2 = """
+                SELECT DISTINCT p.gateway_id
+                FROM packet_history p
+                WHERE p.from_node_id = ?
+                    AND p.gateway_id != ?
+                    AND p.gateway_id IS NOT NULL
+                    AND p.gateway_id LIKE '!%'
+                    AND (p.hop_start - p.hop_limit) = 0
+                """
+
+                cursor.execute(candidates_query_part2, (node_id, gateway_hex))
+                part2_results = cursor.fetchall()
+
+                # Combine results and filter by last byte in Python
+                candidate_node_ids_set = set()
+
+                # Add part 1 results (already integers)
+                for row in part1_results:
+                    candidate_node_ids_set.add(row["node_id"])
+
+                # Add part 2 results (convert hex strings to integers and filter by last byte)
+                for row in part2_results:
+                    gw_hex = row["gateway_id"]
+                    if gw_hex and gw_hex.startswith("!"):
+                        try:
+                            gw_int = int(gw_hex[1:], 16)
+                            if (gw_int & 0xFF) == relay_last_byte:
+                                candidate_node_ids_set.add(gw_int)
+                        except ValueError:
+                            pass
+
+                # Convert to sorted list for consistent results
+                candidate_node_ids_list = sorted(list(candidate_node_ids_set))[:10]
+
+                # Get node names for candidates
+                candidate_names = (
+                    NodeRepository.get_bulk_node_names(candidate_node_ids_list)
+                    if candidate_node_ids_list
+                    else {}
+                )
+
+                candidates = []
+                for cand_node_id in candidate_node_ids_list:
+                    candidates.append(
+                        {
+                            "node_id": cand_node_id,
+                            "node_name": candidate_names.get(
+                                cand_node_id, f"!{cand_node_id:08x}"
+                            ),
+                            "hex_id": f"!{cand_node_id:08x}",
+                            "last_byte": f"{cand_node_id & 0xFF:02x}",
+                        }
+                    )
+
+                relay_node_stats.append(
+                    {
+                        "relay_node": relay_value,
+                        "relay_hex": f"{relay_last_byte:02x}",
+                        "count": relay_count,
+                        "avg_rssi": relay_row["avg_rssi"],
+                        "avg_snr": relay_row["avg_snr"],
+                        "min_rssi": relay_row["min_rssi"],
+                        "max_rssi": relay_row["max_rssi"],
+                        "min_snr": relay_row["min_snr"],
+                        "max_snr": relay_row["max_snr"],
+                        "candidates": candidates,
+                    }
+                )
+
+            cursor.close()
+            conn.close()
+            return relay_node_stats
+
+        except Exception as e:
+            logger.error(f"Error getting relay node analysis for {node_id}: {e}")
             raise
 
     @staticmethod

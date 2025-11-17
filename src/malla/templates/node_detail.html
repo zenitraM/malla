@@ -321,6 +321,9 @@
             <!-- Direct Receptions Graph (Gateway only) -->
             {% include "components/direct_receptions.html" %}
 
+            <!-- Relay Node Analysis (Gateway only) -->
+            {% include "components/relay_node_analysis.html" %}
+
             <!-- Protocol Breakdown -->
             {% if protocols %}
             <div class="card mb-4">
@@ -721,6 +724,9 @@
 <!-- Direct Receptions Chart Component -->
 <script src="{{ url_for('static', filename='js/direct_receptions.js') }}"></script>
 
+<!-- Relay Node Analysis Component -->
+<script src="{{ url_for('static', filename='js/relay_node_analysis.js') }}"></script>
+
 <!-- Location data for JavaScript -->
 {% if location %}
 <script id="location-data" type="application/json">
@@ -887,10 +893,10 @@ async function loadLocationHistoryMap() {
 
             // Create popup content
             // Format timestamp using timezone preference
-            const formattedTime = typeof formatTimestamp === 'function' 
-                ? formatTimestamp(location.timestamp) 
+            const formattedTime = typeof formatTimestamp === 'function'
+                ? formatTimestamp(location.timestamp)
                 : location.timestamp_str;
-            
+
             const popupContent = `
                 <div>
                     <strong>Location #${data.location_history.length - index}</strong><br>
@@ -956,7 +962,7 @@ document.addEventListener('DOMContentLoaded', function() {
         directReceptionsChart = new DirectReceptionsChart(nodeId);
         directReceptionsChart.initialize();
     }
-    
+
     // Format all timestamps based on current timezone preference
     // This ensures timestamps on the detail page respect the timezone setting
     if (typeof updateAllTimestamps === 'function') {

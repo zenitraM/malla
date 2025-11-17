@@ -456,6 +456,24 @@ document.addEventListener('DOMContentLoaded', function() {
                     return `<span class="text-muted">N/A</span>`;
                 }
             },
+            {
+                key: 'relay_node',
+                title: 'Relay Node',
+                sortable: true,
+                render: (value, row) => {
+                    // For grouped packets, value is already a formatted string (e.g., "0a, 3f*2")
+                    if (row.is_grouped && typeof value === 'string' && value) {
+                        return `<code>${value}</code>`;
+                    }
+                    // For individual packets, value is an integer
+                    if (value !== null && value !== undefined && value !== 0 && typeof value === 'number') {
+                        // Extract last byte
+                        const relayHex = (value & 0xFF).toString(16).padStart(2, '0');
+                        return `<code>${relayHex}</code>`;
+                    }
+                    return `<span class="text-muted">-</span>`;
+                }
+            },
           ],
 
         // Final columns that are always at the end

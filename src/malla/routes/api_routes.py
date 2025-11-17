@@ -772,6 +772,36 @@ def api_node_direct_receptions(node_id):
         return jsonify({"error": str(e)}), 500
 
 
+@api_bp.route("/node/<node_id>/relay-node-analysis")
+def api_node_relay_node_analysis(node_id):
+    """API endpoint for relay node analysis.
+    
+    Returns relay_node statistics for packets reported by this gateway,
+    including candidate source nodes based on 0-hop direct receptions.
+    """
+    logger.info(f"API relay node analysis endpoint accessed for node {node_id}")
+    try:
+        limit = request.args.get("limit", 50, type=int)
+        
+        # Convert node_id using helper to support hex strings or int
+        node_id_int = convert_node_id(node_id)
+        
+        data = NodeRepository.get_relay_node_analysis(node_id_int, limit=limit)
+        
+        return jsonify(
+            {
+                "relay_node_stats": data,
+                "total_count": len(data),
+                "total_packets": sum(stat["count"] for stat in data),
+            }
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error in API relay node analysis: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @api_bp.route("/location/statistics")
 def api_location_statistics():
     """API endpoint for location statistics."""
@@ -1404,6 +1434,7 @@ def api_packets_data():
                 "rssi": rssi_display,
                 "snr": snr_display,
                 "hops": hops_display,
+                "relay_node": packet.get("relay_node_grouped") if group_packets else packet.get("relay_node"),
                 "mesh_packet_id": packet.get("mesh_packet_id"),
                 "is_grouped": group_packets,
                 "channel": packet.get("channel_id") or "Unknown",
@@ -1414,6 +1445,7 @@ def api_packets_data():
             if group_packets:
                 response_data["gateway_list"] = packet.get("gateway_list", "")
                 response_data["gateway_count"] = packet.get("gateway_count", 0)
+                response_data["relay_node_grouped"] = packet.get("relay_node_grouped")
             else:
                 # For individual packets, add gateway node info for frontend links
                 gateway_id = packet.get("gateway_id")

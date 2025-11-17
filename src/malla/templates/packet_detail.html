@@ -262,6 +262,18 @@
                                         {% endif %}
                                     </td>
                                 </tr>
+                                <tr>
+                                    <th>Relay Node:</th>
+                                    <td>
+                                        {% if packet.relay_node is not none and packet.relay_node != 0 %}
+                                            {% set relay_last_2_bytes = packet.relay_node % 65536 %}
+                                            <code>{{ "%02x"|format(relay_last_2_bytes) }}</code>
+                                            <br><small class="text-muted">Last 2 bytes of the last hop that relayed this packet</small>
+                                        {% else %}
+                                            <span class="text-muted">None</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
                             </table>
                         </div>
                     </div>
