@@ -13,9 +13,7 @@ from ..database.connection import get_db_connection
 # Import from the new modular architecture
 from ..database.repositories import LocationRepository, NodeRepository
 from ..models.traceroute import TraceroutePacket
-from ..utils.node_utils import (
-    get_bulk_node_names,
-)
+from ..utils.node_utils import convert_node_id, get_bulk_node_names
 from ..utils.traceroute_graph import build_combined_traceroute_graph
 
 logger = logging.getLogger(__name__)
@@ -87,7 +85,6 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
         packet["to_node_name"] = node_names.get(packet["to_node_id"], "Unknown")
 
         # Process relay_node information for the main packet
-        from ..utils.node_utils import convert_node_id
 
         packet_relay_node = packet.get("relay_node")
         if packet_relay_node and packet_relay_node != 0:
@@ -190,7 +187,6 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
                 gateway_ids.add(reception["gateway_id"])
 
         # Process relay_node information for each reception
-        from ..utils.node_utils import convert_node_id
 
         for reception in receptions:
             relay_node = reception.get("relay_node")

@@ -13,6 +13,7 @@ from typing import Any
 from meshtastic import mesh_pb2
 
 from ..utils.formatting import format_time_ago
+from ..utils.node_utils import get_bulk_node_short_names
 from .connection import get_db_connection
 
 logger = logging.getLogger(__name__)
@@ -1795,8 +1796,6 @@ class NodeRepository:
 
             if gateway_node_ids:
                 try:
-                    from ..utils.node_utils import get_bulk_node_short_names
-
                     gateway_node_short_names = get_bulk_node_short_names(
                         list(set(gateway_node_ids))
                     )
@@ -1955,7 +1954,6 @@ class NodeRepository:
             )
 
             # Get short names (4-letter codes) for candidates
-            from ..utils.node_utils import get_bulk_node_short_names
 
             candidate_short_names = (
                 get_bulk_node_short_names(candidate_node_ids_list)
@@ -2368,6 +2366,7 @@ class NodeRepository:
                       AND (p.hop_start - p.hop_limit) = 0
                     GROUP BY p.from_node_id, ni.long_name, ni.short_name
                     ORDER BY packet_count DESC
+                    LIMIT ?
                 """
 
                 # Then get individual packet data for chart plotting
@@ -2388,7 +2387,7 @@ class NodeRepository:
                     ORDER BY p.timestamp
                 """
 
-                cursor.execute(stats_query, (gateway_hex_id, node_id))
+                cursor.execute(stats_query, (gateway_hex_id, node_id, limit))
                 stats_rows = cursor.fetchall()
 
                 cursor.execute(packets_query, (gateway_hex_id, node_id))
@@ -2470,6 +2469,7 @@ class NodeRepository:
                       AND (p.hop_start - p.hop_limit) = 0
                     GROUP BY p.gateway_id
                     ORDER BY packet_count DESC
+                    LIMIT ?
                 """
 
                 # Then get individual packet data for chart plotting
@@ -2490,7 +2490,7 @@ class NodeRepository:
                     ORDER BY p.timestamp
                 """
 
-                cursor.execute(stats_query, (node_id, node_hex_id))
+                cursor.execute(stats_query, (node_id, node_hex_id, limit))
                 stats_rows = cursor.fetchall()
 
                 cursor.execute(packets_query, (node_id, node_hex_id))
