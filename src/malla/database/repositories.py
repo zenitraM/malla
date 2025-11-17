@@ -1945,7 +1945,8 @@ class NodeRepository:
                         if (gw_int & 0xFF) == relay_last_byte:
                             candidate_node_ids_set.add(gw_int)
                     except ValueError:
-                        pass
+                        # Malformed gateway_id encountered; skip this entry.
+                        logger.debug(f"Skipping malformed gateway_id: {gw_hex}")
 
             # Convert to sorted list for consistent results
             candidate_node_ids_list = sorted(candidate_node_ids_set)[:10]
