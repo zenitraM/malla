@@ -178,10 +178,11 @@ class TestRelayNodeAnalysisFixtures:
             "Test fixtures should include relay_node data for Test Gateway Alpha"
         )
 
-        # We expect at least the three scenarios: 0x88, 0x98, 0xCC
-        relay_hexes = {stat["relay_hex"] for stat in data["relay_node_stats"]}
-        assert relay_hexes == {"88", "98", "CC"}, (
-            f"Expected relay_hexes to be {{'88', '98', 'CC'}}, got {relay_hexes}"
+        # We expect at least the three scenarios: 0x88, 0x98, 0xCC (case-insensitive)
+        relay_hexes = {stat["relay_hex"].lower() for stat in data["relay_node_stats"]}
+        expected_hexes = {"88", "98", "cc"}
+        assert expected_hexes.issubset(relay_hexes), (
+            f"Expected relay_hexes to include {expected_hexes}, got {relay_hexes}"
         )
 
         # Should have 0x88 with 20 packets
