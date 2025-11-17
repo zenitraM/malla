@@ -268,7 +268,13 @@
                                         {% if packet.relay_node is not none and packet.relay_node != 0 %}
                                             {% set relay_last_2_bytes = packet.relay_node % 65536 %}
                                             <code>{{ "%02x"|format(relay_last_2_bytes) }}</code>
-                                            <br><small class="text-muted">Last 2 bytes of the last hop that relayed this packet</small>
+                                            {% if packet.relay_candidates %}
+                                                <i class="bi bi-arrow-right"></i>
+                                                {% for candidate in packet.relay_candidates %}
+                                                    {{ node_link(candidate.node_id, candidate.node_name, candidate.short_name) }}{% if not loop.last %}, {% endif %}
+                                                {% endfor %}
+                                            {% endif %}
+                                            <br><small class="text-muted">Last 2 bytes of the last hop that relayed this packet{% if packet.relay_candidates %} - Candidate source node(s) based on 0-hop direct receptions{% endif %}</small>
                                         {% else %}
                                             <span class="text-muted">None</span>
                                         {% endif %}
@@ -893,7 +899,9 @@ window.packetData = {{ {
     'primaryGateway': packet.gateway_id,
     'otherReceptions': other_receptions,
     'gatewayLocations': gateway_locations,
-    'routeNodes': payload_info.data.route_nodes if payload_info and payload_info.data and payload_info.data.route_nodes else None
+    'routeNodes': payload_info.data.route_nodes if payload_info and payload_info.data and payload_info.data.route_nodes else None,
+    'relayCandidates': packet.relay_candidates if packet.relay_candidates else None,
+    'relayHex': packet.relay_hex if packet.relay_hex else None
 } | tojson }};
 
 // Initialize maps if data exists
@@ -1138,6 +1146,54 @@ async function loadTracerouteMap(routeNodes) {
                 weight: 3,
                 opacity: 0.7
             }).addTo(map);
+        }
+
+        // Add relay candidate arrow if there's exactly one candidate
+        if (window.packetData.relayCandidates && window.packetData.relayCandidates.length === 1) {
+            const relayCandidate = window.packetData.relayCandidates[0];
+            const relayCandidateId = relayCandidate.node_id;
+
+            // Find the relay candidate location
+            const relayCandidateLocation = data.locations.find(loc => loc.node_id === relayCandidateId);
+
+            // Find the destination (last node in route)
+            const destinationLocation = routeLocations[routeLocations.length - 1];
+
+            if (relayCandidateLocation && destinationLocation) {
+                // Draw dashed arrow from relay candidate to destination
+                const relayArrow = L.polyline(
+                    [[relayCandidateLocation.latitude, relayCandidateLocation.longitude],
+                     [destinationLocation.latitude, destinationLocation.longitude]],
+                    {
+                        color: '#ff6b35',
+                        weight: 2,
+                        opacity: 0.6,
+                        dashArray: '5, 10'
+                    }
+                ).addTo(map);
+
+                // Add marker for relay candidate
+                const relayMarker = L.circleMarker([relayCandidateLocation.latitude, relayCandidateLocation.longitude], {
+                    radius: 7,
+                    fillColor: '#ff6b35',
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.8
+                }).addTo(map);
+
+                // Add popup for relay candidate
+                relayMarker.bindPopup(`
+                    <div>
+                        <strong>${relayCandidateLocation.display_name || relayCandidate.hex_id}</strong><br>
+                        <span class="badge" style="background-color: #ff6b35;">Relay Candidate (0x${window.packetData.relayHex})</span>
+                        <br><small>Last hop that likely relayed this packet</small>
+                    </div>
+                `);
+
+                // Update bounds to include relay candidate
+                routeCoords.push([relayCandidateLocation.latitude, relayCandidateLocation.longitude]);
+            }
         }
 
         // Fit map to show all markers

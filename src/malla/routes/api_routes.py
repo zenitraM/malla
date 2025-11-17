@@ -775,19 +775,19 @@ def api_node_direct_receptions(node_id):
 @api_bp.route("/node/<node_id>/relay-node-analysis")
 def api_node_relay_node_analysis(node_id):
     """API endpoint for relay node analysis.
-    
+
     Returns relay_node statistics for packets reported by this gateway,
     including candidate source nodes based on 0-hop direct receptions.
     """
     logger.info(f"API relay node analysis endpoint accessed for node {node_id}")
     try:
         limit = request.args.get("limit", 50, type=int)
-        
+
         # Convert node_id using helper to support hex strings or int
         node_id_int = convert_node_id(node_id)
-        
+
         data = NodeRepository.get_relay_node_analysis(node_id_int, limit=limit)
-        
+
         return jsonify(
             {
                 "relay_node_stats": data,
@@ -1434,7 +1434,9 @@ def api_packets_data():
                 "rssi": rssi_display,
                 "snr": snr_display,
                 "hops": hops_display,
-                "relay_node": packet.get("relay_node_grouped") if group_packets else packet.get("relay_node"),
+                "relay_node": packet.get("relay_node_grouped")
+                if group_packets
+                else packet.get("relay_node"),
                 "mesh_packet_id": packet.get("mesh_packet_id"),
                 "is_grouped": group_packets,
                 "channel": packet.get("channel_id") or "Unknown",

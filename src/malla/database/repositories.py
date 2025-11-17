@@ -1878,6 +1878,116 @@ class NodeRepository:
             raise
 
     @staticmethod
+    def get_relay_node_candidates(
+        gateway_node_id: int, relay_last_byte: int, cursor=None
+    ) -> list[dict[str, Any]]:
+        """
+        Get candidate nodes for a specific relay_node value from a gateway's perspective.
+
+        Args:
+            gateway_node_id: The gateway node ID
+            relay_last_byte: The last byte of the relay_node to match against (0-255)
+            cursor: Optional database cursor (will create one if not provided)
+
+        Returns:
+            List of candidate node dictionaries with node_id, node_name, hex_id, last_byte
+        """
+        should_close = False
+        conn = None
+        if cursor is None:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            should_close = True
+
+        try:
+            gateway_hex = f"!{gateway_node_id:08x}"
+
+            # Part 1: Packets this gateway received directly (0 hops) from other nodes
+            candidates_query_part1 = """
+            SELECT DISTINCT p.from_node_id as node_id
+            FROM packet_history p
+            WHERE p.gateway_id = ?
+                AND p.from_node_id IS NOT NULL
+                AND (p.hop_start - p.hop_limit) = 0
+                AND (p.from_node_id & 0xFF) = ?
+            """
+
+            cursor.execute(candidates_query_part1, (gateway_hex, relay_last_byte))
+            part1_results = cursor.fetchall()
+
+            # Part 2: Packets from this node received directly by other gateways
+            candidates_query_part2 = """
+            SELECT DISTINCT p.gateway_id
+            FROM packet_history p
+            WHERE p.from_node_id = ?
+                AND p.gateway_id != ?
+                AND p.gateway_id IS NOT NULL
+                AND p.gateway_id LIKE '!%'
+                AND (p.hop_start - p.hop_limit) = 0
+            """
+
+            cursor.execute(candidates_query_part2, (gateway_node_id, gateway_hex))
+            part2_results = cursor.fetchall()
+
+            # Combine results and filter by last byte in Python
+            candidate_node_ids_set = set()
+
+            # Add part 1 results (already integers)
+            for row in part1_results:
+                candidate_node_ids_set.add(row["node_id"])
+
+            # Add part 2 results (convert hex strings to integers and filter by last byte)
+            for row in part2_results:
+                gw_hex = row["gateway_id"]
+                if gw_hex and gw_hex.startswith("!"):
+                    try:
+                        gw_int = int(gw_hex[1:], 16)
+                        if (gw_int & 0xFF) == relay_last_byte:
+                            candidate_node_ids_set.add(gw_int)
+                    except ValueError:
+                        pass
+
+            # Convert to sorted list for consistent results
+            candidate_node_ids_list = sorted(candidate_node_ids_set)[:10]
+
+            # Get node names and short names for candidates
+            candidate_names = (
+                NodeRepository.get_bulk_node_names(candidate_node_ids_list)
+                if candidate_node_ids_list
+                else {}
+            )
+
+            # Get short names (4-letter codes) for candidates
+            from ..utils.node_utils import get_bulk_node_short_names
+
+            candidate_short_names = (
+                get_bulk_node_short_names(candidate_node_ids_list)
+                if candidate_node_ids_list
+                else {}
+            )
+
+            candidates = []
+            for cand_node_id in candidate_node_ids_list:
+                hex_id = f"!{cand_node_id:08x}"
+                short_name = candidate_short_names.get(cand_node_id, hex_id[-4:])
+                candidates.append(
+                    {
+                        "node_id": cand_node_id,
+                        "node_name": candidate_names.get(cand_node_id, hex_id),
+                        "hex_id": hex_id,
+                        "short_name": short_name,
+                        "last_byte": f"{cand_node_id & 0xFF:02x}",
+                    }
+                )
+
+            return candidates
+
+        finally:
+            if should_close and conn:
+                cursor.close()
+                conn.close()
+
+    @staticmethod
     def get_relay_node_analysis(node_id: int, limit: int = 50) -> list[dict[str, Any]]:
         """Get relay node analysis for packets reported by this gateway.
 
@@ -1929,77 +2039,10 @@ class NodeRepository:
                 relay_count = relay_row["count"]
                 relay_last_byte = relay_value & 0xFF
 
-                # Find all nodes with 0-hop direct links to/from this gateway:
-                # 1. Packets this gateway received directly (0 hops) from other nodes
-                # 2. Packets this node sent that were received directly (0 hops) by other gateways
-
-                # Part 1: Packets this gateway received directly
-                candidates_query_part1 = """
-                SELECT DISTINCT p.from_node_id as node_id
-                FROM packet_history p
-                WHERE p.gateway_id = ?
-                    AND p.from_node_id IS NOT NULL
-                    AND (p.hop_start - p.hop_limit) = 0
-                    AND (p.from_node_id & 0xFF) = ?
-                """
-
-                cursor.execute(candidates_query_part1, (gateway_hex, relay_last_byte))
-                part1_results = cursor.fetchall()
-
-                # Part 2: Packets from this node received directly by other gateways
-                candidates_query_part2 = """
-                SELECT DISTINCT p.gateway_id
-                FROM packet_history p
-                WHERE p.from_node_id = ?
-                    AND p.gateway_id != ?
-                    AND p.gateway_id IS NOT NULL
-                    AND p.gateway_id LIKE '!%'
-                    AND (p.hop_start - p.hop_limit) = 0
-                """
-
-                cursor.execute(candidates_query_part2, (node_id, gateway_hex))
-                part2_results = cursor.fetchall()
-
-                # Combine results and filter by last byte in Python
-                candidate_node_ids_set = set()
-
-                # Add part 1 results (already integers)
-                for row in part1_results:
-                    candidate_node_ids_set.add(row["node_id"])
-
-                # Add part 2 results (convert hex strings to integers and filter by last byte)
-                for row in part2_results:
-                    gw_hex = row["gateway_id"]
-                    if gw_hex and gw_hex.startswith("!"):
-                        try:
-                            gw_int = int(gw_hex[1:], 16)
-                            if (gw_int & 0xFF) == relay_last_byte:
-                                candidate_node_ids_set.add(gw_int)
-                        except ValueError:
-                            pass
-
-                # Convert to sorted list for consistent results
-                candidate_node_ids_list = sorted(list(candidate_node_ids_set))[:10]
-
-                # Get node names for candidates
-                candidate_names = (
-                    NodeRepository.get_bulk_node_names(candidate_node_ids_list)
-                    if candidate_node_ids_list
-                    else {}
+                # Get candidates using the helper method
+                candidates = NodeRepository.get_relay_node_candidates(
+                    node_id, relay_last_byte, cursor
                 )
-
-                candidates = []
-                for cand_node_id in candidate_node_ids_list:
-                    candidates.append(
-                        {
-                            "node_id": cand_node_id,
-                            "node_name": candidate_names.get(
-                                cand_node_id, f"!{cand_node_id:08x}"
-                            ),
-                            "hex_id": f"!{cand_node_id:08x}",
-                            "last_byte": f"{cand_node_id & 0xFF:02x}",
-                        }
-                    )
 
                 relay_node_stats.append(
                     {
