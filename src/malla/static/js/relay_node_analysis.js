@@ -46,6 +46,9 @@ class RelayNodeAnalysis {
             contentDiv.style.display = 'none';
 
             const response = await fetch(`/api/node/${this.nodeId}/relay-node-analysis?limit=50`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
             const data = await response.json();
 
             if (data.error) {
