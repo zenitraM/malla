@@ -179,7 +179,10 @@ class TestRelayNodeAnalysisFixtures:
         )
 
         # We expect at least the three scenarios: 0x88, 0x98, 0xCC
-        {stat["relay_hex"] for stat in data["relay_node_stats"]}
+        relay_hexes = {stat["relay_hex"] for stat in data["relay_node_stats"]}
+        assert relay_hexes == {"88", "98", "CC"}, (
+            f"Expected relay_hexes to be {{'88', '98', 'CC'}}, got {relay_hexes}"
+        )
 
         # Should have 0x88 with 20 packets
         assert any(
