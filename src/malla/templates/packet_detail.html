@@ -266,15 +266,15 @@
                                     <th>Relay Node:</th>
                                     <td>
                                         {% if packet.relay_node is not none and packet.relay_node != 0 %}
-                                            {% set relay_last_2_bytes = packet.relay_node % 65536 %}
-                                            <code>{{ "%02x"|format(relay_last_2_bytes) }}</code>
+                                            {% set relay_last_byte = packet.relay_node % 256 %}
+                                            <code>{{ "%02x"|format(relay_last_byte) }}</code>
                                             {% if packet.relay_candidates %}
                                                 <i class="bi bi-arrow-right"></i>
                                                 {% for candidate in packet.relay_candidates %}
                                                     {{ node_link(candidate.node_id, candidate.node_name, candidate.short_name) }}{% if not loop.last %}, {% endif %}
                                                 {% endfor %}
                                             {% endif %}
-                                            <br><small class="text-muted">Last 2 bytes of the last hop that relayed this packet{% if packet.relay_candidates %} - Candidate source node(s) based on 0-hop direct receptions{% endif %}</small>
+                                            <br><small class="text-muted">Last byte of the last hop that relayed this packet{% if packet.relay_candidates %} - Candidate source node(s) based on 0-hop direct receptions{% endif %}</small>
                                         {% else %}
                                             <span class="text-muted">None</span>
                                         {% endif %}
