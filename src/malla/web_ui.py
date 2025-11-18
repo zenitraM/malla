@@ -99,6 +99,12 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
     # Persist config on Flask instance for later use
     app.config["APP_CONFIG"] = cfg
 
+    # Setup OpenTelemetry if endpoint is configured
+    if cfg.otlp_endpoint:
+        from .telemetry import setup_telemetry
+
+        setup_telemetry(app, cfg.otlp_endpoint)
+
     # Mirror a few frequently-used values to top-level keys for backwards
     # compatibility with the existing code base. Over time we should migrate
     # direct usages to the nested ``APP_CONFIG`` object instead.

@@ -50,6 +50,9 @@ class AppConfig:
     # Number of hours after which to delete old data (0 = never delete)
     data_retention_hours: int = 0
 
+    # OpenTelemetry settings
+    otlp_endpoint: str | None = None
+
     # Internal attribute to remember the source file used
     _config_path: Path | None = field(default=None, repr=False, compare=False)
 

@@ -51,3 +51,7 @@ debug: false
 
 # Number of hours after which to delete old data (0 = never delete)
 # data_retention_hours: 0
+
+# OpenTelemetry settings
+# Endpoint for sending traces (e.g. "http://localhost:4317")
+# otlp_endpoint: ""

@@ -51,7 +51,10 @@ class TestWSGIApplication:
         mock_config.host = "127.0.0.1"
         mock_config.port = 5008
         mock_config.debug = False
+        mock_config.port = 5008
+        mock_config.debug = False
         mock_config.name = "Test Malla"
+        mock_config.otlp_endpoint = None
         mock_get_config.return_value = mock_config
 
         app = create_wsgi_app()
