@@ -84,34 +84,25 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
         packet["from_node_name"] = node_names.get(packet["from_node_id"], "Unknown")
         packet["to_node_name"] = node_names.get(packet["to_node_id"], "Unknown")
 
-        # Process relay_node information for the main packet
+        # Collect all relay candidate requests for batching
+        # Format: list of (gateway_node_id, relay_last_byte, target_dict, is_main_packet)
+        relay_requests = []
 
+        # Add main packet relay request
         packet_relay_node = packet.get("relay_node")
         if packet_relay_node and packet_relay_node != 0:
             packet["relay_hex"] = f"{packet_relay_node & 0xFF:02x}"
-            relay_last_byte = packet_relay_node & 0xFF
-
-            # Get candidates from the perspective of the gateway that received this packet
             if packet.get("gateway_id") and packet["gateway_id"].startswith("!"):
                 try:
                     gateway_node_id = convert_node_id(packet["gateway_id"])
-                    # Use the efficient helper method to get candidates for just this relay_node
-                    candidates_dict = NodeRepository.get_relay_node_candidates(
-                        gateway_node_id, [relay_last_byte]
-                    )
-                    packet["relay_candidates"] = candidates_dict.get(
-                        relay_last_byte, []
+                    relay_requests.append(
+                        (gateway_node_id, packet_relay_node & 0xFF, packet, True)
                     )
                 except ValueError as e:
                     logger.warning(
-                        f"Failed to get relay candidates for packet gateway {packet.get('gateway_id')}: {e}"
+                        f"Failed to convert gateway_id for packet: {packet.get('gateway_id')}: {e}"
                     )
                     packet["relay_candidates"] = []
-                except Exception as e:
-                    logger.exception(
-                        f"Unexpected error while getting relay candidates for packet gateway {packet.get('gateway_id')}: {e}"
-                    )
-                    raise
             else:
                 packet["relay_candidates"] = []
         else:
@@ -187,31 +178,21 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
             if reception["gateway_id"] and reception["gateway_id"].startswith("!"):
                 gateway_ids.add(reception["gateway_id"])
 
-        # Process relay_node information for each reception
-
-        for reception in receptions:
+            # Add reception relay request to batch
             relay_node = reception.get("relay_node")
             if relay_node and relay_node != 0:
-                # Format relay_node as last byte in hex
                 reception["relay_hex"] = f"{relay_node & 0xFF:02x}"
-                relay_last_byte = relay_node & 0xFF
-
-                # Get candidates for this relay_node from the perspective of the gateway
                 if reception.get("gateway_id") and reception["gateway_id"].startswith(
                     "!"
                 ):
                     try:
                         gateway_node_id = convert_node_id(reception["gateway_id"])
-                        # Use the efficient helper method to get candidates for just this relay_node
-                        candidates_dict = NodeRepository.get_relay_node_candidates(
-                            gateway_node_id, [relay_last_byte]
+                        relay_requests.append(
+                            (gateway_node_id, relay_node & 0xFF, reception, False)
                         )
-                        reception["relay_candidates"] = candidates_dict.get(
-                            relay_last_byte, []
-                        )
-                    except (ValueError, Exception) as e:
+                    except ValueError as e:
                         logger.warning(
-                            f"Failed to get relay candidates for gateway {reception.get('gateway_id')}: {e}"
+                            f"Failed to convert gateway_id for reception: {reception.get('gateway_id')}: {e}"
                         )
                         reception["relay_candidates"] = []
                 else:
@@ -219,6 +200,29 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
             else:
                 reception["relay_hex"] = None
                 reception["relay_candidates"] = []
+
+        # Execute batched relay candidate query
+        if relay_requests:
+            # Extract unique gateways and last_bytes
+            gateway_ids_list = list({req[0] for req in relay_requests})
+            last_bytes_list = list({req[1] for req in relay_requests})
+
+            try:
+                # Single batched query for ALL gateways and last_bytes
+                all_candidates = NodeRepository.get_relay_node_candidates(
+                    gateway_ids_list, last_bytes_list
+                )
+
+                # Distribute results to packet and receptions
+                for gateway_id, last_byte, target, _ in relay_requests:
+                    target["relay_candidates"] = all_candidates.get(gateway_id, {}).get(
+                        last_byte, []
+                    )
+            except Exception as e:
+                logger.exception(f"Failed to get batched relay candidates: {e}")
+                # Set empty candidates for all requests on error
+                for _, _, target, _ in relay_requests:
+                    target["relay_candidates"] = []
 
         # Get recent packets from the same node for context
         cursor.execute(
