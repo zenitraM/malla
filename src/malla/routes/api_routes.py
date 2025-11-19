@@ -608,6 +608,9 @@ def api_locations():
     API endpoint for node location data with network topology.
     Returns up to 14 days of data for client-side filtering.
     """
+    import time
+
+    start_time_perf = time.time()
     logger.info("API locations endpoint accessed")
     try:
         # Build filters from request parameters
@@ -633,17 +636,47 @@ def api_locations():
         if request.args.get("search"):
             filters["search"] = request.args.get("search")
 
-        # Get enhanced location data with network topology
-        locations = LocationService.get_node_locations(filters)
-
         # ------------------------------------------------------------------
-        # Link data
-        #   • traceroute_links  – extracted from traceroute packets
-        #   • packet_links      – direct (0-hop) packet receptions
+        # OPTIMIZATION: Call expensive operations ONCE and pass results down
         # ------------------------------------------------------------------
 
-        traceroute_links = LocationService.get_traceroute_links(filters)
+        # 1. Get network topology data (used by both get_node_locations and get_traceroute_links)
+        from ..services.traceroute_service import TracerouteService
+
+        hours = 24  # Default to 24 hours for network analysis
+        time_diff = filters["end_time"] - filters["start_time"]
+        hours = max(1, min(168, int(time_diff / 3600)))  # Between 1 and 168 hours
+
+        network_filters = {}
+        if filters.get("start_time"):
+            network_filters["start_time"] = filters["start_time"]
+        if filters.get("end_time"):
+            network_filters["end_time"] = filters["end_time"]
+        if filters.get("gateway_id"):
+            network_filters["gateway_id"] = filters["gateway_id"]
+
+        network_data = TracerouteService.get_network_graph_data(
+            hours=hours,
+            include_indirect=False,
+            filters=network_filters,
+            limit_packets=2000,
+        )
+
+        # 2. Get packet links (used by get_node_locations and returned in response)
         packet_links = LocationService.get_packet_links(filters)
+
+        # 3. Get enhanced location data, passing pre-computed data
+        locations = LocationService.get_node_locations(
+            filters, network_data=network_data, packet_links=packet_links
+        )
+
+        # 4. Get traceroute links, passing pre-computed network data
+        traceroute_links = LocationService.get_traceroute_links(
+            filters, network_data=network_data
+        )
+
+        duration = time.time() - start_time_perf
+        logger.info(f"/api/locations completed in {duration:.3f}s")
 
         return safe_jsonify(
             {
