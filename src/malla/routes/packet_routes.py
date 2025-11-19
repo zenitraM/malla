@@ -96,10 +96,11 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
                 try:
                     gateway_node_id = convert_node_id(packet["gateway_id"])
                     # Use the efficient helper method to get candidates for just this relay_node
-                    packet["relay_candidates"] = (
-                        NodeRepository.get_relay_node_candidates(
-                            gateway_node_id, relay_last_byte
-                        )
+                    candidates_dict = NodeRepository.get_relay_node_candidates(
+                        gateway_node_id, [relay_last_byte]
+                    )
+                    packet["relay_candidates"] = candidates_dict.get(
+                        relay_last_byte, []
                     )
                 except ValueError as e:
                     logger.warning(
@@ -202,10 +203,11 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
                     try:
                         gateway_node_id = convert_node_id(reception["gateway_id"])
                         # Use the efficient helper method to get candidates for just this relay_node
-                        reception["relay_candidates"] = (
-                            NodeRepository.get_relay_node_candidates(
-                                gateway_node_id, relay_last_byte
-                            )
+                        candidates_dict = NodeRepository.get_relay_node_candidates(
+                            gateway_node_id, [relay_last_byte]
+                        )
+                        reception["relay_candidates"] = candidates_dict.get(
+                            relay_last_byte, []
                         )
                     except (ValueError, Exception) as e:
                         logger.warning(

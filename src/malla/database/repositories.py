@@ -1876,18 +1876,19 @@ class NodeRepository:
 
     @staticmethod
     def get_relay_node_candidates(
-        gateway_node_id: int, relay_last_byte: int, cursor=None
-    ) -> list[dict[str, Any]]:
+        gateway_node_id: int, relay_last_bytes: list[int], cursor=None
+    ) -> dict[int, list[dict[str, Any]]]:
         """
-        Get candidate nodes for a specific relay_node value from a gateway's perspective.
+        Get candidate nodes for relay_node values from a gateway's perspective.
 
         Args:
             gateway_node_id: The gateway node ID
-            relay_last_byte: The last byte of the relay_node to match against (0-255)
+            relay_last_bytes: List of last bytes of relay_nodes to match against (0-255)
             cursor: Optional database cursor (will create one if not provided)
 
         Returns:
-            List of candidate node dictionaries with node_id, node_name, hex_id, last_byte
+            Dictionary mapping each relay_last_byte to a list of candidate node dictionaries.
+            Each candidate dict contains: node_id, node_name, hex_id, short_name, last_byte
         """
         should_close = False
         conn = None
@@ -1897,19 +1898,23 @@ class NodeRepository:
             should_close = True
 
         try:
+            if not relay_last_bytes:
+                return {}
+
             gateway_hex = f"!{gateway_node_id:08x}"
 
             # Part 1: Packets this gateway received directly (0 hops) from other nodes
-            candidates_query_part1 = """
-            SELECT DISTINCT p.from_node_id as node_id
+            placeholders = ",".join(["?"] * len(relay_last_bytes))
+            candidates_query_part1 = f"""
+            SELECT DISTINCT p.from_node_id as node_id, (p.from_node_id & 0xFF) as last_byte
             FROM packet_history p
             WHERE p.gateway_id = ?
                 AND p.from_node_id IS NOT NULL
                 AND (p.hop_start - p.hop_limit) = 0
-                AND (p.from_node_id & 0xFF) = ?
+                AND (p.from_node_id & 0xFF) IN ({placeholders})
             """
 
-            cursor.execute(candidates_query_part1, (gateway_hex, relay_last_byte))
+            cursor.execute(candidates_query_part1, (gateway_hex, *relay_last_bytes))
             part1_results = cursor.fetchall()
 
             # Part 2: Packets from this node received directly by other gateways
@@ -1926,12 +1931,16 @@ class NodeRepository:
             cursor.execute(candidates_query_part2, (gateway_node_id, gateway_hex))
             part2_results = cursor.fetchall()
 
-            # Combine results and filter by last byte in Python
-            candidate_node_ids_set = set()
+            # Group candidates by last_byte in Python
+            candidates_by_last_byte: dict[int, set[int]] = {
+                lb: set() for lb in relay_last_bytes
+            }
 
-            # Add part 1 results (already integers)
+            # Add part 1 results (already integers with last_byte)
             for row in part1_results:
-                candidate_node_ids_set.add(row["node_id"])
+                last_byte = row["last_byte"]
+                if last_byte in candidates_by_last_byte:
+                    candidates_by_last_byte[last_byte].add(row["node_id"])
 
             # Add part 2 results (convert hex strings to integers and filter by last byte)
             for row in part2_results:
@@ -1939,45 +1948,58 @@ class NodeRepository:
                 if gw_hex and gw_hex.startswith("!"):
                     try:
                         gw_int = int(gw_hex[1:], 16)
-                        if (gw_int & 0xFF) == relay_last_byte:
-                            candidate_node_ids_set.add(gw_int)
+                        last_byte = gw_int & 0xFF
+                        if last_byte in candidates_by_last_byte:
+                            candidates_by_last_byte[last_byte].add(gw_int)
                     except ValueError:
                         # Malformed gateway_id encountered; skip this entry.
                         logger.debug(f"Skipping malformed gateway_id: {gw_hex}")
 
-            # Convert to sorted list for consistent results
-            candidate_node_ids_list = sorted(candidate_node_ids_set)[:10]
+            # Limit to top 10 per last_byte and collect all for bulk lookup
+            candidates_by_last_byte_limited: dict[int, list[int]] = {}
+            for last_byte, candidates_set in candidates_by_last_byte.items():
+                candidates_by_last_byte_limited[last_byte] = sorted(candidates_set)[:10]
 
-            # Get node names and short names for candidates
+            # Flatten for bulk lookup
+            all_limited_candidate_ids = set()
+            for candidates_list in candidates_by_last_byte_limited.values():
+                all_limited_candidate_ids.update(candidates_list)
+
+            # Get node names and short names for all candidates in bulk
             candidate_names = (
-                NodeRepository.get_bulk_node_names(candidate_node_ids_list)
-                if candidate_node_ids_list
+                NodeRepository.get_bulk_node_names(list(all_limited_candidate_ids))
+                if all_limited_candidate_ids
                 else {}
             )
-
-            # Get short names (4-letter codes) for candidates
 
             candidate_short_names = (
-                get_bulk_node_short_names(candidate_node_ids_list)
-                if candidate_node_ids_list
+                get_bulk_node_short_names(list(all_limited_candidate_ids))
+                if all_limited_candidate_ids
                 else {}
             )
 
-            candidates = []
-            for cand_node_id in candidate_node_ids_list:
-                hex_id = f"!{cand_node_id:08x}"
-                short_name = candidate_short_names.get(cand_node_id, hex_id[-4:])
-                candidates.append(
-                    {
-                        "node_id": cand_node_id,
-                        "node_name": candidate_names.get(cand_node_id, hex_id),
-                        "hex_id": hex_id,
-                        "short_name": short_name,
-                        "last_byte": f"{cand_node_id & 0xFF:02x}",
-                    }
-                )
+            # Build result dictionary with candidate details
+            result: dict[int, list[dict[str, Any]]] = {}
+            for (
+                last_byte,
+                candidate_node_ids,
+            ) in candidates_by_last_byte_limited.items():
+                candidates = []
+                for cand_node_id in candidate_node_ids:
+                    hex_id = f"!{cand_node_id:08x}"
+                    short_name = candidate_short_names.get(cand_node_id, hex_id[-4:])
+                    candidates.append(
+                        {
+                            "node_id": cand_node_id,
+                            "node_name": candidate_names.get(cand_node_id, hex_id),
+                            "hex_id": hex_id,
+                            "short_name": short_name,
+                            "last_byte": f"{cand_node_id & 0xFF:02x}",
+                        }
+                    )
+                result[last_byte] = candidates
 
-            return candidates
+            return result
 
         finally:
             if should_close and conn:
@@ -2002,7 +2024,6 @@ class NodeRepository:
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            relay_node_stats = []
 
             # Query to get relay_node values with counts and signal stats for packets reported by this gateway
             relay_query = """
@@ -2029,23 +2050,35 @@ class NodeRepository:
             cursor.execute(relay_query, (gateway_hex, limit))
             relay_rows = cursor.fetchall()
 
-            # For each relay_node, find candidate nodes (0-hop direct receptions)
-            # Match based on last byte of node ID matching last byte of relay_node
+            if not relay_rows:
+                cursor.close()
+                conn.close()
+                return []
+
+            # Collect all unique relay_last_byte values
+            relay_last_bytes = list(
+                {relay_row["relay_node"] & 0xFF for relay_row in relay_rows}
+            )
+
+            # Use the refactored helper method to get all candidates in bulk
+            candidates_by_last_byte = NodeRepository.get_relay_node_candidates(
+                node_id, relay_last_bytes, cursor
+            )
+
+            # Build relay_node_stats with candidates from the pre-computed dictionary
+            relay_node_stats = []
             for relay_row in relay_rows:
                 relay_value = relay_row["relay_node"]
-                relay_count = relay_row["count"]
                 relay_last_byte = relay_value & 0xFF
 
-                # Get candidates using the helper method
-                candidates = NodeRepository.get_relay_node_candidates(
-                    node_id, relay_last_byte, cursor
-                )
+                # Get candidates for this relay_last_byte
+                candidates = candidates_by_last_byte.get(relay_last_byte, [])
 
                 relay_node_stats.append(
                     {
                         "relay_node": relay_value,
                         "relay_hex": f"{relay_last_byte:02x}",
-                        "count": relay_count,
+                        "count": relay_row["count"],
                         "avg_rssi": relay_row["avg_rssi"],
                         "avg_snr": relay_row["avg_snr"],
                         "min_rssi": relay_row["min_rssi"],
