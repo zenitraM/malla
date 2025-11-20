@@ -1943,7 +1943,7 @@ class NodeRepository:
             # Process part 1 results (direct receptions by gateways)
             gateway_hex_to_id = {
                 hex_id: gw_id
-                for gw_id, hex_id in zip(gateway_node_ids, gateway_hex_ids)
+                for gw_id, hex_id in zip(gateway_node_ids, gateway_hex_ids, strict=True)
             }
             for row in part1_results:
                 gateway_hex = row["gateway_id"]
