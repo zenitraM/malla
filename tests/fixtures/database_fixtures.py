@@ -115,21 +115,35 @@ class DatabaseFixtures:
             )
         """)
 
-        # Create indexes for performance
+        # Create indexes for performance (matching production schema)
+        # Composite indexes for /api/nodes aggregation queries
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_packet_timestamp ON packet_history(timestamp)"
+            "CREATE INDEX IF NOT EXISTS idx_packet_history_stats ON packet_history(timestamp, from_node_id)"
         )
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_packet_from_node ON packet_history(from_node_id)"
+            "CREATE INDEX IF NOT EXISTS idx_packet_history_gateway_stats ON packet_history(timestamp, gateway_id)"
         )
+
+        # Additional proven performance indexes (20-40% improvements)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_packet_history_portnum_time ON packet_history(timestamp, portnum_name)"
+        )
+        cursor.execute(
+            """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_hops
+               ON packet_history(timestamp, from_node_id, gateway_id, hop_start, hop_limit)
+               WHERE hop_start = hop_limit"""
+        )
+        cursor.execute(
+            """CREATE INDEX IF NOT EXISTS idx_packet_history_relay_time
+               ON packet_history(timestamp, relay_node)
+               WHERE relay_node IS NOT NULL AND relay_node != 0"""
+        )
+
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_packet_to_node ON packet_history(to_node_id)"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_packet_portnum ON packet_history(portnum)"
-        )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_packet_gateway ON packet_history(gateway_id)"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_packet_portnum_name ON packet_history(portnum_name)"
