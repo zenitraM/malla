@@ -41,7 +41,7 @@ jobs:
       - name: Install Playwright browsers (for e2e tests)
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          uv run playwright install --with-deps chromium
+          uv run playwright install
 
       - name: Copy sample config
         run: cp config.sample.yaml config.yaml
