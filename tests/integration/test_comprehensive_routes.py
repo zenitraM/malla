@@ -9,6 +9,8 @@ import time
 
 import pytest
 
+from src.malla import get_version
+
 
 class TestMainRoutes:
     """Test main application routes."""
@@ -26,8 +28,6 @@ class TestMainRoutes:
     @pytest.mark.integration
     def test_dashboard_shows_version(self, client):
         """Test that the dashboard displays the version in the footer."""
-        from src.malla import get_version
-
         response = client.get("/")
         assert response.status_code == 200
         # Check that version appears in the footer
@@ -173,8 +173,6 @@ class TestUtilityRoutes:
         assert data["status"] == "healthy"
         assert data["service"] == "meshtastic-mesh-health-ui"
         # Verify version is present and matches the get_version() output
-        from src.malla import get_version
-
         assert data["version"] == get_version()
         # Version should be non-empty
         assert len(data["version"]) > 0
@@ -188,8 +186,6 @@ class TestUtilityRoutes:
         data = response.get_json()
         assert data["name"] == "Meshtastic Mesh Health Web UI"
         # Verify version is present and matches the get_version() output
-        from src.malla import get_version
-
         assert data["version"] == get_version()
         # Version should be non-empty
         assert len(data["version"]) > 0
