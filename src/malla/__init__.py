@@ -20,6 +20,7 @@ except ImportError:
 __all__ = [
     "create_app",
     "__version__",
+    "get_version",
     "__title__",
     "__description__",
     "__author__",
