@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "uv-dynamic-versioning"]
 build-backend = "hatchling.build"
 
 [project]
 name = "malla"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A comprehensive web UI for browsing and analyzing Meshtastic mesh network health data"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -74,7 +74,24 @@ dev = [
 
 # Hatch configuration
 [tool.hatch.version]
-path = "src/malla/__init__.py"
+source = "uv-dynamic-versioning"
+
+[tool.hatch.build.hooks.version]
+path = "src/malla/_version.py"
+template = '''
+__version__ = "{version}"
+'''
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+# Use PEP440 style for Python compatibility
+style = "pep440"
+# Enable metadata to include commit hash when not on a tagged commit
+metadata = true
+# Include dirty flag to show uncommitted changes
+dirty = true
+# Fallback version when not in a git repository (e.g., when installed from PyPI)
+fallback-version = "0.1.0"
 
 [tool.hatch.build]
 include = [
