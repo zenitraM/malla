@@ -24,6 +24,20 @@ class TestMainRoutes:
         assert b"Active Nodes" in response.data
 
     @pytest.mark.integration
+    def test_dashboard_shows_version(self, client):
+        """Test that the dashboard displays the version in the footer."""
+        from src.malla import get_version
+
+        response = client.get("/")
+        assert response.status_code == 200
+        # Check that version appears in the footer
+        version = get_version()
+        assert version.encode() in response.data
+        # Check that "Malla" link appears (from footer)
+        assert b"Powered by" in response.data
+        assert b"Malla" in response.data
+
+    @pytest.mark.integration
     def test_map_route(self, client):
         """Test the map view route."""
         response = client.get("/map")
@@ -158,7 +172,12 @@ class TestUtilityRoutes:
         data = response.get_json()
         assert data["status"] == "healthy"
         assert data["service"] == "meshtastic-mesh-health-ui"
-        assert data["version"] == "2.0.0"
+        # Verify version is present and matches the get_version() output
+        from src.malla import get_version
+
+        assert data["version"] == get_version()
+        # Version should be non-empty
+        assert len(data["version"]) > 0
 
     @pytest.mark.integration
     def test_info_endpoint(self, client):
@@ -168,7 +187,12 @@ class TestUtilityRoutes:
 
         data = response.get_json()
         assert data["name"] == "Meshtastic Mesh Health Web UI"
-        assert data["version"] == "2.0.0"
+        # Verify version is present and matches the get_version() output
+        from src.malla import get_version
+
+        assert data["version"] == get_version()
+        # Version should be non-empty
+        assert len(data["version"]) > 0
         assert "components" in data
         assert "database" in data["components"]
 
