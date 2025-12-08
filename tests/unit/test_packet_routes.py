@@ -476,3 +476,48 @@ class TestNeighborInfoDataStructure:
                 assert neighbor["last_rx_time_str"] == "Unknown"
                 assert neighbor["snr"] is not None  # SNR should always be present
                 assert isinstance(neighbor["snr"], float)
+
+    def test_decode_telemetry_app_host_metrics(self):
+        """Test successful TELEMETRY_APP decoding with host metrics."""
+        from meshtastic import telemetry_pb2
+
+        # Create Telemetry protobuf message with host metrics
+        telemetry = telemetry_pb2.Telemetry()
+        telemetry.time = 1640995200  # 2022-01-01 00:00:00 UTC
+        telemetry.host_metrics.uptime_seconds = 44239
+        telemetry.host_metrics.freemem_bytes = 198164480
+        telemetry.host_metrics.diskfree1_bytes = 18354638848
+        telemetry.host_metrics.diskfree2_bytes = 5000000000
+        telemetry.host_metrics.diskfree3_bytes = 1000000000
+        telemetry.host_metrics.load1 = 125  # 1.25 load average
+        telemetry.host_metrics.load5 = 200  # 2.00 load average
+        telemetry.host_metrics.load15 = 150  # 1.50 load average
+        telemetry.host_metrics.user_string = "Test host info"
+
+        packet = {
+            "id": 1,
+            "portnum_name": "TELEMETRY_APP",
+            "raw_payload": telemetry.SerializeToString(),
+            "payload_length": len(telemetry.SerializeToString()),
+        }
+
+        result = decode_packet_payload(packet)
+        assert result is not None
+        assert result["portnum"] == "TELEMETRY_APP"
+        assert result["decoded"] is True
+        assert result["error"] is None
+        assert "data" in result
+
+        # Verify host metrics were extracted
+        data = result["data"]
+        assert "host_metrics" in data
+        assert data["host_metrics"]["uptime_seconds"] == 44239
+        # freemem_bytes is stored as string by protobuf for uint64
+        assert int(data["host_metrics"]["freemem_bytes"]) == 198164480
+        assert int(data["host_metrics"]["diskfree1_bytes"]) == 18354638848
+        assert int(data["host_metrics"]["diskfree2_bytes"]) == 5000000000
+        assert int(data["host_metrics"]["diskfree3_bytes"]) == 1000000000
+        assert data["host_metrics"]["load1"] == 125
+        assert data["host_metrics"]["load5"] == 200
+        assert data["host_metrics"]["load15"] == 150
+        assert data["host_metrics"]["user_string"] == "Test host info"

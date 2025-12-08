@@ -503,6 +503,9 @@ def decode_packet_payload(packet: dict[str, Any]) -> dict[str, Any] | None:
                 if "power_metrics" in raw_data:
                     data["power_metrics"] = raw_data["power_metrics"]
 
+                if "host_metrics" in raw_data:
+                    data["host_metrics"] = raw_data["host_metrics"]
+
                 payload_info["data"] = data
 
             elif packet["portnum_name"] == "NEIGHBORINFO_APP":
