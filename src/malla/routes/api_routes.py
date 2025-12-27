@@ -713,13 +713,14 @@ def api_infrastructure_nodes():
         data = {}
 
         for node in result["nodes"]:
+            time_diff = time.time() - node["last_packet_time"]
+
             # Determine status
             status = "Unknown"
             if node.get("packet_count_24h", 0) > 0:
                 status = "Active"
             elif node.get("last_packet_time"):
                 # Check if last packet was within 7 days
-                time_diff = time.time() - node["last_packet_time"]
                 if time_diff < (7 * 24 * 3600):
                     status = "Inactive"
 
@@ -745,6 +746,7 @@ def api_infrastructure_nodes():
                     "last_packet_str": node.get("last_packet_str", "Never"),
                     "last_packet_time": node.get("last_packet_time"),
                     "is_infrastructure_node": node.get("is_infrastructure_node", 0),
+                    "last_packet_time_diff": time_diff,
                     "region": node.get("region", "Unknown"),
                     "packet_count_24h": node.get("packet_count_24h", 0),
                     "gateway_packet_count_24h": node.get("gateway_packet_count_24h", 0),
@@ -770,6 +772,7 @@ def api_infrastructure_nodes():
 def api_node_info(node_id):
     """API endpoint for basic node information (optimized for tooltips and pickers)."""
     logger.info(f"API node info endpoint accessed for node {node_id}")
+    logger.info(CORS_ALLOWED_DOMAINS)
     try:
         # Convert node_id to int
         from ..utils.node_utils import convert_node_id
