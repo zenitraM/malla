@@ -53,6 +53,10 @@ class AppConfig:
     # OpenTelemetry settings
     otlp_endpoint: str | None = None
 
+    # Gunicorn settings
+    gunicorn_workers: int | None = None
+    gunicorn_threads: int = 1
+
     # Internal attribute to remember the source file used
     _config_path: Path | None = field(default=None, repr=False, compare=False)
 

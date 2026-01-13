@@ -63,16 +63,21 @@ def main():
         print("=" * 60)
         print(f"Database: {cfg.database_file}")
         print(f"Web UI: http://{cfg.host}:{cfg.port}")
-        print("Workers: auto-detected")
+        print(f"Workers: {cfg.gunicorn_workers or 'auto (gunicorn default)'}")
+        print(f"Threads: {cfg.gunicorn_threads}")
         print(f"Debug mode: {cfg.debug}")
         print("=" * 60)
         print()
 
+        # Determine worker class based on threads
+        worker_class = "gthread" if cfg.gunicorn_threads > 1 else "sync"
+
         # Configure Gunicorn
         gunicorn_config = {
             "bind": f"{cfg.host}:{cfg.port}",
-            "workers": None,  # Let Gunicorn auto-detect based on CPU cores
-            "worker_class": "sync",
+            "workers": cfg.gunicorn_workers,
+            "threads": cfg.gunicorn_threads,
+            "worker_class": worker_class,
             "worker_connections": 1000,
             "max_requests": 1000,
             "max_requests_jitter": 50,
