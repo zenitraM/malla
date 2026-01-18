@@ -48,13 +48,16 @@ def dashboard():
 @main_bp.route("/map")
 def map_view():
     """Node location map view.
-    
+
     Supports the following URL parameters:
     - sidebar-collapsed: Set to 'true' or '1' to collapse the sidebar by default (useful for embedding)
     """
     try:
         # Check if sidebar should be collapsed by default
-        sidebar_collapsed = request.args.get("sidebar-collapsed", "").lower() in ["true", "1"]
+        sidebar_collapsed = request.args.get("sidebar-collapsed", "").lower() in [
+            "true",
+            "1",
+        ]
         return render_template("map.html", sidebar_collapsed=sidebar_collapsed)
     except Exception as e:
         logger.error(f"Error in map route: {e}")
