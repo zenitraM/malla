@@ -33,21 +33,13 @@ class TestMainRoutes:
         assert b"leaflet" in response.data or b"map" in response.data.lower()
 
     @pytest.mark.integration
-    def test_map_route_with_sidebar_collapsed(self, client):
-        """Test the map view route with sidebar-collapsed URL parameter."""
-        response = client.get("/map?sidebar-collapsed=true")
+    def test_map_route_includes_sidebar_collapse_logic(self, client):
+        """Test that the map route includes frontend logic for sidebar collapse."""
+        response = client.get("/map")
         assert response.status_code == 200
-        assert b"Node Map" in response.data or b"Map" in response.data
-        # Check that the sidebar gets collapsed class
-        assert b"sidebar.classList.add('collapsed')" in response.data
-
-    @pytest.mark.integration
-    def test_map_route_with_sidebar_collapsed_numeric(self, client):
-        """Test the map view route with sidebar-collapsed=1 URL parameter."""
-        response = client.get("/map?sidebar-collapsed=1")
-        assert response.status_code == 200
-        assert b"Node Map" in response.data or b"Map" in response.data
-        # Check that the sidebar gets collapsed class
+        # Check that the frontend JavaScript for reading URL parameter exists
+        assert b"URLSearchParams" in response.data
+        assert b"sidebar-collapsed" in response.data
         assert b"sidebar.classList.add('collapsed')" in response.data
 
     @pytest.mark.integration

@@ -457,12 +457,16 @@ function updateMapTheme() {
 // Initialize the page
 document.addEventListener('DOMContentLoaded', function() {
     // Check if sidebar should be collapsed by default (from URL parameter)
-    {% if sidebar_collapsed %}
-    const sidebar = document.getElementById('sidebar');
-    if (sidebar) {
-        sidebar.classList.add('collapsed');
+    // Pure frontend implementation - reads URL parameter directly
+    const urlParams = new URLSearchParams(window.location.search);
+    const sidebarCollapsed = urlParams.get('sidebar-collapsed');
+    
+    if (sidebarCollapsed === 'true' || sidebarCollapsed === '1') {
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar) {
+            sidebar.classList.add('collapsed');
+        }
     }
-    {% endif %}
 
     // Wait for jQuery to be available
     function waitForJQuery() {
