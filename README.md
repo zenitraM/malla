@@ -327,6 +327,34 @@ export MALLA_DATA_RETENTION_HOURS=168
 
 Set to `0` (default) to disable cleanup completely.
 
+## Embedding the Map
+
+The map view can be embedded in other websites or used in a narrower width by collapsing the sidebar by default. This is particularly useful when you want to showcase your mesh network on your website or integrate it into other pages.
+
+### URL Parameter
+
+Add `?sidebar-collapsed=true` or `?sidebar-collapsed=1` to the map URL to collapse the sidebar by default:
+
+```
+https://your-malla-instance.com/map?sidebar-collapsed=true
+```
+
+The sidebar can still be expanded by users clicking the toggle button, giving them access to filters, statistics, and controls when needed.
+
+### Embedding Example
+
+```html
+<iframe 
+    src="https://your-malla-instance.com/map?sidebar-collapsed=true" 
+    width="100%" 
+    height="600" 
+    frameborder="0"
+    style="border: 0;">
+</iframe>
+```
+
+This approach maximizes the visible map area while keeping full functionality accessible through the expandable sidebar.
+
 ## Contributing
 
 Feel free to submit issues, feature requests, or pull requests to improve Malla!
