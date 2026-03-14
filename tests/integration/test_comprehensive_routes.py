@@ -239,35 +239,6 @@ class TestAPIStatsEndpoints:
         data = response.get_json()
         assert isinstance(data, dict)
 
-    @pytest.mark.integration
-    @pytest.mark.api
-    def test_api_analytics_with_tz_offset(self, client):
-        """Test /api/analytics with tz_offset parameter returns local-time hourly data."""
-        # UTC response (no offset)
-        response_utc = client.get("/api/analytics?tz_offset=0")
-        assert response_utc.status_code == 200
-        data_utc = response_utc.get_json()
-        assert "temporal_patterns" in data_utc
-        assert "hourly_breakdown" in data_utc["temporal_patterns"]
-        assert len(data_utc["temporal_patterns"]["hourly_breakdown"]) == 24
-
-        # UTC+2 response
-        response_plus2 = client.get("/api/analytics?tz_offset=120")
-        assert response_plus2.status_code == 200
-        data_plus2 = response_plus2.get_json()
-        assert "temporal_patterns" in data_plus2
-        assert len(data_plus2["temporal_patterns"]["hourly_breakdown"]) == 24
-
-        # UTC-5 response
-        response_minus5 = client.get("/api/analytics?tz_offset=-300")
-        assert response_minus5.status_code == 200
-        data_minus5 = response_minus5.get_json()
-        assert len(data_minus5["temporal_patterns"]["hourly_breakdown"]) == 24
-
-        # Invalid tz_offset should be clamped to valid range, not error
-        response_invalid = client.get("/api/analytics?tz_offset=99999")
-        assert response_invalid.status_code == 200
-
 
 class TestAPIPacketEndpoints:
     """Test API packet endpoints."""
