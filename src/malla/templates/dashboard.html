@@ -546,14 +546,34 @@ function createTimeSeriesChart(temporalData) {
     const ctx = document.getElementById('timeSeriesChart');
     if (!ctx) return;
 
-    // Convert hourly data to chart format
+    // Determine timezone offset for display.
+    // getTimezoneOffset() returns minutes *behind* UTC (positive = west), so negate
+    // to get the number of minutes to add to UTC to reach local time.
+    const tzPref = (typeof getTimezonePreference === 'function') ? getTimezonePreference() : 'local';
+    const tzOffsetMinutes = (tzPref === 'utc') ? 0 : -new Date().getTimezoneOffset();
+
+    // The API returns data bucketed by UTC hour (0-23).  Rotate into local time by
+    // computing, for each local hour L, which UTC hour contributed its data.
+    // For half-hour / quarter-hour timezones we round to the nearest whole hour –
+    // this is the same approximation a UTC-only chart already makes per bucket.
+    const tzOffsetHours = Math.round(tzOffsetMinutes / 60);
+
+    // Build a UTC-indexed lookup: utcCounts[utcHour] = total_packets
+    const utcCounts = new Array(24).fill(0);
+    temporalData.hourly_breakdown.forEach(item => {
+        utcCounts[item.hour] = item.total_packets;
+    });
+
+    // Build chart arrays ordered by local hour (0 → 23)
     const labels = [];
     const data = [];
-
-    temporalData.hourly_breakdown.forEach(item => {
-        labels.push(`${item.hour}:00`);
-        data.push(item.total_packets);
-    });
+    for (let localHour = 0; localHour < 24; localHour++) {
+        // The +24 before the outer % 24 ensures the result is non-negative in
+        // JavaScript, where (negative % positive) can return a negative number.
+        const utcHour = ((localHour - tzOffsetHours) % 24 + 24) % 24;
+        labels.push(`${localHour}:00`);
+        data.push(utcCounts[utcHour]);
+    }
 
     const colors = getChartColors();
     const options = getDefaultChartOptions();
