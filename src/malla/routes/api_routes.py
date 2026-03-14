@@ -92,9 +92,15 @@ def api_analytics():
         gateway_id = request.args.get("gateway_id")
         from_node = request.args.get("from_node", type=int)
         hop_count = request.args.get("hop_count", type=int)
+        tz_offset = request.args.get("tz_offset", 0, type=int)
+        # Clamp to valid timezone range: UTC-12 (-720 min) to UTC+14 (+840 min)
+        tz_offset = max(-720, min(840, tz_offset))
 
         analytics_data = AnalyticsService.get_analytics_data(
-            gateway_id=gateway_id, from_node=from_node, hop_count=hop_count
+            gateway_id=gateway_id,
+            from_node=from_node,
+            hop_count=hop_count,
+            tz_offset=tz_offset,
         )
         return safe_jsonify(analytics_data)
     except Exception as e:

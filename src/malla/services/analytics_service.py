@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 class AnalyticsService:
     """Service for analytics and statistical calculations."""
 
-    # (gateway_id, from_node, hop_count) → (timestamp, data)
+    # (gateway_id, from_node, hop_count, tz_offset) → (timestamp, data)
     _CACHE: dict[
-        tuple[str | None, int | None, int | None], tuple[float, dict[str, Any]]
+        tuple[str | None, int | None, int | None, int], tuple[float, dict[str, Any]]
     ] = {}
     _CACHE_TTL_SEC: int = 60  # one minute cache window
 
@@ -31,10 +31,20 @@ class AnalyticsService:
         gateway_id: str | None = None,
         from_node: int | None = None,
         hop_count: int | None = None,
+        tz_offset: int = 0,
     ) -> dict[str, Any]:
-        """Get comprehensive analytics data for the dashboard with simple in-memory caching."""
+        """Get comprehensive analytics data for the dashboard with simple in-memory caching.
 
-        cache_key = (gateway_id, from_node, hop_count)
+        Args:
+            gateway_id: Optional gateway ID filter.
+            from_node: Optional source node ID filter.
+            hop_count: Optional hop count filter.
+            tz_offset: Timezone offset in minutes from UTC (e.g. 120 for UTC+2,
+                       -300 for UTC-5).  Used to display hourly breakdowns in
+                       the caller's local time rather than UTC.
+        """
+
+        cache_key = (gateway_id, from_node, hop_count, tz_offset)
         now_ts = time.time()
 
         # Return cached value if still valid
@@ -43,10 +53,11 @@ class AnalyticsService:
             return cached[1]
 
         logger.info(
-            "Computing analytics data (cache miss): gateway_id=%s, from_node=%s, hop_count=%s",
+            "Computing analytics data (cache miss): gateway_id=%s, from_node=%s, hop_count=%s, tz_offset=%s",
             gateway_id,
             from_node,
             hop_count,
+            tz_offset,
         )
 
         try:
@@ -72,7 +83,7 @@ class AnalyticsService:
                 filters, twenty_four_hours_ago
             )
             temporal_stats = AnalyticsService._get_temporal_patterns(
-                filters, twenty_four_hours_ago
+                filters, twenty_four_hours_ago, tz_offset
             )
             top_nodes = AnalyticsService._get_top_active_nodes(filters, seven_days_ago)
             packet_types = AnalyticsService._get_packet_type_distribution(
@@ -305,8 +316,18 @@ class AnalyticsService:
         }
 
     @staticmethod
-    def _get_temporal_patterns(filters: dict, since_timestamp: float) -> dict[str, Any]:
-        """Get temporal patterns (hourly breakdown) efficiently using SQL aggregation."""
+    def _get_temporal_patterns(
+        filters: dict, since_timestamp: float, tz_offset: int = 0
+    ) -> dict[str, Any]:
+        """Get temporal patterns (hourly breakdown) efficiently using SQL aggregation.
+
+        Args:
+            filters: Query filters (gateway_id, from_node, hop_count).
+            since_timestamp: Only include packets after this Unix timestamp.
+            tz_offset: Timezone offset in minutes from UTC.  Positive values
+                       shift east of UTC (e.g. 120 for UTC+2), negative values
+                       shift west (e.g. -300 for UTC-5).
+        """
 
         from ..database.connection import get_db_connection
 
@@ -328,9 +349,15 @@ class AnalyticsService:
 
         where_clause = " AND ".join(where_conditions)
 
+        # Clamp tz_offset to a valid timezone range and ensure it is an integer
+        # before interpolating into the SQL string to prevent injection.
+        tz_offset_safe = max(-720, min(840, int(tz_offset)))
+        # SQLite supports modifier strings like '+120 minutes' or '-300 minutes'.
+        tz_modifier = f"{tz_offset_safe:+d} minutes"
+
         query = f"""
             SELECT
-                strftime('%H', datetime(timestamp, 'unixepoch')) AS hour,
+                strftime('%H', datetime(timestamp, 'unixepoch', '{tz_modifier}')) AS hour,
                 COUNT(*) AS total_packets,
                 SUM(CASE WHEN processed_successfully = 1 THEN 1 ELSE 0 END) AS successful_packets
             FROM packet_history

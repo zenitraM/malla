@@ -499,7 +499,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
 async function loadAnalyticsData() {
     try {
-        const response = await fetch('/api/analytics');
+        // Send the browser's UTC offset so the server groups hourly activity by
+        // local time instead of UTC.  getTimezoneOffset() returns minutes *behind*
+        // UTC (positive for west), so we negate it to get the offset to add to UTC.
+        const tzPref = (typeof getTimezonePreference === 'function') ? getTimezonePreference() : 'local';
+        const tzOffset = (tzPref === 'utc') ? 0 : -new Date().getTimezoneOffset();
+        const response = await fetch(`/api/analytics?tz_offset=${tzOffset}`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
