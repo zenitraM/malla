@@ -117,8 +117,28 @@
                         </td>
                     </tr>
 
-                    <!-- Other receptions -->
+                    <!-- Other receptions, grouped by hop count -->
+                    {% if other_receptions %}
+                    {% set ns = namespace(current_hop = None) %}
                     {% for reception in other_receptions %}
+                    {% set hop_value = reception.hop_count if reception.hop_count is not none else 'Unknown' %}
+                    {% if ns.current_hop != hop_value %}
+                    {% set ns.current_hop = hop_value %}
+                    <tr class="table-secondary">
+                        <td colspan="9">
+                            {% if hop_value == 'Unknown' %}
+                                <strong>Unknown hop count</strong>
+                                <small class="text-muted ms-2">Receptions without hop information</small>
+                            {% elif hop_value == 0 %}
+                                <strong>0 hops (direct receptions)</strong>
+                                <small class="text-muted ms-2">Gateways that heard the packet directly from the source</small>
+                            {% else %}
+                                <strong>{{ hop_value }} hops</strong>
+                                <small class="text-muted ms-2">Gateways that received this packet after {{ hop_value }} hops</small>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
                     <tr>
                         <td>
                             {% if reception.gateway_id and reception.gateway_id != "Unknown Gateway" %}
@@ -186,8 +206,7 @@
                         </td>
                     </tr>
                     {% endfor %}
-
-                    {% if not other_receptions %}
+                    {% else %}
                     <tr>
                         <td colspan="9" class="text-center text-muted">
                             <i class="bi bi-info-circle"></i>
