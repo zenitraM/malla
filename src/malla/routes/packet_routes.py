@@ -21,6 +21,49 @@ logger = logging.getLogger(__name__)
 packet_bp = Blueprint("packet", __name__)
 
 
+def sort_receptions_for_display(receptions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort receptions for display on the packet detail page.
+
+    Ordering:
+    - First by hop_count (ascending), with unknown hop_count at the end
+    - Then by receiving gateway_id (alphabetically, with None/unknown last)
+    - Then by relay_node value (ascending), with unknown relay_node at the end
+    - Finally by timestamp (ascending), with unknown timestamp at the end
+    """
+
+    def _sort_key(
+        reception: dict[str, Any],
+    ) -> tuple[bool, int, bool, str, bool, int, bool, float]:
+        hop_count = reception.get("hop_count")
+        hop_is_unknown = not isinstance(hop_count, int)
+        hop_sort = hop_count if isinstance(hop_count, int) else 0
+
+        gateway_id = reception.get("gateway_id")
+        gateway_is_unknown = not (isinstance(gateway_id, str) and gateway_id)
+        gateway_sort = gateway_id if isinstance(gateway_id, str) and gateway_id else ""
+
+        relay_node = reception.get("relay_node")
+        relay_is_unknown = not isinstance(relay_node, int)
+        relay_sort = relay_node if isinstance(relay_node, int) else 0
+
+        timestamp = reception.get("timestamp")
+        timestamp_is_unknown = not isinstance(timestamp, (int, float))
+        timestamp_sort = float(timestamp) if isinstance(timestamp, (int, float)) else 0.0
+
+        return (
+            hop_is_unknown,
+            hop_sort,
+            gateway_is_unknown,
+            gateway_sort,
+            relay_is_unknown,
+            relay_sort,
+            timestamp_is_unknown,
+            timestamp_sort,
+        )
+
+    return sorted(receptions, key=_sort_key)
+
+
 def get_packet_details(packet_id: int) -> dict[str, Any] | None:
     """Get comprehensive details for a specific packet including all receptions."""
     logger.info(f"Getting packet details for packet {packet_id}")
@@ -110,8 +153,7 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
             packet["relay_candidates"] = []
 
         # Find all receptions of the same packet using mesh_packet_id (preferred) or fallback to time-based
-        receptions = []
-
+        receptions: list[dict[str, Any]] = []
         if packet["mesh_packet_id"] is not None:
             # Use mesh_packet_id for accurate correlation
             cursor.execute(
@@ -200,6 +242,10 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
             else:
                 reception["relay_hex"] = None
                 reception["relay_candidates"] = []
+
+        # Sort receptions for nicer presentation on the packet detail page
+        if receptions:
+            receptions = sort_receptions_for_display(receptions)
 
         # Execute batched relay candidate query
         if relay_requests:
