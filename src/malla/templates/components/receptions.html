@@ -133,8 +133,9 @@
                                 <strong>0 hops (direct receptions)</strong>
                                 <small class="text-muted ms-2">Gateways that heard the packet directly from the source</small>
                             {% else %}
-                                <strong>{{ hop_value }} hops</strong>
-                                <small class="text-muted ms-2">Gateways that received this packet after {{ hop_value }} hops</small>
+                                {% set hop_label = 'hop' if hop_value == 1 else 'hops' %}
+                                <strong>{{ hop_value }} {{ hop_label }}</strong>
+                                <small class="text-muted ms-2">Gateways that received this packet after {{ hop_value }} {{ hop_label }}</small>
                             {% endif %}
                         </td>
                     </tr>

@@ -1,6 +1,10 @@
 """Tests for reception sorting on the packet detail page."""
 
+import pytest
+
 from malla.routes.packet_routes import sort_receptions_for_display
+
+pytestmark = pytest.mark.unit
 
 
 def test_sort_receptions_for_display_orders_by_hop_then_gateway_then_relay():
@@ -65,4 +69,3 @@ def test_sort_receptions_for_display_handles_missing_fields_gracefully():
 
     # Known hop_count (0) should come before unknown
     assert [r["id"] for r in sorted_receptions] == [2, 1]
-

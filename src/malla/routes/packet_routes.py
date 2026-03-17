@@ -27,22 +27,39 @@ def sort_receptions_for_display(receptions: list[dict[str, Any]]) -> list[dict[s
     Ordering:
     - First by hop_count (ascending), with unknown hop_count at the end
     - Then by receiving gateway_id (alphabetically, with None/unknown last)
-    - Then by relay_node value (ascending) for stable ordering
+    - Then by relay_node value (ascending), with unknown relay_node at the end
+    - Finally by timestamp (ascending), with unknown timestamp at the end
     """
 
-    def _sort_key(reception: dict[str, Any]) -> tuple[int, str, int, float]:
+    def _sort_key(
+        reception: dict[str, Any],
+    ) -> tuple[bool, int, bool, str, bool, int, bool, float]:
         hop_count = reception.get("hop_count")
-        # Place unknown hop counts at the end
-        hop_sort = hop_count if isinstance(hop_count, int) else 9999
+        hop_is_unknown = not isinstance(hop_count, int)
+        hop_sort = hop_count if isinstance(hop_count, int) else 0
 
         gateway_id = reception.get("gateway_id")
-        # Normalize gateway_id so that None/empty sorts after real IDs
-        gateway_sort = gateway_id if isinstance(gateway_id, str) and gateway_id else "~~~~"
+        gateway_is_unknown = not (isinstance(gateway_id, str) and gateway_id)
+        gateway_sort = gateway_id if isinstance(gateway_id, str) and gateway_id else ""
 
-        relay_node = reception.get("relay_node") or 0
-        timestamp = float(reception.get("timestamp") or 0.0)
+        relay_node = reception.get("relay_node")
+        relay_is_unknown = not isinstance(relay_node, int)
+        relay_sort = relay_node if isinstance(relay_node, int) else 0
 
-        return (hop_sort, gateway_sort, int(relay_node), timestamp)
+        timestamp = reception.get("timestamp")
+        timestamp_is_unknown = not isinstance(timestamp, (int, float))
+        timestamp_sort = float(timestamp) if isinstance(timestamp, (int, float)) else 0.0
+
+        return (
+            hop_is_unknown,
+            hop_sort,
+            gateway_is_unknown,
+            gateway_sort,
+            relay_is_unknown,
+            relay_sort,
+            timestamp_is_unknown,
+            timestamp_sort,
+        )
 
     return sorted(receptions, key=_sort_key)
 
