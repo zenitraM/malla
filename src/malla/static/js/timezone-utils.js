@@ -209,6 +209,12 @@ function updateAllTimestamps() {
  * Listen for timezone changes and update timestamps
  */
 window.addEventListener('timezoneChanged', function(event) {
+    // Pages that manage their own timestamps (e.g. Chat) can set
+    // event.detail.skipReload = true to prevent the full page reload.
+    if (event.detail && event.detail.skipReload) {
+        updateAllTimestamps();
+        return;
+    }
     // Reload the page when timezone changes.
     // Rationale: Reloading ensures all server-rendered timestamps and dynamic content
     // are consistently updated, avoiding the need to track and update every timestamp

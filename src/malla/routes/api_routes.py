@@ -1903,6 +1903,130 @@ def api_channels():
         return jsonify({"error": str(e), "channels": []}), 500
 
 
+@api_bp.route("/chat/messages")
+def api_chat_messages():
+    """Lightweight chat endpoint — streams raw TEXT_MESSAGE_APP rows.
+
+    The client handles dedup/grouping by mesh_packet_id and computes
+    reception counts itself.  This keeps the query trivially fast
+    (indexed scan on the primary key) and the response small (~55 KB
+    for 300 rows).
+
+    Query parameters:
+        after_id: Only return rows with id > this value (polling cursor).
+        channel:  Filter by channel_id (e.g. 'LongFast').
+        limit:    Max rows to return (default 300, max 500).
+
+    Response JSON:
+        packets:  list of raw packet dicts (ascending id order)
+        nodes:    dict mapping node_id -> {name, short} for every sender
+        last_id:  highest packet_history.id in the DB (polling tail)
+    """
+    try:
+        after_id = request.args.get("after_id", type=int, default=0)
+        channel = request.args.get("channel", "").strip()
+        limit = min(request.args.get("limit", type=int, default=300), 500)
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT MAX(id) FROM packet_history")
+        row = cursor.fetchone()
+        db_last_id = row[0] if row and row[0] else 0
+
+        where = [
+            "portnum_name = 'TEXT_MESSAGE_APP'",
+            "raw_payload IS NOT NULL",
+            "payload_length > 0",
+        ]
+        params: list = []
+
+        if after_id > 0:
+            where.append("id > ?")
+            params.append(after_id)
+
+        if channel:
+            where.append("channel_id = ?")
+            params.append(channel)
+
+        params.append(limit)
+
+        cursor.execute(
+            f"""
+            SELECT id, timestamp, from_node_id, to_node_id, channel_id,
+                   mesh_packet_id, hop_limit, hop_start, raw_payload,
+                   gateway_id, rssi, snr, relay_node
+            FROM packet_history
+            WHERE {' AND '.join(where)}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            params,
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        from_ids: set[int] = set()
+        gateway_ids: set[int] = set()
+        packets = []
+        for r in reversed(rows):
+            raw = r["raw_payload"]
+            if isinstance(raw, bytes):
+                text = raw.decode("utf-8", errors="replace")
+            elif isinstance(raw, str):
+                text = raw
+            else:
+                continue
+
+            fid = r["from_node_id"]
+            if fid:
+                from_ids.add(fid)
+
+            gw = r["gateway_id"]
+            if gw and isinstance(gw, str) and gw.startswith("!"):
+                try:
+                    gateway_ids.add(int(gw[1:], 16))
+                except ValueError:
+                    pass
+
+            pkt: dict = {
+                "i": r["id"],
+                "t": r["timestamp"],
+                "f": fid,
+                "d": r["to_node_id"],
+                "ch": r["channel_id"],
+                "m": r["mesh_packet_id"],
+                "hl": r["hop_limit"],
+                "hs": r["hop_start"],
+                "tx": text,
+                "gw": gw,
+            }
+            if r["rssi"] is not None:
+                pkt["rs"] = r["rssi"]
+            if r["snr"] is not None:
+                pkt["sn"] = r["snr"]
+            if r["relay_node"] and r["relay_node"] != 0:
+                pkt["rl"] = r["relay_node"]
+
+            packets.append(pkt)
+
+        all_node_ids = list(from_ids | gateway_ids)
+        names = get_bulk_node_names(all_node_ids) if all_node_ids else {}
+        shorts = get_bulk_node_short_names(all_node_ids) if all_node_ids else {}
+
+        nodes: dict[str, dict] = {}
+        for nid in all_node_ids:
+            nodes[str(nid)] = {
+                "name": names.get(nid, f"!{nid:08x}"),
+                "short": shorts.get(nid, ""),
+            }
+
+        return jsonify({"packets": packets, "nodes": nodes, "last_id": db_last_id})
+    except Exception as e:
+        logger.error(f"Error in chat messages API: {e}")
+        return jsonify({"error": str(e), "packets": [], "nodes": {}, "last_id": 0}), 500
+
+
 def safe_jsonify(data, *args, **kwargs):
     """
     A drop-in replacement for Flask's jsonify() that sanitizes NaN/Inf values.
