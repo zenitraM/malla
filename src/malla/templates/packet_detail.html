@@ -394,6 +394,95 @@
                                         {% endif %}
                                     </table>
                                 {% endif %}
+                                {% if payload_info.data.host_metrics %}
+                                    <h6>Host Metrics:</h6>
+                                    <table class="table table-sm">
+                                        {% if payload_info.data.host_metrics.uptime_seconds %}
+                                            <tr>
+                                                <th>Uptime:</th>
+                                                <td>
+                                                    {% set days = (payload_info.data.host_metrics.uptime_seconds // 86400) %}
+                                                    {% set hours = ((payload_info.data.host_metrics.uptime_seconds % 86400) // 3600) %}
+                                                    {% set minutes = ((payload_info.data.host_metrics.uptime_seconds % 3600) // 60) %}
+                                                    {% if days > 0 %}{{ days }}d {% endif %}{% if hours > 0 or days > 0 %}{{ hours }}h {% endif %}{{ minutes }}m
+                                                </td>
+                                            </tr>
+                                        {% endif %}
+                                        {% if payload_info.data.host_metrics.freemem_bytes %}
+                                            <tr>
+                                                <th>Free Memory:</th>
+                                                <td>
+                                                    {% set freemem_mb = (payload_info.data.host_metrics.freemem_bytes | int) / (1024 * 1024) %}
+                                                    {% if freemem_mb >= 1024 %}
+                                                        {{ "%.2f"|format(freemem_mb / 1024) }} GB
+                                                    {% else %}
+                                                        {{ "%.0f"|format(freemem_mb) }} MB
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                        {% endif %}
+                                        {% if payload_info.data.host_metrics.diskfree1_bytes %}
+                                            <tr>
+                                                <th>Disk Free (/):</th>
+                                                <td>
+                                                    {% set diskfree1_mb = (payload_info.data.host_metrics.diskfree1_bytes | int) / (1024 * 1024) %}
+                                                    {% if diskfree1_mb >= 1024 %}
+                                                        {{ "%.2f"|format(diskfree1_mb / 1024) }} GB
+                                                    {% else %}
+                                                        {{ "%.0f"|format(diskfree1_mb) }} MB
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                        {% endif %}
+                                        {% if payload_info.data.host_metrics.diskfree2_bytes %}
+                                            <tr>
+                                                <th>Disk Free (2):</th>
+                                                <td>
+                                                    {% set diskfree2_mb = (payload_info.data.host_metrics.diskfree2_bytes | int) / (1024 * 1024) %}
+                                                    {% if diskfree2_mb >= 1024 %}
+                                                        {{ "%.2f"|format(diskfree2_mb / 1024) }} GB
+                                                    {% else %}
+                                                        {{ "%.0f"|format(diskfree2_mb) }} MB
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                        {% endif %}
+                                        {% if payload_info.data.host_metrics.diskfree3_bytes %}
+                                            <tr>
+                                                <th>Disk Free (3):</th>
+                                                <td>
+                                                    {% set diskfree3_mb = (payload_info.data.host_metrics.diskfree3_bytes | int) / (1024 * 1024) %}
+                                                    {% if diskfree3_mb >= 1024 %}
+                                                        {{ "%.2f"|format(diskfree3_mb / 1024) }} GB
+                                                    {% else %}
+                                                        {{ "%.0f"|format(diskfree3_mb) }} MB
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                        {% endif %}
+                                        {% if payload_info.data.host_metrics.load1 is defined %}
+                                            <tr>
+                                                <th>Load Average:</th>
+                                                <td>
+                                                    {{ "%.2f"|format(payload_info.data.host_metrics.load1 / 100.0) }}
+                                                    {% if payload_info.data.host_metrics.load5 is defined %}
+                                                        / {{ "%.2f"|format(payload_info.data.host_metrics.load5 / 100.0) }}
+                                                    {% endif %}
+                                                    {% if payload_info.data.host_metrics.load15 is defined %}
+                                                        / {{ "%.2f"|format(payload_info.data.host_metrics.load15 / 100.0) }}
+                                                    {% endif %}
+                                                    <small class="text-muted">(1/5/15 min)</small>
+                                                </td>
+                                            </tr>
+                                        {% endif %}
+                                        {% if payload_info.data.host_metrics.user_string %}
+                                            <tr>
+                                                <th>User Info:</th>
+                                                <td>{{ payload_info.data.host_metrics.user_string }}</td>
+                                            </tr>
+                                        {% endif %}
+                                    </table>
+                                {% endif %}
                             {% elif payload_info.portnum == 'NEIGHBORINFO_APP' %}
                                 <h6><i class="bi bi-diagram-3"></i> Neighbor Information Report</h6>
                                 <div class="row mb-3">
