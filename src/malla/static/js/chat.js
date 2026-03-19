@@ -15,9 +15,15 @@
     var lastId    = 0;
     var pollTimer = null;
 
-    var nodeCache = {};
-    var messagesByMesh = new Map();
+    var nodeCache = {};          // string node_id -> {name, short}
+    var messagesByMesh = new Map(); // mesh_packet_id -> msg state
     var seenPacketIds = new Set();
+
+    // mesh_packet_id -> msg state (for reply lookups)
+    // Same objects as messagesByMesh but keyed by the Meshtastic mesh_packet_id
+    // (the protocol-level ID, not the DB row id).  messagesByMesh uses
+    // `p.m || p.i` which falls back to DB id when mesh_packet_id is null.
+    var messagesByProtoId = new Map();
 
     // ----- helpers -----
 
@@ -91,9 +97,30 @@
         });
     }
 
+    // Server provides relay candidates keyed by byte suffix (decimal string).
+    // relayCache: { "12": [{id, name, short}, ...], ... }
+    var relayCache = {};
+
+    function mergeRelays(relaysDict) {
+        for (var key in relaysDict) {
+            relayCache[key] = relaysDict[key];
+        }
+    }
+
+    function relaySuffix(rlVal) {
+        if (!rlVal) return '';
+        return (rlVal & 0xFF).toString(16).padStart(2, '0');
+    }
+
+    function relayCandidates(rlVal) {
+        if (!rlVal) return [];
+        var byteVal = String(rlVal & 0xFF);
+        return relayCache[byteVal] || [];
+    }
+
     // ----- rx popover -----
 
-    var activePopover = null;  // { el, badge, meshId, pinned }
+    var activePopover = null;
 
     function closePopover() {
         if (!activePopover) return;
@@ -109,23 +136,39 @@
             var gwName = esc(gwDisplayName(rx.gw));
             var gwNid = gwNodeId(rx.gw);
             var gwCell = gwNid
-                ? '<a href="/node/' + gwNid + '" class="rx-pop-link">' + gwName + '</a>'
+                ? '<a href="/node/' + gwNid + '" class="rx-pop-link node-link" ' +
+                  'data-node-id="' + gwNid + '" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" ' +
+                  'data-bs-title="Loading...">' + gwName + '</a>'
                 : gwName;
 
             var relayCell = '';
             if (rx.rl) {
-                var rHex = (rx.rl >>> 0).toString(16);
-                relayCell = esc(rHex.slice(-2));
+                var sfx = relaySuffix(rx.rl);
+                var candidates = relayCandidates(rx.rl);
+                if (candidates.length === 1) {
+                    var c = candidates[0];
+                    var cName = esc(c.short || c.name);
+                    relayCell = '<span class="rx-relay-match" title="' + esc(c.name) + ' (0x' + sfx + ')">' + cName + '</span>';
+                } else if (candidates.length > 1) {
+                    var cNames = candidates.slice(0, 5).map(function (c) {
+                        return esc(c.short || c.name);
+                    });
+                    var titleText = candidates.length + ' candidates: ' + cNames.join(', ');
+                    if (candidates.length > 5) titleText += ', …';
+                    relayCell = '<span class="rx-relay-ambig" title="' + esc(titleText) + '">' + sfx + ' <small>(' + candidates.length + ')</small></span>';
+                } else {
+                    relayCell = sfx;
+                }
             }
 
             rows +=
                 '<tr>' +
-                    '<td><a href="/packet/' + rx.id + '" class="rx-pop-link">#' + rx.id + '</a></td>' +
-                    '<td>' + gwCell + '</td>' +
-                    '<td>' + (rx.hops != null ? rx.hops : '?') + '</td>' +
-                    '<td>' + (rx.rs != null ? rx.rs : '') + '</td>' +
-                    '<td>' + (rx.sn != null ? (typeof rx.sn === 'number' ? rx.sn.toFixed(1) : rx.sn) : '') + '</td>' +
-                    '<td>' + relayCell + '</td>' +
+                    '<td class="rx-col-pkt"><a href="/packet/' + rx.id + '" class="rx-pop-link">#' + rx.id + '</a></td>' +
+                    '<td class="rx-col-gw">' + gwCell + '</td>' +
+                    '<td class="rx-col-num">' + (rx.hops != null ? rx.hops : '?') + '</td>' +
+                    '<td class="rx-col-num">' + (rx.rs != null ? rx.rs : '') + '</td>' +
+                    '<td class="rx-col-num">' + (rx.sn != null ? (typeof rx.sn === 'number' ? rx.sn.toFixed(1) : rx.sn) : '') + '</td>' +
+                    '<td class="rx-col-relay">' + relayCell + '</td>' +
                 '</tr>';
         }
 
@@ -135,7 +178,12 @@
             '</div>' +
             '<table class="rx-pop-table">' +
                 '<thead><tr>' +
-                    '<th>Pkt</th><th>Gateway</th><th>Hops</th><th>RSSI</th><th>SNR</th><th>Relay</th>' +
+                    '<th class="rx-col-pkt">Pkt</th>' +
+                    '<th class="rx-col-gw">Gateway</th>' +
+                    '<th class="rx-col-num">Hops</th>' +
+                    '<th class="rx-col-num">RSSI</th>' +
+                    '<th class="rx-col-num">SNR</th>' +
+                    '<th class="rx-col-relay">Relay</th>' +
                 '</tr></thead>' +
                 '<tbody>' + rows + '</tbody>' +
             '</table>'
@@ -161,6 +209,26 @@
         popEl.style.left = left + 'px';
         popEl.style.top = top + 'px';
         popEl.style.visibility = 'visible';
+    }
+
+    function initPopoverTooltips(popEl) {
+        popEl.querySelectorAll('.node-link[data-node-id]').forEach(function (link) {
+            if (bootstrap.Tooltip.getInstance(link)) return;
+            var tip = new bootstrap.Tooltip(link, {
+                html: true, trigger: 'hover',
+                delay: { show: 200, hide: 100 }, placement: 'top'
+            });
+            link.addEventListener('mouseenter', function () {
+                var nodeId = link.getAttribute('data-node-id');
+                if (nodeId && typeof fetchNodeInfo === 'function') {
+                    fetchNodeInfo(nodeId).then(function (info) {
+                        if (typeof updateTooltipContent === 'function') {
+                            updateTooltipContent(link, info);
+                        }
+                    }).catch(function () {});
+                }
+            });
+        });
     }
 
     function showPopover(badge, meshId, pinned) {
@@ -190,6 +258,7 @@
 
         activePopover = { el: pop, badge: badge, meshId: meshId, pinned: pinned };
         positionPopover(pop, badge);
+        initPopoverTooltips(pop);
     }
 
     function refreshPopover(meshId) {
@@ -197,6 +266,7 @@
         var msg = messagesByMesh.get(meshId);
         if (!msg) return;
         activePopover.el.innerHTML = buildPopoverContent(msg);
+        initPopoverTooltips(activePopover.el);
     }
 
     document.addEventListener('mousedown', function (e) {
@@ -206,16 +276,45 @@
         closePopover();
     });
 
+    // ----- reply / emoji helpers -----
+
+    function buildReplySnippet(msg) {
+        if (!msg.replyId) return '';
+        var refMsg = messagesByProtoId.get(msg.replyId);
+        var label;
+        if (refMsg) {
+            var sender = esc(nodeShort(refMsg.fromId) || nodeName(refMsg.fromId));
+            var snippet = refMsg.text.length > 60 ? refMsg.text.substring(0, 57) + '…' : refMsg.text;
+            label = sender + ': ' + esc(snippet);
+        } else {
+            label = 'msg #' + msg.replyId;
+        }
+        var href = refMsg ? '#msg-' + (refMsg.meshId || refMsg.firstId) : '#';
+        return '<span class="chat-reply">' +
+            '<i class="bi bi-reply"></i> ' +
+            '<a href="' + href + '" class="chat-reply-link" data-reply-mesh="' + msg.replyId + '">' +
+                label +
+            '</a>' +
+        '</span>';
+    }
+
     // ----- rendering -----
 
     function buildLine(msg) {
         var line = document.createElement('div');
         line.className = 'chat-line';
+        line.id = 'msg-' + (msg.meshId || msg.firstId);
         line.dataset.meshId = msg.meshId || msg.firstId;
 
         var isDm = msg.toId && msg.toId !== BROADCAST;
         var display = esc(nodeShort(msg.fromId) || nodeName(msg.fromId));
         var full = esc(nodeName(msg.fromId));
+
+        var isEmoji = msg.isEmoji;
+        var textClass = 'chat-text' + (isDm ? ' chat-dm' : '') + (isEmoji ? ' chat-emoji-reaction' : '');
+        var textContent = isEmoji ? '  ' + esc(msg.text) : esc(msg.text);
+
+        var replyHtml = buildReplySnippet(msg);
 
         line.innerHTML =
             '<span class="chat-ts timestamp-display" data-timestamp="' + msg.timestamp + '" data-timestamp-format="time">' +
@@ -230,7 +329,10 @@
                 '</a>' +
             '</span>' +
             '<span class="chat-sep">' + (isDm ? '&rarr;' : '|') + '</span>' +
-            '<span class="chat-text' + (isDm ? ' chat-dm' : '') + '">' + esc(msg.text) + '</span>' +
+            '<span class="' + textClass + '">' +
+                replyHtml +
+                textContent +
+            '</span>' +
             '<span class="chat-meta">' +
                 (msg.channel ? '<span class="chat-channel">' + esc(msg.channel) + '</span>' : '') +
                 '<a href="/packet/' + msg.firstId + '" title="Packet #' + msg.firstId + '">' +
@@ -260,7 +362,6 @@
         if (!badge) return;
         var meshId = badge.dataset.meshId;
         if (!meshId) return;
-        // parse meshId back to number if needed
         var key = isNaN(meshId) ? meshId : Number(meshId);
         if (activePopover && activePopover.pinned) return;
         clearTimeout(hoverTimer);
@@ -284,12 +385,6 @@
         }
     });
 
-    document.addEventListener('mouseover', function (e) {
-        if (!activePopover || activePopover.pinned) return;
-        if (activePopover.el.contains(e.target)) return;
-        if (activePopover.badge.contains(e.target)) return;
-    });
-
     document.addEventListener('mouseout', function (e) {
         if (!activePopover || activePopover.pinned) return;
         setTimeout(function () {
@@ -301,6 +396,22 @@
     });
 
     messagesEl.addEventListener('click', function (e) {
+        // Reply link click — scroll to the referenced message
+        var replyLink = e.target.closest('.chat-reply-link');
+        if (replyLink) {
+            e.preventDefault();
+            var rid = replyLink.getAttribute('data-reply-mesh');
+            if (rid) {
+                var refMsg = messagesByProtoId.get(Number(rid));
+                if (refMsg && refMsg.el) {
+                    refMsg.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    refMsg.el.classList.add('chat-line-highlight');
+                    setTimeout(function () { refMsg.el.classList.remove('chat-line-highlight'); }, 1500);
+                }
+            }
+            return;
+        }
+
         var badge = e.target.closest('.chat-rx-badge');
         if (!badge) return;
         e.preventDefault();
@@ -343,11 +454,14 @@
             minHops: hops,
             maxHops: hops,
             rxList: [rxEntry],
+            replyId: p.ri || null,
+            isEmoji: !!p.em,
             el: null,
         };
         var el = buildLine(msg);
         msg.el = el;
         messagesByMesh.set(meshId, msg);
+        if (p.m) messagesByProtoId.set(p.m, msg);
         messagesEl.appendChild(el);
         return true;
     }
@@ -376,6 +490,7 @@
 
             removeLoading();
             Object.assign(nodeCache, data.nodes || {});
+            mergeRelays(data.relays || {});
             data.packets.forEach(ingestPacket);
 
             lastId = data.last_id;
@@ -398,6 +513,7 @@
 
             var wasAtBottom = isScrolledToBottom();
             Object.assign(nodeCache, data.nodes || {});
+            mergeRelays(data.relays || {});
 
             var newLines = 0;
             data.packets.forEach(function (p) {
@@ -444,6 +560,8 @@
         lastId = 0;
         seenPacketIds.clear();
         messagesByMesh.clear();
+        messagesByProtoId.clear();
+        relayCache = {};
 
         messagesEl.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
             var tip = bootstrap.Tooltip.getInstance(el);

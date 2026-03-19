@@ -14,11 +14,12 @@ class TestChatMessagesAPI:
         """The endpoint returns the expected top-level keys."""
         response = client.get("/api/chat/messages")
         data = helpers.assert_api_response_structure(
-            response, ["packets", "nodes", "last_id"]
+            response, ["packets", "nodes", "last_id", "relays"]
         )
         assert isinstance(data["packets"], list)
         assert isinstance(data["nodes"], dict)
         assert isinstance(data["last_id"], int)
+        assert isinstance(data["relays"], dict)
 
     @pytest.mark.integration
     @pytest.mark.api
