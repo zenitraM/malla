@@ -129,6 +129,13 @@
                         </a>
                     </li>
 
+                    <!-- Chat -->
+                    <li class="nav-item">
+                        <a class="nav-link {{ 'active' if request.endpoint == 'chat.chat' }}" href="{{ url_for('chat.chat') }}">
+                            <i class="bi bi-chat-dots"></i> Chat
+                        </a>
+                    </li>
+
                     <!-- Packets -->
                     <li class="nav-item">
                         <a class="nav-link {{ 'active' if 'packet' in request.endpoint }}" href="{{ url_for('packet.packets') }}">

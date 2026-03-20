@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Chat - Malla{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/chat.css') }}">
+{% endblock %}
+
+{% block content %}
+<!-- Override the base template's container to make this page full-width/full-height -->
+</div> <!-- Close the base template's container -->
+
+<div class="chat-container">
+    <!-- Filter bar -->
+    <div class="chat-filters">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-funnel text-secondary"></i>
+                <select id="channelFilter" class="form-select form-select-sm chat-filter-select">
+                    <option value="">All channels</option>
+                </select>
+            </div>
+            <div class="chat-status ms-auto d-flex align-items-center gap-2">
+                <span id="chatStatus" class="badge bg-secondary">Connecting…</span>
+                <button id="scrollBottomBtn" class="btn btn-sm btn-outline-secondary d-none" title="Scroll to latest">
+                    <i class="bi bi-arrow-down"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Message area -->
+    <div id="chatMessages" class="chat-messages">
+        <div id="chatLoading" class="chat-loading">
+            <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
+            <span class="text-muted ms-2">Loading messages…</span>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+{% endblock %}
