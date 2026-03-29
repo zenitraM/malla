@@ -161,10 +161,12 @@ def _build_service_envelope(
     text: str,
     reply_id: int | None = None,
     is_emoji: bool = False,
+    channel_id: str | None = None,
 ) -> bytes:
     envelope = mqtt_pb2.ServiceEnvelope()
     envelope.gateway_id = gateway_id
-    envelope.channel_id = str(int(timestamp))
+    if channel_id is not None:
+        envelope.channel_id = channel_id
 
     packet = envelope.packet
     packet.id = mesh_packet_id

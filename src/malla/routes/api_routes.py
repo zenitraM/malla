@@ -1927,7 +1927,7 @@ def api_chat_messages():
         after_id = request.args.get("after_id", type=int, default=0)
         before_id = request.args.get("before_id", type=int, default=0)
         channel = request.args.get("channel", "").strip()
-        limit = min(request.args.get("limit", type=int, default=300), 500)
+        limit = max(1, min(request.args.get("limit", type=int, default=300), 500))
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -2086,7 +2086,15 @@ def api_chat_messages():
         )
     except Exception as e:
         logger.error(f"Error in chat messages API: {e}")
-        return jsonify({"error": str(e), "packets": [], "nodes": {}, "last_id": 0}), 500
+        return jsonify(
+            {
+                "error": str(e),
+                "packets": [],
+                "nodes": {},
+                "relays": {},
+                "last_id": 0,
+            }
+        ), 500
 
 
 def safe_jsonify(data, *args, **kwargs):
