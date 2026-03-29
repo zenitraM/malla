@@ -8,7 +8,10 @@ from meshtastic import mesh_pb2
 from meshtastic.protobuf import mqtt_pb2
 
 from src.malla.database.repositories import PacketRepository
-from src.malla.routes.packet_routes import decode_packet_payload
+from src.malla.routes.packet_routes import (
+    decode_packet_payload,
+    get_raw_packet_analysis,
+)
 
 
 class TestDecodePacketPayload:
@@ -92,6 +95,75 @@ class TestDecodeServiceEnvelope:
         assert decoded_mesh_packet is not None
         assert packet["reply_id"] == 1358599243
         assert packet["emoji"] == 1
+
+    @patch("src.malla.database.repositories.get_config")
+    def test_raw_packet_analysis_keeps_metadata_and_protobuf_views(
+        self, mock_get_config
+    ):
+        """Raw packet analysis should use the protobuf MeshPacket as the canonical view."""
+        mock_get_config.return_value.get_decryption_keys.return_value = []
+
+        mesh_packet = mesh_pb2.MeshPacket()
+        setattr(mesh_packet, "from", 123)
+        mesh_packet.to = 456
+        mesh_packet.hop_start = 3
+        mesh_packet.hop_limit = 1
+        mesh_packet.rx_rssi = -87
+        mesh_packet.rx_snr = 5.5
+        mesh_packet.via_mqtt = True
+        mesh_packet.want_ack = True
+        mesh_packet.decoded.portnum = 1
+        mesh_packet.decoded.payload = b"hello"
+        mesh_packet.decoded.reply_id = 1358599243
+        mesh_packet.decoded.emoji = 1
+
+        service_envelope = mqtt_pb2.ServiceEnvelope()
+        service_envelope.channel_id = "LongFast"
+        service_envelope.gateway_id = "!12345678"
+        service_envelope.packet.CopyFrom(mesh_packet)
+
+        packet = {
+            "id": 52357537,
+            "channel_id": "LongFast",
+            "gateway_id": "!12345678",
+            "portnum": 999,
+            "portnum_name": "NEIGHBORINFO_APP",
+            "from_node_id": 999,
+            "to_node_id": 888,
+            "hop_start": 9,
+            "hop_limit": 8,
+            "payload_length": 5,
+            "raw_payload": b"hello",
+            "raw_service_envelope": service_envelope.SerializeToString(),
+            "via_mqtt": True,
+            "want_ack": True,
+            "topic": "msh/US/LongFast/e/LongFast",
+            "timestamp": 1700000000,
+        }
+
+        analysis = get_raw_packet_analysis(packet)
+
+        assert analysis is not None
+        assert analysis["mesh_packet"]["from"] == 123
+        assert analysis["mesh_packet"]["to"] == 456
+        assert analysis["mesh_packet"]["decoded"]["portnum"] == "TEXT_MESSAGE_APP"
+        assert analysis["mesh_packet"]["hop_start"] == 3
+        assert analysis["mesh_packet"]["hop_limit"] == 1
+        assert analysis["mesh_packet"]["rx_rssi"] == -87
+        assert analysis["mesh_packet"]["rx_snr"] == 5.5
+        assert analysis["mesh_packet_helpers"]["hops_taken"] == 2
+        assert analysis["mesh_packet_helpers"]["payload_length"] == 5
+        assert (
+            analysis["protobuf_fields"]["mesh_packet"]["decoded"]["reply_id"]
+            == 1358599243
+        )
+        assert analysis["protobuf_fields"]["mesh_packet"]["decoded"]["emoji"] == 1
+        assert (
+            analysis["protobuf_fields"]["mesh_packet"]["decoded"]["parsed_payload"][
+                "text"
+            ]
+            == "hello"
+        )
 
     @patch("src.malla.routes.packet_routes.get_bulk_node_names")
     def test_decode_neighborinfo_app_success(self, mock_get_node_names):

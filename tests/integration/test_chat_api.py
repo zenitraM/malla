@@ -229,6 +229,7 @@ class TestChatPageRoute:
         assert "channelFilter" in html
         assert "chat.js" in html
         assert "chat.css" in html
+        assert html.count("<div") == html.count("</div>")
 
     @pytest.mark.integration
     def test_chat_in_navbar(self, client):
