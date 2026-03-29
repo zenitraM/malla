@@ -11,7 +11,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from meshtastic import mesh_pb2
+from meshtastic.protobuf import mqtt_pb2
 
+from ..config import get_config
+from ..utils.decryption import try_decrypt_mesh_packet
 from ..utils.formatting import format_time_ago
 from ..utils.node_utils import get_bulk_node_short_names
 from .connection import get_db_connection
@@ -110,6 +113,58 @@ class DashboardRepository:
 
 class PacketRepository:
     """Repository for packet operations."""
+
+    @staticmethod
+    def has_raw_service_envelope_column(cursor: Any) -> bool:
+        """Check whether packet_history includes the stored ServiceEnvelope column."""
+        try:
+            cursor.execute("SELECT raw_service_envelope FROM packet_history LIMIT 0")
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def hydrate_packet_envelope(
+        packet: dict[str, Any],
+    ) -> tuple[mqtt_pb2.ServiceEnvelope | None, mesh_pb2.MeshPacket | None]:
+        """Deserialize the stored ServiceEnvelope and populate protobuf-derived metadata."""
+        raw_service_envelope = packet.get("raw_service_envelope")
+        if not raw_service_envelope:
+            return None, None
+
+        try:
+            env = mqtt_pb2.ServiceEnvelope()
+            env.ParseFromString(raw_service_envelope)
+            mesh_packet = env.packet
+
+            decryption_keys = get_config().get_decryption_keys()
+            if decryption_keys and getattr(mesh_packet, "encrypted", b""):
+                for key_base64 in decryption_keys:
+                    if try_decrypt_mesh_packet(mesh_packet, key_base64=key_base64):
+                        break
+
+                    channel_name = packet.get("channel_id") or ""
+                    if channel_name and try_decrypt_mesh_packet(
+                        mesh_packet,
+                        channel_name=channel_name,
+                        key_base64=key_base64,
+                    ):
+                        break
+
+            decoded = mesh_packet.decoded
+            if decoded.reply_id != 0:
+                packet["reply_id"] = decoded.reply_id
+            if decoded.emoji != 0:
+                packet["emoji"] = decoded.emoji
+
+            return env, mesh_packet
+        except Exception as exc:
+            logger.debug(
+                "Unable to deserialize ServiceEnvelope for packet %s: %s",
+                packet.get("id"),
+                exc,
+            )
+            return None, None
 
     @staticmethod
     def _decode_text_content(packet: dict[str, Any]) -> str | None:

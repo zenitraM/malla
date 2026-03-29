@@ -5,7 +5,9 @@ Unit tests for packet route functionality including payload decoding.
 from unittest.mock import patch
 
 from meshtastic import mesh_pb2
+from meshtastic.protobuf import mqtt_pb2
 
+from src.malla.database.repositories import PacketRepository
 from src.malla.routes.packet_routes import decode_packet_payload
 
 
@@ -57,6 +59,39 @@ class TestDecodePacketPayload:
         assert result["decoded"] is True
         assert result["text"] == invalid_utf8.hex()
         assert "Could not decode as UTF-8" in result["error"]
+
+
+class TestDecodeServiceEnvelope:
+    """Test extracting metadata from stored ServiceEnvelope bytes."""
+
+    @patch("src.malla.database.repositories.get_config")
+    def test_populates_reply_and_emoji_from_service_envelope(self, mock_get_config):
+        """Reply and emoji should come from the stored protobuf envelope."""
+        mock_get_config.return_value.get_decryption_keys.return_value = []
+
+        mesh_packet = mesh_pb2.MeshPacket()
+        mesh_packet.decoded.portnum = 1
+        mesh_packet.decoded.payload = "1️⃣".encode()
+        mesh_packet.decoded.reply_id = 1358599243
+        mesh_packet.decoded.emoji = 1
+
+        service_envelope = mqtt_pb2.ServiceEnvelope()
+        service_envelope.channel_id = "LongFast"
+        service_envelope.gateway_id = "!12345678"
+        service_envelope.packet.CopyFrom(mesh_packet)
+
+        packet = {
+            "id": 52357537,
+            "channel_id": "LongFast",
+            "raw_service_envelope": service_envelope.SerializeToString(),
+        }
+
+        env, decoded_mesh_packet = PacketRepository.hydrate_packet_envelope(packet)
+
+        assert env is not None
+        assert decoded_mesh_packet is not None
+        assert packet["reply_id"] == 1358599243
+        assert packet["emoji"] == 1
 
     @patch("src.malla.routes.packet_routes.get_bulk_node_names")
     def test_decode_neighborinfo_app_success(self, mock_get_node_names):

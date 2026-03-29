@@ -1922,8 +1922,6 @@ def api_chat_messages():
         nodes:    dict mapping node_id -> {name, short} for every sender
         last_id:  highest packet_history.id in the DB (polling tail)
     """
-    from meshtastic.protobuf import mqtt_pb2
-
     try:
         after_id = request.args.get("after_id", type=int, default=0)
         channel = request.args.get("channel", "").strip()
@@ -1953,12 +1951,7 @@ def api_chat_messages():
 
         params.append(limit)
 
-        has_envelope_col = False
-        try:
-            cursor.execute("SELECT raw_service_envelope FROM packet_history LIMIT 0")
-            has_envelope_col = True
-        except Exception:
-            pass
+        has_envelope_col = PacketRepository.has_raw_service_envelope_column(cursor)
 
         env_col = ", raw_service_envelope" if has_envelope_col else ""
         cursor.execute(
@@ -1967,7 +1960,7 @@ def api_chat_messages():
                    mesh_packet_id, hop_limit, hop_start, raw_payload,
                    gateway_id, rssi, snr, relay_node{env_col}
             FROM packet_history
-            WHERE {' AND '.join(where)}
+            WHERE {" AND ".join(where)}
             ORDER BY id DESC
             LIMIT ?
             """,
@@ -2020,16 +2013,16 @@ def api_chat_messages():
 
             raw_env = r["raw_service_envelope"] if has_envelope_col else None
             if raw_env:
-                try:
-                    env = mqtt_pb2.ServiceEnvelope()
-                    env.ParseFromString(raw_env)
-                    d = env.packet.decoded
-                    if d.reply_id != 0:
-                        pkt["ri"] = d.reply_id
-                    if d.emoji != 0:
-                        pkt["em"] = 1
-                except Exception:
-                    pass
+                packet_record = {
+                    "id": r["id"],
+                    "channel_id": r["channel_id"],
+                    "raw_service_envelope": raw_env,
+                }
+                PacketRepository.hydrate_packet_envelope(packet_record)
+                if packet_record.get("reply_id"):
+                    pkt["ri"] = packet_record["reply_id"]
+                if packet_record.get("emoji"):
+                    pkt["em"] = 1
 
             packets.append(pkt)
 
@@ -2069,17 +2062,23 @@ def api_chat_messages():
                 byte_val = str(row["node_id"] & 0xFF)
                 if byte_val not in relays:
                     relays[byte_val] = []
-                relays[byte_val].append({
-                    "id": row["node_id"],
-                    "name": row["long_name"] or f"!{row['node_id']:08x}",
-                    "short": row["short_name"] or "",
-                })
+                relays[byte_val].append(
+                    {
+                        "id": row["node_id"],
+                        "name": row["long_name"] or f"!{row['node_id']:08x}",
+                        "short": row["short_name"] or "",
+                    }
+                )
             conn2.close()
 
-        return jsonify({
-            "packets": packets, "nodes": nodes,
-            "relays": relays, "last_id": db_last_id,
-        })
+        return jsonify(
+            {
+                "packets": packets,
+                "nodes": nodes,
+                "relays": relays,
+                "last_id": db_last_id,
+            }
+        )
     except Exception as e:
         logger.error(f"Error in chat messages API: {e}")
         return jsonify({"error": str(e), "packets": [], "nodes": {}, "last_id": 0}), 500

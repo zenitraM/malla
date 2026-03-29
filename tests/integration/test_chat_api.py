@@ -121,12 +121,12 @@ class TestChatMessagesAPI:
             pytest.skip("No channel data in test fixtures")
 
         target = next(iter(channels))
-        filtered = client.get(f"/api/chat/messages?channel={target}&limit=300").get_json()
+        filtered = client.get(
+            f"/api/chat/messages?channel={target}&limit=300"
+        ).get_json()
 
         for p in filtered["packets"]:
-            assert p["ch"] == target, (
-                f"Expected channel '{target}', got '{p['ch']}'"
-            )
+            assert p["ch"] == target, f"Expected channel '{target}', got '{p['ch']}'"
 
     @pytest.mark.integration
     @pytest.mark.api
@@ -165,6 +165,7 @@ class TestChatMessagesAPI:
         if not mesh_ids:
             pytest.skip("No mesh_packet_ids in test data")
         from collections import Counter
+
         counts = Counter(mesh_ids)
         duplicates = {mid: cnt for mid, cnt in counts.items() if cnt > 1}
         # At least some packets should appear multiple times (multi-gateway)
