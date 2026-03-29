@@ -35,11 +35,15 @@ import argparse
 import http.client
 import logging
 import socket
+import sqlite3
 import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
+from meshtastic import portnums_pb2
+from meshtastic.protobuf import mqtt_pb2
 from playwright.sync_api import sync_playwright
 
 # ---------------------------------------------------------------------------
@@ -67,11 +71,13 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-# The list of (route, output filename) to capture – order matters for README
+# The list of (route, output filename) to capture – order matters for README.
+# JPEG is used for smaller, README-friendly assets.
 PAGES: list[tuple[str, str]] = [
     ("/", "dashboard.jpg"),
     ("/nodes", "nodes.jpg"),
     ("/packets", "packets.jpg"),
+    ("/chat", "chat.jpg"),
     ("/traceroute", "traceroutes.jpg"),
     ("/map", "map.jpg"),
     ("/traceroute-graph", "traceroute_graph.jpg"),
@@ -127,6 +133,235 @@ def _build_demo_database(db_path: Path) -> None:
     _LOG.info("Creating demo database → %s", db_path)
     fixtures = DatabaseFixtures()
     fixtures.create_test_database(str(db_path))
+    _seed_demo_chat_examples(db_path)
+
+
+def _ensure_packet_history_column(
+    cursor: sqlite3.Cursor, column_name: str, column_type: str
+) -> None:
+    existing_columns = {
+        row[1] for row in cursor.execute("PRAGMA table_info(packet_history)")
+    }
+    if column_name not in existing_columns:
+        cursor.execute(
+            f"ALTER TABLE packet_history ADD COLUMN {column_name} {column_type}"
+        )
+
+
+def _build_service_envelope(
+    *,
+    mesh_packet_id: int,
+    timestamp: float,
+    from_node_id: int,
+    to_node_id: int,
+    channel_index: int,
+    hop_limit: int,
+    hop_start: int,
+    gateway_id: str,
+    text: str,
+    reply_id: int | None = None,
+    is_emoji: bool = False,
+) -> bytes:
+    envelope = mqtt_pb2.ServiceEnvelope()
+    envelope.gateway_id = gateway_id
+    envelope.channel_id = str(int(timestamp))
+
+    packet = envelope.packet
+    packet.id = mesh_packet_id
+    setattr(packet, "from", from_node_id)
+    packet.to = to_node_id
+    packet.channel = channel_index
+    packet.hop_limit = hop_limit
+    packet.hop_start = hop_start
+    packet.rx_time = int(timestamp)
+    packet.decoded.portnum = portnums_pb2.PortNum.TEXT_MESSAGE_APP
+    packet.decoded.payload = text.encode("utf-8")
+
+    if reply_id is not None:
+        packet.decoded.reply_id = reply_id
+    if is_emoji:
+        packet.decoded.emoji = 1
+
+    return envelope.SerializeToString()
+
+
+def _seed_demo_chat_examples(db_path: Path) -> None:
+    _LOG.info("Seeding demo chat thread examples")
+
+    now = time.time()
+    base_timestamp = now - 90
+    gateway_id = "!433d0c24"
+    channel_id = "LongFast"
+    channel_index = 0
+    broadcast_id = 0xFFFFFFFF
+    thread_root_mesh_id = 910000101
+
+    thread_packets = [
+        {
+            "timestamp": base_timestamp,
+            "from_node_id": 1128074277,
+            "to_node_id": broadcast_id,
+            "gateway_id": gateway_id,
+            "channel_id": channel_id,
+            "channel_index": channel_index,
+            "rssi": -67,
+            "snr": 8.5,
+            "hop_limit": 3,
+            "hop_start": 4,
+            "mesh_packet_id": thread_root_mesh_id,
+            "text": "Battery swap finished at Cerro Azul. Link margin is stable again and the hill relay is back on the primary channel.",
+            "reply_id": None,
+            "is_emoji": False,
+        },
+        {
+            "timestamp": base_timestamp + 8,
+            "from_node_id": 1128074278,
+            "to_node_id": 1128074277,
+            "gateway_id": gateway_id,
+            "channel_id": channel_id,
+            "channel_index": channel_index,
+            "rssi": -71,
+            "snr": 6.8,
+            "hop_limit": 3,
+            "hop_start": 5,
+            "mesh_packet_id": 910000102,
+            "text": "Confirmed from the repeater. Traceroutes are back to two hops and telemetry is flowing normally.",
+            "reply_id": thread_root_mesh_id,
+            "is_emoji": False,
+        },
+        {
+            "timestamp": base_timestamp + 14,
+            "from_node_id": 2883444196,
+            "to_node_id": 1128074277,
+            "gateway_id": gateway_id,
+            "channel_id": channel_id,
+            "channel_index": channel_index,
+            "rssi": -74,
+            "snr": 5.9,
+            "hop_limit": 4,
+            "hop_start": 6,
+            "mesh_packet_id": 910000103,
+            "text": "Map looks clean now. I can add a note in the ops channel if we want to close the incident.",
+            "reply_id": thread_root_mesh_id,
+            "is_emoji": False,
+        },
+        {
+            "timestamp": base_timestamp + 19,
+            "from_node_id": 1128074276,
+            "to_node_id": 1128074277,
+            "gateway_id": gateway_id,
+            "channel_id": channel_id,
+            "channel_index": channel_index,
+            "rssi": -65,
+            "snr": 9.3,
+            "hop_limit": 3,
+            "hop_start": 4,
+            "mesh_packet_id": 910000104,
+            "text": "👍",
+            "reply_id": thread_root_mesh_id,
+            "is_emoji": True,
+        },
+        {
+            "timestamp": base_timestamp + 22,
+            "from_node_id": 3735928559,
+            "to_node_id": 1128074277,
+            "gateway_id": gateway_id,
+            "channel_id": channel_id,
+            "channel_index": channel_index,
+            "rssi": -78,
+            "snr": 4.7,
+            "hop_limit": 4,
+            "hop_start": 6,
+            "mesh_packet_id": 910000105,
+            "text": "🔥",
+            "reply_id": thread_root_mesh_id,
+            "is_emoji": True,
+        },
+        {
+            "timestamp": base_timestamp + 30,
+            "from_node_id": 1128074277,
+            "to_node_id": broadcast_id,
+            "gateway_id": gateway_id,
+            "channel_id": channel_id,
+            "channel_index": channel_index,
+            "rssi": -66,
+            "snr": 8.0,
+            "hop_limit": 3,
+            "hop_start": 4,
+            "mesh_packet_id": 910000106,
+            "text": "Closing this out after the next capture window. Keep an eye on the west ridge gateway for another ten minutes.",
+            "reply_id": None,
+            "is_emoji": False,
+        },
+    ]
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        _ensure_packet_history_column(cursor, "raw_service_envelope", "BLOB")
+
+        next_packet_id = cursor.execute(
+            "SELECT COALESCE(MAX(id), 0) + 1 FROM packet_history"
+        ).fetchone()[0]
+
+        for offset, packet in enumerate(thread_packets):
+            raw_payload = packet["text"].encode("utf-8")
+            raw_service_envelope = _build_service_envelope(
+                mesh_packet_id=packet["mesh_packet_id"],
+                timestamp=packet["timestamp"],
+                from_node_id=packet["from_node_id"],
+                to_node_id=packet["to_node_id"],
+                channel_index=packet["channel_index"],
+                hop_limit=packet["hop_limit"],
+                hop_start=packet["hop_start"],
+                gateway_id=packet["gateway_id"],
+                text=packet["text"],
+                reply_id=packet["reply_id"],
+                is_emoji=packet["is_emoji"],
+            )
+
+            cursor.execute(
+                """
+                INSERT INTO packet_history (
+                    id, timestamp, topic, from_node_id, to_node_id, portnum, portnum_name,
+                    gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
+                    payload_length, raw_payload, mesh_packet_id, processed_successfully,
+                    via_mqtt, want_ack, priority, delayed, channel_index, rx_time,
+                    pki_encrypted, next_hop, relay_node, tx_after, raw_service_envelope
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    next_packet_id + offset,
+                    packet["timestamp"],
+                    f"msh/US/{packet['gateway_id']}/e/{packet['channel_id']}/{packet['gateway_id']}",
+                    packet["from_node_id"],
+                    packet["to_node_id"],
+                    int(portnums_pb2.PortNum.TEXT_MESSAGE_APP),
+                    "TEXT_MESSAGE_APP",
+                    packet["gateway_id"],
+                    packet["channel_id"],
+                    packet["rssi"],
+                    packet["snr"],
+                    packet["hop_limit"],
+                    packet["hop_start"],
+                    len(raw_payload),
+                    raw_payload,
+                    packet["mesh_packet_id"],
+                    True,
+                    True,
+                    False,
+                    0,
+                    0,
+                    packet["channel_index"],
+                    int(packet["timestamp"]),
+                    False,
+                    None,
+                    None,
+                    None,
+                    raw_service_envelope,
+                ),
+            )
+
+        conn.commit()
 
 
 def _launch_app_thread(cfg: AppConfig):
@@ -178,6 +413,11 @@ def _capture_screenshots(base_url: str, out_dir: Path) -> list[Path]:
         for route, filename in PAGES:
             url = f"{base_url}{route}"
             _LOG.info("Capturing %s → %s", url, filename)
+            screenshot_kwargs: dict[str, Any] = {
+                "full_page": True,
+                "type": "jpeg",
+                "quality": 90,
+            }
 
             try:
                 page.goto(url, wait_until="networkidle", timeout=30_000)
@@ -192,196 +432,58 @@ def _capture_screenshots(base_url: str, out_dir: Path) -> list[Path]:
                     _LOG.error(f"Failed to load {url} even with 'load' strategy: {e2}")
                     continue  # Skip this page
 
-            # Disable Chart.js animations globally for consistent screenshots
-            page.evaluate("""() => {
-                if (typeof Chart !== 'undefined') {
-                    Chart.defaults.animation = false;
-                    Chart.defaults.animations = false;
-                    Chart.defaults.responsive = true;
-                    Chart.defaults.maintainAspectRatio = false;
-
-                    // Also disable animations for existing charts
-                    Object.values(Chart.instances || {}).forEach(chart => {
-                        if (chart.options) {
-                            chart.options.animation = false;
-                            chart.options.animations = false;
-                            chart.options.responsive = true;
-                            chart.options.maintainAspectRatio = false;
-                            chart.update('none'); // Update without animation
-                        }
-                    });
-                }
-            }""")
-
             # Special handling for different page types
             try:
                 if route == "/":
                     # Dashboard - wait for stats cards and analytics to load
                     try:
-                        _LOG.info("Dashboard: Waiting for stats cards...")
-                        page.wait_for_selector(".stats-card", timeout=10000)
-                        _LOG.info("Dashboard: Stats cards loaded")
-
-                        # Wait for analytics data to be available in the page
-                        _LOG.info("Dashboard: Waiting for analytics data to load...")
-                        try:
-                            page.wait_for_function(
-                                "() => window.analyticsData !== null && window.analyticsData !== undefined",
-                                timeout=15000,
-                            )
-                            _LOG.info("Dashboard: Analytics data loaded in window")
-                        except Exception as data_e:
-                            _LOG.warning(
-                                f"Dashboard: Analytics data not loaded: {data_e}"
-                            )
-
-                        # Disable animations again after data loads
-                        page.evaluate("""() => {
-                            if (typeof Chart !== 'undefined') {
-                                Chart.defaults.animation = false;
-                                Chart.defaults.animations = false;
-                                Chart.defaults.responsive = true;
-                                Chart.defaults.maintainAspectRatio = false;
-
-                                // Update all existing charts to disable animations
-                                Object.values(Chart.instances || {}).forEach(chart => {
-                                    if (chart.options) {
-                                        chart.options.animation = false;
-                                        chart.options.animations = false;
-                                        chart.options.responsive = true;
-                                        chart.options.maintainAspectRatio = false;
-                                        chart.update('none');
-                                    }
-                                });
-                            }
-                        }""")
-
-                        # Check Chart.js status
-                        _LOG.info("Dashboard: Checking Chart.js status...")
-                        chart_status = page.evaluate("""() => {
-                            if (typeof Chart === 'undefined') return 'Chart.js not loaded';
-                            const charts = Object.values(Chart.instances || {});
-                            return {
-                                chartCount: charts.length,
-                                chartStates: charts.map(chart => ({
-                                    id: chart.canvas?.id || 'unknown',
-                                    width: chart.canvas?.width || 0,
-                                    height: chart.canvas?.height || 0,
-                                    ready: chart.isReady !== false,
-                                    animationDisabled: chart.options?.animation === false
-                                }))
-                            };
-                        }""")
-                        _LOG.info(f"Dashboard: Chart.js status: {chart_status}")
-
-                        # Check for loading spinners
-                        _LOG.info("Dashboard: Checking for loading spinners...")
-                        spinners = page.evaluate("""() => {
-                            const spinners = document.querySelectorAll('[id$="Loading"]');
-                            return Array.from(spinners).map(spinner => ({
-                                id: spinner.id,
-                                visible: spinner.offsetParent !== null,
-                                display: spinner.style.display
-                            }));
-                        }""")
-                        _LOG.info(f"Dashboard: Loading spinners: {spinners}")
-
-                        # Wait for Chart.js charts to finish rendering properly
-                        _LOG.info("Dashboard: Waiting for Chart.js charts to render...")
-                        try:
-                            page.wait_for_function(
-                                """() => {
-                                    if (typeof Chart === 'undefined') return false;
-                                    const charts = Object.values(Chart.instances || {});
-                                    if (charts.length === 0) return false;
-
-                                    // Check that charts are rendered and have proper dimensions
-                                    return charts.every(chart => {
-                                        const canvas = chart.canvas;
-                                        return canvas &&
-                                               canvas.width > 0 &&
-                                               canvas.height > 0 &&
-                                               chart.isReady !== false;
-                                    });
-                                }""",
-                                timeout=20000,
-                            )
-                            _LOG.info("Dashboard: Charts are ready")
-                        except Exception as chart_e:
-                            _LOG.warning(f"Dashboard: Charts not ready: {chart_e}")
-
-                        # Wait for loading spinners to disappear
-                        _LOG.info(
-                            "Dashboard: Waiting for loading spinners to disappear..."
+                        _LOG.info("Dashboard: Waiting for metric cards...")
+                        page.wait_for_selector(
+                            ".card-metric .metric-value", timeout=10000
                         )
-                        try:
-                            page.wait_for_function(
-                                """() => {
-                                    const spinners = document.querySelectorAll('[id$="Loading"]');
-                                    return Array.from(spinners).every(spinner =>
-                                        spinner.style.display === 'none' ||
-                                        !spinner.offsetParent
-                                    );
-                                }""",
-                                timeout=10000,
-                            )
-                            _LOG.info("Dashboard: Loading spinners disappeared")
-                        except Exception as spinner_e:
-                            _LOG.warning(
-                                f"Dashboard: Loading spinners still visible: {spinner_e}"
-                            )
+                        _LOG.info("Dashboard: Metric cards loaded")
 
-                        # Force charts to resize to their containers properly
-                        page.evaluate("""() => {
-                            if (typeof Chart !== 'undefined') {
-                                Object.values(Chart.instances || {}).forEach(chart => {
-                                    if (chart.canvas && chart.canvas.parentElement) {
-                                        const container = chart.canvas.parentElement;
-                                        const containerWidth = container.offsetWidth;
-                                        const containerHeight = container.offsetHeight;
-
-                                        if (containerWidth > 0 && containerHeight > 0) {
-                                            chart.resize(containerWidth, containerHeight);
-                                            chart.update('none');
-                                        }
-                                    }
-                                });
-                            }
-                        }""")
-
-                        # Final chart status check
-                        final_chart_status = page.evaluate("""() => {
-                            if (typeof Chart === 'undefined') return 'Chart.js not loaded';
-                            const charts = Object.values(Chart.instances || {});
-                            const canvases = document.querySelectorAll('canvas');
-                            return {
-                                chartCount: charts.length,
-                                canvasCount: canvases.length,
-                                chartDetails: charts.map(chart => ({
-                                    id: chart.canvas?.id || 'unknown',
-                                    width: chart.canvas?.width || 0,
-                                    height: chart.canvas?.height || 0,
-                                    ready: chart.isReady !== false,
-                                    visible: chart.canvas?.offsetParent !== null,
-                                    animationDisabled: chart.options?.animation === false,
-                                    containerWidth: chart.canvas?.parentElement?.offsetWidth || 0,
-                                    containerHeight: chart.canvas?.parentElement?.offsetHeight || 0
-                                })),
-                                canvasDetails: Array.from(canvases).map(canvas => ({
-                                    id: canvas.id,
-                                    width: canvas.width,
-                                    height: canvas.height,
-                                    visible: canvas.offsetParent !== null,
-                                    containerWidth: canvas.parentElement?.offsetWidth || 0,
-                                    containerHeight: canvas.parentElement?.offsetHeight || 0
-                                }))
-                            };
-                        }""")
-                        _LOG.info(
-                            f"Dashboard: Final chart status: {final_chart_status}"
+                        page.wait_for_function(
+                            "() => window.analyticsData !== undefined",
+                            timeout=15000,
                         )
+                        _LOG.info("Dashboard: analyticsData is available")
 
-                        _LOG.info("Dashboard: Final wait completed")
+                        page.wait_for_function(
+                            """() => {
+                                const chartKeys = [
+                                    'timeSeriesChart',
+                                    'nodeActivityChart',
+                                    'gatewayActivityChart',
+                                    'signalDistributionChart',
+                                    'hopDistributionChart',
+                                    'packetTypesChart',
+                                ];
+                                const chartInstances = window.chartInstances || {};
+                                const spinnersHidden = Array.from(document.querySelectorAll('[id$="Loading"]')).every(spinner => spinner.style.display === 'none');
+                                const chartsReady = chartKeys.every(key => {
+                                    const chart = chartInstances[key];
+                                    const canvas = document.getElementById(key);
+                                    if (!chart || !canvas) return false;
+                                    const datasets = chart.data?.datasets || [];
+                                    const hasData = datasets.some(dataset => Array.isArray(dataset.data) && dataset.data.length > 0);
+                                    return hasData && canvas.style.display !== 'none' && canvas.offsetParent !== null && canvas.width > 0 && canvas.height > 0;
+                                });
+                                const topNodesTable = document.getElementById('topNodesTableContainer');
+                                const topNodesRows = topNodesTable ? topNodesTable.querySelectorAll('tbody tr').length : 0;
+                                return spinnersHidden && chartsReady &&
+                                       topNodesTable &&
+                                       topNodesTable.style.display !== 'none' &&
+                                       topNodesTable.offsetParent !== null &&
+                                       topNodesRows > 0;
+                            }""",
+                            timeout=20000,
+                        )
+                        _LOG.info("Dashboard: Charts, table, and loading state are ready")
+
+                        # Give Chart.js animations time to finish drawing every panel.
+                        page.wait_for_timeout(6000)
+                        _LOG.info("Dashboard: Final settle wait completed")
 
                         _LOG.info("Dashboard analytics charts loaded")
                     except Exception as e:
@@ -820,6 +922,80 @@ def _capture_screenshots(base_url: str, out_dir: Path) -> list[Path]:
                         _LOG.warning(f"Line-of-sight setup failed: {e}")
                         pass  # Continue with screenshot even if analysis fails
 
+                elif route == "/chat":
+                    try:
+                        page.wait_for_function(
+                            """() => {
+                                const loading = document.getElementById('chatLoading');
+                                const lines = document.querySelectorAll('#chatMessages .chat-line');
+                                return (!loading || loading.style.display === 'none' || !loading.isConnected) && lines.length > 0;
+                            }""",
+                            timeout=15000,
+                        )
+
+                        page.wait_for_timeout(2000)
+
+                        chat_state = page.evaluate("""() => {
+                            const filters = document.querySelector('.chat-filters');
+                            const container = document.querySelector('.chat-container');
+                            const messages = document.getElementById('chatMessages');
+                            const lines = Array.from(document.querySelectorAll('#chatMessages .chat-line'));
+                            const scored = lines
+                                .map((line, index) => {
+                                    const children = line.querySelectorAll('.chat-child').length;
+                                    const replies = line.querySelectorAll('.chat-child-reply').length;
+                                    const reactions = line.querySelectorAll('.chat-child-reaction').length;
+                                    const textLength = (line.querySelector('.chat-text')?.textContent || '').trim().length;
+                                    const score = (children * 10) + (replies * 6) + (reactions * 8) + Math.min(textLength, 120) + index;
+                                    return { line, children, replies, reactions, score };
+                                })
+                                .sort((a, b) => b.score - a.score);
+                            const richest = scored[0] || null;
+                            const target = richest?.line || lines[Math.max(0, lines.length - 8)] || null;
+
+                            if (messages && target) {
+                                const targetOffset = target.offsetTop - 96;
+                                messages.scrollTop = Math.max(0, targetOffset);
+                                target.scrollIntoView({ block: 'center', inline: 'nearest' });
+                            }
+
+                            let clip = null;
+                            if (container && target) {
+                                const containerRect = container.getBoundingClientRect();
+                                const targetRect = target.getBoundingClientRect();
+                                const clipTop = 0;
+                                const desiredBottom = Math.min(containerRect.bottom - 8, targetRect.bottom + 140);
+                                const clipHeight = Math.max(520, Math.min(desiredBottom - clipTop, window.innerHeight - clipTop - 8));
+                                clip = {
+                                    x: Math.max(containerRect.left - 6, 0) + window.scrollX,
+                                    y: clipTop + window.scrollY,
+                                    width: Math.min(containerRect.width + 12, window.innerWidth - Math.max(containerRect.left - 6, 0) - 8),
+                                    height: clipHeight,
+                                };
+                            }
+
+                            return {
+                                lineCount: lines.length,
+                                replyCount: document.querySelectorAll('#chatMessages .chat-child-reply').length,
+                                reactionCount: document.querySelectorAll('#chatMessages .chat-child-reaction').length,
+                                highlightedRichThread: !!richest,
+                                selectedChildren: richest?.children || 0,
+                                selectedReplies: richest?.replies || 0,
+                                selectedReactions: richest?.reactions || 0,
+                                clip,
+                            };
+                        }""")
+
+                        _LOG.info("Chat screenshot state: %s", chat_state)
+                        if chat_state.get("clip"):
+                            screenshot_kwargs = {
+                                "full_page": False,
+                                "clip": chat_state["clip"],
+                            }
+                    except Exception as e:
+                        _LOG.warning(f"Chat page setup failed: {e}")
+                        pass
+
                 elif route in ["/traceroute", "/packets", "/nodes"]:
                     # Table pages - wait for content to load
                     try:
@@ -890,12 +1066,7 @@ def _capture_screenshots(base_url: str, out_dir: Path) -> list[Path]:
                 pass  # Continue with screenshot even if special handling fails
 
             dest = out_dir / filename
-            page.screenshot(
-                path=str(dest),
-                full_page=True,  # Capture full page content
-                type="jpeg",
-                quality=90,  # Higher quality for crisp charts
-            )
+            page.screenshot(path=str(dest), **screenshot_kwargs)
             images.append(dest)
 
         browser.close()

@@ -37,6 +37,7 @@ Check out some instances with running data from community MQTT servers:
 ![dashboard](.screenshots/dashboard.jpg)
 ![nodes](.screenshots/nodes.jpg)
 ![packets](.screenshots/packets.jpg)
+![chat](.screenshots/chat.jpg)
 ![traceroutes](.screenshots/traceroutes.jpg)
 ![map](.screenshots/map.jpg)
 ![traceroute_graph](.screenshots/traceroute_graph.jpg)
