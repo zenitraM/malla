@@ -4,6 +4,9 @@ Integration tests for the Chat API endpoint (/api/chat/messages).
 
 import pytest
 
+from malla.database.repositories import NodeRepository
+from malla.routes import api_routes
+
 
 class TestChatMessagesAPI:
     """Tests for /api/chat/messages endpoint — raw packet streaming."""
@@ -14,12 +17,13 @@ class TestChatMessagesAPI:
         """The endpoint returns the expected top-level keys."""
         response = client.get("/api/chat/messages")
         data = helpers.assert_api_response_structure(
-            response, ["packets", "nodes", "last_id", "relays"]
+            response, ["packets", "nodes", "last_id", "relays", "relay_filters"]
         )
         assert isinstance(data["packets"], list)
         assert isinstance(data["nodes"], dict)
         assert isinstance(data["last_id"], int)
         assert isinstance(data["relays"], dict)
+        assert isinstance(data["relay_filters"], dict)
 
     @pytest.mark.integration
     @pytest.mark.api
@@ -196,6 +200,72 @@ class TestChatMessagesAPI:
 
         for gid in gw_node_ids:
             assert gid in data["nodes"], f"Gateway node {gid} missing from nodes dict"
+
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_ambiguous_relay_candidates_are_filtered_and_cached(
+        self, client, monkeypatch
+    ):
+        """Ambiguous relay suffixes should use cached gateway-aware narrowing."""
+        baseline = client.get("/api/chat/messages?limit=300").get_json()
+        target_packet = next(
+            (
+                packet
+                for packet in baseline["packets"]
+                if packet.get("rl")
+                and packet.get("gw")
+                and isinstance(packet["gw"], str)
+                and packet["gw"].startswith("!")
+                and len(baseline["relays"].get(str(packet["rl"] & 0xFF), [])) > 1
+            ),
+            None,
+        )
+        if target_packet is None:
+            pytest.skip("Need an ambiguous relay suffix in fixtures")
+
+        gateway_node_id = int(target_packet["gw"][1:], 16)
+        relay_last_byte = target_packet["rl"] & 0xFF
+        filtered_candidate = {
+            "node_id": 0x01020304,
+            "node_name": "Filtered Relay",
+            "short_name": "FR",
+            "hex_id": "!01020304",
+            "last_byte": f"{relay_last_byte:02x}",
+        }
+        api_routes._chat_relay_candidate_cache.clear()
+        lookup_calls = 0
+
+        def fake_get_relay_node_candidates_for_pairs(
+            relay_pairs: list[tuple[int, int]], cursor=None
+        ):
+            nonlocal lookup_calls
+            lookup_calls += 1
+            assert (gateway_node_id, relay_last_byte) in relay_pairs
+            return {gateway_node_id: {relay_last_byte: [filtered_candidate]}}
+
+        monkeypatch.setattr(
+            NodeRepository,
+            "get_relay_node_candidates_for_pairs",
+            staticmethod(fake_get_relay_node_candidates_for_pairs),
+        )
+
+        first = client.get(
+            f"/api/chat/relay-filters?pair={gateway_node_id}:{relay_last_byte}"
+        ).get_json()
+        filter_key = f"{gateway_node_id}:{relay_last_byte}"
+        assert first["relay_filters"][filter_key] == [
+            {
+                "id": filtered_candidate["node_id"],
+                "name": filtered_candidate["node_name"],
+                "short": filtered_candidate["short_name"],
+            }
+        ]
+
+        second = client.get(
+            f"/api/chat/relay-filters?pair={gateway_node_id}:{relay_last_byte}"
+        ).get_json()
+        assert second["relay_filters"][filter_key] == first["relay_filters"][filter_key]
+        assert lookup_calls == 1
 
     @pytest.mark.integration
     @pytest.mark.api

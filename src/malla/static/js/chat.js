@@ -30,6 +30,10 @@
     var messagesByProtoId = new Map();
     var messagesByPacketId = new Map();
     var relayCache = {};
+    var relayFilterCache = {};
+    var relayFilterPending = {};
+    var relayFilterQueued = {};
+    var relayFilterTimer = null;
     var orderedMsgs = [];  // all messages, including attached replies/reactions
     var topLevelMsgs = [];
     var searchTerm = '';
@@ -118,8 +122,70 @@
     }
 
     function mergeRelays(d) { for (var k in d) relayCache[k] = d[k]; }
+    function mergeRelayFilters(d) { for (var k in d) relayFilterCache[k] = d[k]; }
     function relaySfx(v) { return v ? (v & 0xFF).toString(16).padStart(2, '0') : ''; }
     function relayCands(v) { return v ? (relayCache[String(v & 0xFF)] || []) : []; }
+    function relayFilterKey(rx) {
+        var gid = rx && gwNid(rx.gw);
+        return (gid != null && rx && rx.rl) ? (String(gid) + ':' + (rx.rl & 0xFF)) : null;
+    }
+    function relayCandidatesForRx(rx) {
+        if (!rx || !rx.rl) return [];
+        var key = relayFilterKey(rx);
+        if (key && Object.prototype.hasOwnProperty.call(relayFilterCache, key)) {
+            return relayFilterCache[key];
+        }
+        return relayCands(rx.rl);
+    }
+
+    async function flushRelayFilterQueue() {
+        relayFilterTimer = null;
+        var keys = Object.keys(relayFilterQueued);
+        relayFilterQueued = {};
+        if (!keys.length) return;
+
+        keys.forEach(function (key) { relayFilterPending[key] = true; });
+        try {
+            var params = new URLSearchParams();
+            keys.forEach(function (key) { params.append('pair', key); });
+            var resp = await fetch('/api/chat/relay-filters?' + params.toString());
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            var data = await resp.json();
+            mergeRelayFilters(data.relay_filters || {});
+            if (activePop) refreshPop(activePop.meshId);
+        } catch (err) {
+            console.error('Relay filter fetch error:', err);
+        } finally {
+            keys.forEach(function (key) { delete relayFilterPending[key]; });
+            if (Object.keys(relayFilterQueued).length && !relayFilterTimer) {
+                relayFilterTimer = setTimeout(flushRelayFilterQueue, 0);
+            }
+        }
+    }
+
+    function queueRelayFilters(packets) {
+        var shouldSchedule = false;
+        packets.forEach(function (packet) {
+            if (!packet.rl) return;
+            var gid = gwNid(packet.gw);
+            if (gid == null || relayCands(packet.rl).length <= 1) return;
+            var key = String(gid) + ':' + (packet.rl & 0xFF);
+            if (Object.prototype.hasOwnProperty.call(relayFilterCache, key) || relayFilterPending[key] || relayFilterQueued[key]) return;
+            relayFilterQueued[key] = true;
+            shouldSchedule = true;
+        });
+
+        if (shouldSchedule && !relayFilterTimer) {
+            relayFilterTimer = setTimeout(flushRelayFilterQueue, 0);
+        }
+    }
+
+    function renderRelayCand(c) {
+        var label = esc(c.short || c.name || ('!' + Number(c.id || 0).toString(16).padStart(8, '0')));
+        return c.id
+            ? '<a href="/node/' + c.id + '" class="rx-pop-link node-link" data-node-id="' + c.id + '" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="Loading...">' + label + '</a>'
+            : label;
+    }
 
     function sortRx(list) {
         return list.slice().sort(function (a, b) {
@@ -195,12 +261,20 @@
                 : gn;
             var rc = '';
             if (rx.rl) {
-                var sfx = relaySfx(rx.rl), cands = relayCands(rx.rl);
+                var sfx = relaySfx(rx.rl), key = relayFilterKey(rx), cands = relayCandidatesForRx(rx);
+                var relayLoading = key && !Object.prototype.hasOwnProperty.call(relayFilterCache, key) && (relayFilterPending[key] || relayFilterQueued[key]) && relayCands(rx.rl).length > 1;
                 if (cands.length === 1) {
-                    rc = '<span class="rx-relay-match" title="' + esc(cands[0].name) + ' (0x' + sfx + ')">' + esc(cands[0].short || cands[0].name) + '</span>';
+                    rc = '<span class="rx-relay-match" title="' + esc(cands[0].name) + ' (0x' + sfx + ')">' + renderRelayCand(cands[0]) + '</span>';
+                } else if (relayLoading) {
+                    rc = '<span class="rx-relay-loading" title="Resolving relay candidates for 0x' + esc(sfx) + '">' + sfx + ' <small>loading</small></span>';
                 } else if (cands.length > 1) {
-                    var cn = cands.slice(0, 5).map(function (c) { return esc(c.short || c.name); });
-                    rc = '<span class="rx-relay-ambig" title="' + esc(cands.length + ': ' + cn.join(', ')) + '">' + sfx + ' <small>(' + cands.length + ')</small></span>';
+                    var titleNames = cands.map(function (c) { return c.short || c.name; }).join(', ');
+                    if (cands.length <= 2) {
+                        rc = '<span class="rx-relay-ambig" title="' + esc('0x' + sfx + ': ' + titleNames) + '">' + cands.map(renderRelayCand).join(', ') + '</span>';
+                    } else {
+                        var first = renderRelayCand(cands[0]);
+                        rc = '<span class="rx-relay-ambig" title="' + esc('0x' + sfx + ': ' + titleNames) + '">' + first + ' <small>(+' + (cands.length - 1) + ')</small></span>';
+                    }
                 } else { rc = sfx; }
             }
             rows += '<tr><td class="rx-col-pkt"><a href="/packet/' + rx.id + '" class="rx-pop-link">#' + rx.id + '</a></td>' +
@@ -238,6 +312,7 @@
     function showPop(badge, meshId, pinned) {
         var msg = messagesByMesh.get(meshId);
         if (!msg) return;
+        queueRelayFilters(msg.rxList || []);
         if (activePop && activePop.meshId === meshId) {
             if (pinned && !activePop.pinned) { activePop.pinned = true; activePop.el.classList.add('rx-pop-pinned'); return; }
             if (pinned && activePop.pinned) { closePop(); return; }
@@ -477,6 +552,7 @@
 
                 Object.assign(nodeCache, data.nodes || {});
                 mergeRelays(data.relays || {});
+                mergeRelayFilters(data.relay_filters || {});
                 initialPackets = data.packets.concat(initialPackets);
                 data.packets.forEach(function (p) {
                     if (!p.ri) initialTopLevelMeshIds.add(p.m || p.i);
@@ -512,6 +588,7 @@
             var wasBottom = atBottom();
             Object.assign(nodeCache, data.nodes || {});
             mergeRelays(data.relays || {});
+            mergeRelayFilters(data.relay_filters || {});
             var newCount = 0;
             data.packets.forEach(function (p) { if (ingestPacket(p)) newCount++; });
             lastId = data.last_id;
@@ -555,7 +632,8 @@
         unreadCount = 0; unreadEl.classList.add('d-none');
         seenPacketIds.clear(); messagesByMesh.clear(); messagesByProtoId.clear();
         messagesByPacketId.clear();
-        relayCache = {}; orderedMsgs = []; topLevelMsgs = [];
+        relayCache = {}; relayFilterCache = {}; relayFilterPending = {}; relayFilterQueued = {}; orderedMsgs = []; topLevelMsgs = [];
+        if (relayFilterTimer) { clearTimeout(relayFilterTimer); relayFilterTimer = null; }
         scrollBtn.classList.add('d-none');
         messagesEl.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
             var tip = bootstrap.Tooltip.getInstance(el);

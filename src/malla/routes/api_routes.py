@@ -34,6 +34,69 @@ from ..utils.traceroute_utils import parse_traceroute_payload
 logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
+CHAT_RELAY_CANDIDATE_CACHE_TTL_SECONDS = 600
+CHAT_RELAY_CANDIDATE_CACHE_MAX_ENTRIES = 512
+CHAT_RELAY_CANDIDATE_LOOKUP_LIMIT = 256
+_chat_relay_candidate_cache: dict[
+    tuple[int, int], tuple[float, list[dict[str, Any]]]
+] = {}
+
+
+def _prune_chat_relay_candidate_cache(now: float) -> None:
+    expired_keys = [
+        key
+        for key, (cached_at, _) in _chat_relay_candidate_cache.items()
+        if now - cached_at > CHAT_RELAY_CANDIDATE_CACHE_TTL_SECONDS
+    ]
+    for key in expired_keys:
+        _chat_relay_candidate_cache.pop(key, None)
+
+    overflow = len(_chat_relay_candidate_cache) - CHAT_RELAY_CANDIDATE_CACHE_MAX_ENTRIES
+    if overflow > 0:
+        oldest_keys = sorted(
+            _chat_relay_candidate_cache.items(), key=lambda item: item[1][0]
+        )[:overflow]
+        for key, _ in oldest_keys:
+            _chat_relay_candidate_cache.pop(key, None)
+
+
+def _get_cached_chat_relay_candidates(
+    gateway_node_id: int, relay_last_byte: int, now: float
+) -> list[dict[str, Any]] | None:
+    cache_key = (gateway_node_id, relay_last_byte)
+    cached_entry = _chat_relay_candidate_cache.get(cache_key)
+    if not cached_entry:
+        return None
+
+    cached_at, candidates = cached_entry
+    if now - cached_at > CHAT_RELAY_CANDIDATE_CACHE_TTL_SECONDS:
+        _chat_relay_candidate_cache.pop(cache_key, None)
+        return None
+
+    return candidates
+
+
+def _store_chat_relay_candidates(
+    gateway_node_id: int,
+    relay_last_byte: int,
+    candidates: list[dict[str, Any]],
+    now: float,
+) -> None:
+    _chat_relay_candidate_cache[(gateway_node_id, relay_last_byte)] = (now, candidates)
+
+
+def _serialize_chat_relay_candidates(
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": candidate["node_id"],
+            "name": candidate["node_name"],
+            "short": candidate.get("short_name", "") or "",
+        }
+        for candidate in candidates
+    ]
+
 
 @api_bp.route("/stats")
 def api_stats():
@@ -1991,9 +2054,11 @@ def api_chat_messages():
                 from_ids.add(fid)
 
             gw = r["gateway_id"]
+            gateway_node_id = None
             if gw and isinstance(gw, str) and gw.startswith("!"):
                 try:
-                    gateway_ids.add(int(gw[1:], 16))
+                    gateway_node_id = int(gw[1:], 16)
+                    gateway_ids.add(gateway_node_id)
                 except ValueError:
                     pass
 
@@ -2076,11 +2141,14 @@ def api_chat_messages():
                 )
             conn2.close()
 
+        relay_filters: dict[str, list[dict[str, Any]]] = {}
+
         return jsonify(
             {
                 "packets": packets,
                 "nodes": nodes,
                 "relays": relays,
+                "relay_filters": relay_filters,
                 "last_id": db_last_id,
             }
         )
@@ -2092,9 +2160,75 @@ def api_chat_messages():
                 "packets": [],
                 "nodes": {},
                 "relays": {},
+                "relay_filters": {},
                 "last_id": 0,
             }
         ), 500
+
+
+@api_bp.route("/chat/relay-filters")
+def api_chat_relay_filters():
+    """Resolve narrow relay candidates for exact gateway/last-byte chat pairs."""
+    try:
+        parsed_pairs: list[tuple[int, int]] = []
+        for raw_pair in request.args.getlist("pair")[:CHAT_RELAY_CANDIDATE_LOOKUP_LIMIT]:
+            gateway_part, separator, relay_part = raw_pair.partition(":")
+            if not separator:
+                continue
+
+            try:
+                gateway_node_id = int(gateway_part)
+                relay_last_byte = int(relay_part)
+            except ValueError:
+                continue
+
+            if relay_last_byte < 0 or relay_last_byte > 255:
+                continue
+
+            parsed_pairs.append((gateway_node_id, relay_last_byte))
+
+        unique_pairs = sorted(set(parsed_pairs))
+        relay_filters: dict[str, list[dict[str, Any]]] = {}
+        if not unique_pairs:
+            return jsonify({"relay_filters": relay_filters})
+
+        now = time.time()
+        _prune_chat_relay_candidate_cache(now)
+        missing_pairs: list[tuple[int, int]] = []
+        for gateway_node_id, relay_last_byte in unique_pairs:
+            cache_key = f"{gateway_node_id}:{relay_last_byte}"
+            cached_candidates = _get_cached_chat_relay_candidates(
+                gateway_node_id, relay_last_byte, now
+            )
+            if cached_candidates is not None:
+                relay_filters[cache_key] = cached_candidates
+            else:
+                missing_pairs.append((gateway_node_id, relay_last_byte))
+
+        if missing_pairs:
+            looked_up_candidates = NodeRepository.get_relay_node_candidates_for_pairs(
+                missing_pairs
+            )
+            for gateway_node_id, relay_last_byte in missing_pairs:
+                serialized_candidates = _serialize_chat_relay_candidates(
+                    looked_up_candidates.get(gateway_node_id, {}).get(
+                        relay_last_byte, []
+                    )
+                )
+                _store_chat_relay_candidates(
+                    gateway_node_id,
+                    relay_last_byte,
+                    serialized_candidates,
+                    now,
+                )
+                relay_filters[f"{gateway_node_id}:{relay_last_byte}"] = (
+                    serialized_candidates
+                )
+
+        return jsonify({"relay_filters": relay_filters})
+    except Exception as e:
+        logger.error(f"Error in chat relay filters API: {e}")
+        return jsonify({"error": str(e), "relay_filters": {}}), 500
 
 
 def safe_jsonify(data, *args, **kwargs):
