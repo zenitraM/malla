@@ -14,9 +14,9 @@ chat_bp = Blueprint("chat", __name__)
 @chat_bp.route("/chat")
 def chat():
     """Chat view showing text messages in an IRC-like layout."""
-    logger.info("Chat route accessed")
+    logger.debug("Chat route accessed")
     try:
         return render_template("chat.html")
-    except Exception as e:
-        logger.error(f"Error in chat route: {e}")
-        return f"Chat error: {e}", 500
+    except Exception:
+        logger.exception("Error in chat route")
+        return "Internal server error", 500
