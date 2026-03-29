@@ -180,9 +180,9 @@
         }
     }
 
-    function renderNodeLink(nodeId, label) {
+    function renderNodeLink(nodeId, label, packetId) {
         return nodeId
-            ? '<span class="' + nickColor(nodeId) + '"><a href="/node/' + nodeId + '" class="rx-pop-link rx-pop-node">' + label + '</a></span>'
+            ? '<span class="' + nickColor(nodeId) + '"><a href="/node/' + nodeId + '" class="rx-pop-link rx-pop-node node-link" data-node-id="' + nodeId + '" data-tooltip-hide-id="1"' + (packetId ? ' data-packet-id="' + packetId + '"' : '') + ' data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="Loading...">' + label + '</a></span>'
             : label;
     }
 
@@ -190,9 +190,9 @@
         return '<a href="/packet/' + packetId + '" class="rx-pop-link rx-pop-packet-link" title="Open packet reception"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i><span class="visually-hidden">Open packet reception</span></a>';
     }
 
-    function renderRelayCand(c) {
+    function renderRelayCand(c, packetId) {
         var label = esc(c.short || c.name || ('!' + Number(c.id || 0).toString(16).padStart(8, '0')));
-        return renderNodeLink(c.id, label);
+        return renderNodeLink(c.id, label, packetId);
     }
 
     function sortRx(list) {
@@ -264,21 +264,21 @@
         for (var k = 0; k < sorted.length; k++) {
             var rx = sorted[k];
             var gn = esc(gwName(rx.gw)), gid = gwNid(rx.gw);
-            var gc = renderNodeLink(gid, gn);
+            var gc = renderNodeLink(gid, gn, rx.id);
             var rc = '';
             if (rx.rl) {
                 var sfx = relaySfx(rx.rl), key = relayFilterKey(rx), cands = relayCandidatesForRx(rx);
                 var relayLoading = key && !Object.prototype.hasOwnProperty.call(relayFilterCache, key) && (relayFilterPending[key] || relayFilterQueued[key]) && relayCands(rx.rl).length > 1;
                 if (cands.length === 1) {
-                    rc = '<span class="rx-relay-match" title="' + esc(cands[0].name) + ' (0x' + sfx + ')">' + renderRelayCand(cands[0]) + '</span>';
+                    rc = '<span class="rx-relay-match" title="' + esc(cands[0].name) + ' (0x' + sfx + ')">' + renderRelayCand(cands[0], rx.id) + '</span>';
                 } else if (relayLoading) {
                     rc = '<span class="rx-relay-loading" title="Resolving relay candidates for 0x' + esc(sfx) + '">' + sfx + ' <small>loading</small></span>';
                 } else if (cands.length > 1) {
                     var titleNames = cands.map(function (c) { return c.short || c.name; }).join(', ');
                     if (cands.length <= 2) {
-                        rc = '<span class="rx-relay-ambig" title="' + esc('0x' + sfx + ': ' + titleNames) + '">' + cands.map(renderRelayCand).join(', ') + '</span>';
+                        rc = '<span class="rx-relay-ambig" title="' + esc('0x' + sfx + ': ' + titleNames) + '">' + cands.map(function (c) { return renderRelayCand(c, rx.id); }).join(', ') + '</span>';
                     } else {
-                        var first = renderRelayCand(cands[0]);
+                        var first = renderRelayCand(cands[0], rx.id);
                         rc = '<span class="rx-relay-ambig" title="' + esc('0x' + sfx + ': ' + titleNames) + '">' + first + ' <small>(+' + (cands.length - 1) + ')</small></span>';
                     }
                 } else { rc = sfx; }

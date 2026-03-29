@@ -341,14 +341,21 @@
             const node = nodeInfo.node || nodeInfo;
             const displayName = node.long_name || node.short_name || node.hex_id || 'Unknown Node';
 
+            const hideNodeId = element.dataset.tooltipHideId === '1';
+
             let content = `
                 <div class="node-tooltip-content">
                     <div class="node-tooltip-header">${displayName}</div>
+            `;
+
+            if (!hideNodeId) {
+                content += `
                     <div class="node-tooltip-row">
                         <span class="node-tooltip-label">ID:</span>
                         <span class="node-tooltip-value">${node.hex_id || 'Unknown'}</span>
                     </div>
-            `;
+                `;
+            }
 
             if (node.hw_model) {
                 content += `
