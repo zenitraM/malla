@@ -254,16 +254,16 @@
     }
 
     function packetLinkHtml(msg) {
-        return '<a href="/packet/' + msg.firstId + '" class="chat-packet-link" title="Open packet details (DB row #' + msg.firstId + ')"><i class="bi bi-box-arrow-up-right"></i><span>packet</span></a>';
+        return '<a href="/packet/' + msg.firstId + '" class="chat-packet-link" title="Open packet details (Malla ID#' + msg.firstId + ')"><i class="bi bi-box-arrow-up-right"></i><span></span></a>';
     }
 
     // ----- rendering -----
 
     function metaHtml(msg) {
         return '<span class="chat-meta">' +
+            '<span class="chat-rx-badge badge bg-secondary" data-mesh-id="' + (msg.meshId || msg.firstId) + '">rx' + msg.rxList.length + ' h' + hopsLabel(msg) + '</span>' +
             (msg.channel ? '<span class="chat-channel">' + esc(msg.channel) + '</span>' : '') +
             packetLinkHtml(msg) +
-            '<span class="chat-rx-badge badge bg-secondary" data-mesh-id="' + (msg.meshId || msg.firstId) + '">rx' + msg.rxList.length + ' h' + hopsLabel(msg) + '</span>' +
         '</span>';
     }
 
