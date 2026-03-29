@@ -465,23 +465,30 @@
             var beforeId = 0;
             var batches = 0;
             var data = null;
+            var initialPackets = [];
+            var initialTopLevelMeshIds = new Set();
 
             removeLoading();
 
-            while (batches < MAX_INITIAL_BATCHES && topLevelMsgs.length < INIT_TARGET_TOP_LEVEL) {
+            while (batches < MAX_INITIAL_BATCHES && initialTopLevelMeshIds.size < INIT_TARGET_TOP_LEVEL) {
                 var resp = await fetch(apiUrl(0, INIT_LIMIT, beforeId));
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 data = await resp.json();
 
                 Object.assign(nodeCache, data.nodes || {});
                 mergeRelays(data.relays || {});
-                data.packets.forEach(ingestPacket);
-                lastId = data.last_id;
+                initialPackets = data.packets.concat(initialPackets);
+                data.packets.forEach(function (p) {
+                    if (!p.ri) initialTopLevelMeshIds.add(p.m || p.i);
+                });
+                lastId = Math.max(lastId, data.last_id || 0);
                 batches += 1;
 
                 if (!data.packets.length || data.packets.length < INIT_LIMIT) break;
                 beforeId = data.packets[0].i;
             }
+
+            initialPackets.forEach(ingestPacket);
 
             removeLoading();
             if (searchTerm) applySearch();
