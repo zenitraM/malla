@@ -436,15 +436,18 @@
 .rx-pop-table th:last-child, .rx-pop-table td:last-child { padding-right: 0; }
 .rx-pop-table tr:last-child td { border-bottom: none; }
 
-.rx-relay-match { color: var(--bs-success, #198754); cursor: help; }
-.rx-relay-ambig { color: var(--bs-warning-text-emphasis, #997404); cursor: help; }
+.rx-relay-match { color: inherit; cursor: help; }
+.rx-relay-ambig { color: inherit; cursor: help; }
 .rx-relay-ambig small { opacity: 0.7; }
+.rx-relay-loading { color: var(--bs-secondary-color, #6c757d); cursor: progress; }
 
 .rx-col-num { text-align: right; }
 .rx-col-pkt { white-space: nowrap; }
 
 .rx-pop-link { color: var(--bs-info, #0dcaf0); text-decoration: none; }
 .rx-pop-link:hover { text-decoration: underline; color: var(--bs-info-text-emphasis, #087990); }
+.rx-pop-link.rx-pop-node { color: inherit; }
+.rx-pop-link.rx-pop-node:hover { color: inherit; }
 
 [data-bs-theme=dark] .rx-popover { background: var(--bs-body-bg, #212529); border-color: var(--bs-border-color, #495057); box-shadow: 0 4px 20px rgba(0,0,0,0.45); }
 [data-bs-theme=dark] .rx-pop-link { color: #6edff6; }

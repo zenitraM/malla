@@ -180,11 +180,19 @@
         }
     }
 
+    function renderNodeLink(nodeId, label) {
+        return nodeId
+            ? '<span class="' + nickColor(nodeId) + '"><a href="/node/' + nodeId + '" class="rx-pop-link rx-pop-node">' + label + '</a></span>'
+            : label;
+    }
+
+    function renderReceptionLink(packetId) {
+        return '<a href="/packet/' + packetId + '" class="rx-pop-link rx-pop-packet-link" title="Open packet reception"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i><span class="visually-hidden">Open packet reception</span></a>';
+    }
+
     function renderRelayCand(c) {
         var label = esc(c.short || c.name || ('!' + Number(c.id || 0).toString(16).padStart(8, '0')));
-        return c.id
-            ? '<a href="/node/' + c.id + '" class="rx-pop-link node-link" data-node-id="' + c.id + '" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="Loading...">' + label + '</a>'
-            : label;
+        return renderNodeLink(c.id, label);
     }
 
     function sortRx(list) {
@@ -256,9 +264,7 @@
         for (var k = 0; k < sorted.length; k++) {
             var rx = sorted[k];
             var gn = esc(gwName(rx.gw)), gid = gwNid(rx.gw);
-            var gc = gid
-                ? '<a href="/node/' + gid + '" class="rx-pop-link node-link" data-node-id="' + gid + '" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="Loading...">' + gn + '</a>'
-                : gn;
+            var gc = renderNodeLink(gid, gn);
             var rc = '';
             if (rx.rl) {
                 var sfx = relaySfx(rx.rl), key = relayFilterKey(rx), cands = relayCandidatesForRx(rx);
@@ -277,7 +283,7 @@
                     }
                 } else { rc = sfx; }
             }
-            rows += '<tr><td class="rx-col-pkt"><a href="/packet/' + rx.id + '" class="rx-pop-link">#' + rx.id + '</a></td>' +
+            rows += '<tr><td class="rx-col-pkt">' + renderReceptionLink(rx.id) + '</td>' +
                 '<td class="rx-col-gw">' + gc + '</td>' +
                 '<td class="rx-col-num">' + (rx.hops != null ? rx.hops : '?') + '</td>' +
                 '<td class="rx-col-num">' + (rx.rs != null ? rx.rs : '') + '</td>' +
