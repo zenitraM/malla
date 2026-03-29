@@ -86,6 +86,48 @@ class TestChatMessagesAPI:
 
     @pytest.mark.integration
     @pytest.mark.api
+    def test_before_id_returns_older_only(self, client):
+        """Using before_id should return only packets with id < before_id."""
+        initial = client.get("/api/chat/messages?limit=10").get_json()
+        pkts = initial["packets"]
+        if len(pkts) < 2:
+            pytest.skip("Need at least 2 packets to test before_id")
+
+        oldest_loaded_id = pkts[0]["i"]
+        data = client.get(
+            f"/api/chat/messages?before_id={oldest_loaded_id}&limit=10"
+        ).get_json()
+
+        if not data["packets"]:
+            pytest.skip("Need older packets than the initial page to test before_id")
+
+        for p in data["packets"]:
+            assert p["i"] < oldest_loaded_id, (
+                f"Packet id {p['i']} should be < {oldest_loaded_id}"
+            )
+
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_before_id_preserves_ascending_order(self, client):
+        """Backward paging should still return packets in ascending id order."""
+        initial = client.get("/api/chat/messages?limit=10").get_json()
+        pkts = initial["packets"]
+        if len(pkts) < 2:
+            pytest.skip("Need at least 2 packets to test before_id ordering")
+
+        oldest_loaded_id = pkts[0]["i"]
+        data = client.get(
+            f"/api/chat/messages?before_id={oldest_loaded_id}&limit=10"
+        ).get_json()
+
+        if len(data["packets"]) < 2:
+            pytest.skip("Need at least 2 older packets to test before_id ordering")
+
+        ids = [p["i"] for p in data["packets"]]
+        assert ids == sorted(ids), "Packets should remain ordered by id ascending"
+
+    @pytest.mark.integration
+    @pytest.mark.api
     def test_after_id_beyond_last_returns_empty(self, client):
         """When after_id is beyond the last packet, no packets should be returned."""
         data = client.get("/api/chat/messages?after_id=999999999").get_json()

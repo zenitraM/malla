@@ -1,12 +1,14 @@
 (function () {
     'use strict';
 
-    var POLL_MS       = 3000;
-    var INIT_LIMIT    = 300;
-    var POLL_LIMIT    = 100;
-    var NICK_COLORS   = 12;
-    var BROADCAST     = 4294967295;
-    var CONSEC_SEC    = 120;   // collapse nicks if same sender within 2 min
+    var POLL_MS               = 3000;
+    var INIT_LIMIT            = 500;
+    var INIT_TARGET_TOP_LEVEL = 120;
+    var MAX_INITIAL_BATCHES   = 4;
+    var POLL_LIMIT            = 100;
+    var NICK_COLORS           = 12;
+    var BROADCAST             = 4294967295;
+    var CONSEC_SEC            = 120;   // collapse nicks if same sender within 2 min
 
     var messagesEl = document.getElementById('chatMessages');
     var statusEl   = document.getElementById('chatStatus');
@@ -86,7 +88,34 @@
     }
 
     function atBottom() { return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 60; }
-    function goBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+    function updateScrollButton() {
+        var bottom = atBottom();
+        scrollBtn.classList.toggle('d-none', bottom);
+        if (bottom || unreadCount <= 0) {
+            unreadEl.classList.add('d-none');
+        } else {
+            unreadEl.textContent = unreadCount > 99 ? '99+' : unreadCount;
+            unreadEl.classList.remove('d-none');
+        }
+    }
+
+    function goBottom(smooth) {
+        if (messagesEl.scrollTo) {
+            messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+        } else {
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+    }
+
+    function followBottom() {
+        requestAnimationFrame(function () {
+            requestAnimationFrame(function () {
+                goBottom();
+                updateScrollButton();
+            });
+        });
+    }
 
     function mergeRelays(d) { for (var k in d) relayCache[k] = d[k]; }
     function relaySfx(v) { return v ? (v & 0xFF).toString(16).padStart(2, '0') : ''; }
@@ -419,9 +448,10 @@
 
     // ----- API -----
 
-    function apiUrl(afterId, limit) {
+    function apiUrl(afterId, limit, beforeId) {
         var p = new URLSearchParams();
         if (afterId > 0) p.set('after_id', afterId);
+        else if (beforeId > 0) p.set('before_id', beforeId);
         p.set('limit', limit);
         var ch = channelSel.value;
         if (ch) p.set('channel', ch);
@@ -432,16 +462,30 @@
 
     async function loadInitial() {
         try {
-            var resp = await fetch(apiUrl(0, INIT_LIMIT));
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            var data = await resp.json();
+            var beforeId = 0;
+            var batches = 0;
+            var data = null;
+
             removeLoading();
-            Object.assign(nodeCache, data.nodes || {});
-            mergeRelays(data.relays || {});
-            data.packets.forEach(ingestPacket);
-            lastId = data.last_id;
+
+            while (batches < MAX_INITIAL_BATCHES && topLevelMsgs.length < INIT_TARGET_TOP_LEVEL) {
+                var resp = await fetch(apiUrl(0, INIT_LIMIT, beforeId));
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                data = await resp.json();
+
+                Object.assign(nodeCache, data.nodes || {});
+                mergeRelays(data.relays || {});
+                data.packets.forEach(ingestPacket);
+                lastId = data.last_id;
+                batches += 1;
+
+                if (!data.packets.length || data.packets.length < INIT_LIMIT) break;
+                beforeId = data.packets[0].i;
+            }
+
+            removeLoading();
             if (searchTerm) applySearch();
-            goBottom();
+            followBottom();
             setStatus('live');
             updateStats();
             if (typeof reinitializeTooltips === 'function') reinitializeTooltips();
@@ -455,7 +499,7 @@
     async function poll() {
         if (paused) return;
         try {
-            var resp = await fetch(apiUrl(lastId, POLL_LIMIT));
+            var resp = await fetch(apiUrl(lastId, POLL_LIMIT, 0));
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             var data = await resp.json();
             var wasBottom = atBottom();
@@ -468,12 +512,10 @@
                 if (searchTerm) applySearch();
                 updateStats();
                 if (typeof reinitializeTooltips === 'function') reinitializeTooltips();
-                if (wasBottom) goBottom();
+                if (wasBottom) followBottom();
                 else {
                     unreadCount += newCount;
-                    unreadEl.textContent = unreadCount > 99 ? '99+' : unreadCount;
-                    unreadEl.classList.remove('d-none');
-                    scrollBtn.classList.remove('d-none');
+                    updateScrollButton();
                 }
                 playNotif();
             }
@@ -507,6 +549,7 @@
         seenPacketIds.clear(); messagesByMesh.clear(); messagesByProtoId.clear();
         messagesByPacketId.clear();
         relayCache = {}; orderedMsgs = []; topLevelMsgs = [];
+        scrollBtn.classList.add('d-none');
         messagesEl.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
             var tip = bootstrap.Tooltip.getInstance(el);
             if (tip) tip.dispose();
@@ -572,19 +615,18 @@
 
     messagesEl.addEventListener('scroll', function () {
         if (atBottom()) {
-            scrollBtn.classList.add('d-none');
             unreadCount = 0;
-            unreadEl.classList.add('d-none');
         }
+        updateScrollButton();
         // Show pause button when user scrolls up away from bottom
         if (!atBottom() && !paused) pauseBtn.classList.remove('d-none');
         else if (atBottom()) pauseBtn.classList.add('d-none');
     });
 
     scrollBtn.addEventListener('click', function () {
-        goBottom();
-        scrollBtn.classList.add('d-none');
-        unreadCount = 0; unreadEl.classList.add('d-none');
+        unreadCount = 0;
+        goBottom(true);
+        updateScrollButton();
     });
 
     channelSel.addEventListener('change', resetChat);

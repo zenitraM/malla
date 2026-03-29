@@ -1913,9 +1913,10 @@ def api_chat_messages():
     for 300 rows).
 
     Query parameters:
-        after_id: Only return rows with id > this value (polling cursor).
-        channel:  Filter by channel_id (e.g. 'LongFast').
-        limit:    Max rows to return (default 300, max 500).
+        after_id:  Only return rows with id > this value (polling cursor).
+        before_id: Only return rows with id < this value (initial history backfill).
+        channel:   Filter by channel_id (e.g. 'LongFast').
+        limit:     Max rows to return (default 300, max 500).
 
     Response JSON:
         packets:  list of raw packet dicts (ascending id order)
@@ -1924,6 +1925,7 @@ def api_chat_messages():
     """
     try:
         after_id = request.args.get("after_id", type=int, default=0)
+        before_id = request.args.get("before_id", type=int, default=0)
         channel = request.args.get("channel", "").strip()
         limit = min(request.args.get("limit", type=int, default=300), 500)
 
@@ -1944,6 +1946,9 @@ def api_chat_messages():
         if after_id > 0:
             where.append("id > ?")
             params.append(after_id)
+        elif before_id > 0:
+            where.append("id < ?")
+            params.append(before_id)
 
         if channel:
             where.append("channel_id = ?")
