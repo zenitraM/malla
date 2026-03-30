@@ -313,6 +313,7 @@ def _seed_demo_chat_examples(db_path: Path) -> None:
                 from_node_id=packet["from_node_id"],
                 to_node_id=packet["to_node_id"],
                 channel_index=packet["channel_index"],
+                channel_id=packet["channel_id"],
                 hop_limit=packet["hop_limit"],
                 hop_start=packet["hop_start"],
                 gateway_id=packet["gateway_id"],
@@ -990,10 +991,8 @@ def _capture_screenshots(base_url: str, out_dir: Path) -> list[Path]:
 
                         _LOG.info("Chat screenshot state: %s", chat_state)
                         if chat_state.get("clip"):
-                            screenshot_kwargs = {
-                                "full_page": False,
-                                "clip": chat_state["clip"],
-                            }
+                            screenshot_kwargs["full_page"] = False
+                            screenshot_kwargs["clip"] = chat_state["clip"]
                     except Exception as e:
                         _LOG.warning(f"Chat page setup failed: {e}")
                         pass
