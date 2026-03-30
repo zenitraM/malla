@@ -1151,6 +1151,19 @@ def get_raw_packet_analysis(packet: dict[str, Any]) -> dict[str, Any] | None:
             "description": "Original MeshPacket protobuf unavailable for this packet.",
         }
         analysis["mesh_packet"] = mesh_packet_fields
+        analysis["mesh_packet_db"] = {
+            "id": packet.get("id"),
+            "timestamp": packet.get("timestamp"),
+            "channel_id": packet.get("channel_id"),
+            "gateway_id": packet.get("gateway_id"),
+            "from_node_id": packet.get("from_node_id"),
+            "to_node_id": packet.get("to_node_id"),
+            "hop_start": packet.get("hop_start"),
+            "hop_limit": packet.get("hop_limit"),
+            "payload_length": packet.get("payload_length"),
+            "portnum": packet.get("portnum"),
+            "portnum_name": packet.get("portnum_name"),
+        }
 
         mesh_packet_helpers: dict[str, Any] = {
             "description": "Canonical MeshPacket view reconstructed from stored protobuf bytes.",

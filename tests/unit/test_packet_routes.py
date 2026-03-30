@@ -147,6 +147,8 @@ class TestDecodeServiceEnvelope:
         assert analysis["mesh_packet"]["from"] == 123
         assert analysis["mesh_packet"]["to"] == 456
         assert analysis["mesh_packet"]["decoded"]["portnum"] == "TEXT_MESSAGE_APP"
+        assert analysis["mesh_packet_db"]["id"] == 52357537
+        assert analysis["mesh_packet_db"]["channel_id"] == "LongFast"
         assert analysis["mesh_packet"]["hop_start"] == 3
         assert analysis["mesh_packet"]["hop_limit"] == 1
         assert analysis["mesh_packet"]["rx_rssi"] == -87
