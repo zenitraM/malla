@@ -204,10 +204,11 @@
     }
 
     function linkify(text) {
-        return text.replace(/(https?:\/\/[^\s<]+)/g, function (url) {
-            var display = url.length > 50 ? url.substring(0, 47) + '…' : url;
-            return '<a href="' + esc(url) + '" target="_blank" rel="noopener" class="chat-link">' + esc(display) + '</a>';
-        });
+        return String(text).split(/(https?:\/\/[^\s<]+)/g).map(function (part) {
+            if (!/^https?:\/\//.test(part)) return esc(part);
+            var display = part.length > 50 ? part.substring(0, 47) + '…' : part;
+            return '<a href="' + esc(part) + '" target="_blank" rel="noopener" class="chat-link">' + esc(display) + '</a>';
+        }).join('');
     }
 
     function dayKey(ts) { var d = new Date(ts * 1000); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); }
@@ -389,7 +390,7 @@
         var textClass = 'chat-text' + (isDm ? ' chat-dm' : '');
 
         var replyHtml = replySnippet(msg);
-        var textHtml = linkify(esc(msg.text));
+        var textHtml = linkify(msg.text);
 
         line.innerHTML =
             '<span class="chat-ts timestamp-display" data-timestamp="' + msg.timestamp + '" data-timestamp-format="time">' + fmtTime(msg.timestamp) + '</span>' +
@@ -426,7 +427,7 @@
             ? '<span class="chat-child-label"><i class="bi bi-emoji-smile"></i> reacted</span>'
             : '<span class="chat-child-label"><i class="bi bi-reply"></i> replied</span>';
         var textClass = 'chat-child-text' + (msg.toId && msg.toId !== BROADCAST ? ' chat-dm' : '') + (msg.isEmoji ? ' chat-emoji-reaction' : '');
-        var textHtml = msg.isEmoji ? esc(msg.text) : linkify(esc(msg.text));
+        var textHtml = msg.isEmoji ? esc(msg.text) : linkify(msg.text);
 
         line.innerHTML =
             labelHtml +

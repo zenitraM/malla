@@ -233,6 +233,17 @@ h1, .h1 {
   max-width: 280px;
 }
 
+.node-link {
+  position: relative;
+  color: var(--bs-primary);
+  font-weight: 500;
+}
+
+.node-link:hover {
+  color: var(--bs-primary);
+  filter: brightness(0.85);
+}
+
 .node-tooltip-content {
   min-width: 200px;
   font-size: 0.8rem;
@@ -245,7 +256,8 @@ h1, .h1 {
   line-height: 1.15;
   margin-bottom: 0.35rem;
   padding-bottom: 0.3rem;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
 }
 
 .node-tooltip-table {
