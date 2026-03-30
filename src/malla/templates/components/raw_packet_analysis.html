@@ -76,7 +76,7 @@
                                 <tr><th>Gateway:</th><td>{{ raw_analysis.service_envelope.gateway_id or 'Unknown' }}</td></tr>
                                 <tr><th>Channel:</th><td>{{ raw_analysis.service_envelope.channel_id or 'Unknown' }}</td></tr>
                                 <tr><th>Payload Type:</th><td>{{ decoded_packet.portnum if decoded_packet else 'Unknown' }}</td></tr>
-                                <tr><th>Hop Count:</th><td>{{ mesh_packet_helpers.hops_taken or 'Unknown' }} / {{ mesh_packet.hop_start or mesh_packet_helpers.hop_start or 'Unknown' }}</td></tr>
+                                <tr><th>Hop Count:</th><td>{{ mesh_packet_helpers.hops_taken if mesh_packet_helpers.hops_taken is not none else 'Unknown' }} / {{ mesh_packet.hop_start if mesh_packet.hop_start is defined and mesh_packet.hop_start is not none else (mesh_packet_helpers.hop_start if mesh_packet_helpers.hop_start is defined and mesh_packet_helpers.hop_start is not none else 'Unknown') }}</td></tr>
                             </table>
                         </div>
                         <div class="col-md-4">
