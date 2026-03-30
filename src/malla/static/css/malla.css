@@ -228,6 +228,75 @@ h1, .h1 {
   --bs-tooltip-bg: var(--bs-tertiary-bg);
 }
 
+.tooltip-inner {
+  text-align: left;
+  max-width: 280px;
+}
+
+.node-link {
+  position: relative;
+  color: var(--bs-primary);
+  font-weight: 500;
+}
+
+.node-link:hover {
+  color: var(--bs-primary);
+  filter: brightness(0.85);
+}
+
+.node-tooltip-content {
+  min-width: 200px;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+.node-tooltip-header {
+  font-weight: 700;
+  font-size: 0.88rem;
+  line-height: 1.15;
+  margin-bottom: 0.35rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.node-tooltip-table {
+  display: grid;
+  gap: 0;
+}
+
+.node-tooltip-row {
+  display: grid;
+  grid-template-columns: 4.25rem minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: start;
+}
+
+.node-tooltip-row + .node-tooltip-row {
+  border-top: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.node-tooltip-label,
+.node-tooltip-value {
+  padding: 0.18rem 0;
+  vertical-align: top;
+}
+
+.node-tooltip-label {
+  font-weight: 600;
+  color: var(--bs-secondary-color);
+  white-space: nowrap;
+}
+
+.node-tooltip-value {
+  word-break: break-word;
+}
+
+.node-tooltip-mono {
+  font-family: var(--bs-font-monospace);
+  font-size: 0.76rem;
+}
+
 /* Application-specific components using Bootstrap utilities */
 
 /* Modern table container - using Bootstrap classes where possible */

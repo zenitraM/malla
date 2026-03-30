@@ -3,6 +3,7 @@ Routes package for Meshtastic Mesh Health Web UI
 """
 
 from .api_routes import api_bp
+from .chat_routes import chat_bp
 from .gateway_routes import gateway_bp
 
 # Import all route blueprints
@@ -20,3 +21,4 @@ def register_routes(app):
     app.register_blueprint(traceroute_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(gateway_bp)
+    app.register_blueprint(chat_bp)

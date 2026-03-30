@@ -11,12 +11,107 @@ from datetime import UTC, datetime
 from typing import Any
 
 from meshtastic import mesh_pb2
+from meshtastic.protobuf import mqtt_pb2
 
+from ..config import get_config
+from ..utils.decryption import try_decrypt_mesh_packet
 from ..utils.formatting import format_time_ago
 from ..utils.node_utils import get_bulk_node_short_names
 from .connection import get_db_connection
 
 logger = logging.getLogger(__name__)
+
+RELAY_CANDIDATE_CACHE_TTL_SECONDS = 1800
+RELAY_CANDIDATE_CACHE_MAX_ENTRIES = 4096
+_relay_candidate_cache: dict[tuple[int, int], tuple[float, list[dict[str, Any]]]] = {}
+_relay_candidate_indexes_ready: set[str] = set()
+
+
+def _get_db_identity(cursor) -> str:
+    try:
+        cursor.execute("PRAGMA database_list")
+        row = cursor.fetchone()
+        if row and len(row) >= 3:
+            return f"db:{row[2] or ':memory:'}"
+    except Exception:
+        pass
+
+    connection = getattr(cursor, "connection", None)
+    return f"connection:{id(connection) if connection is not None else id(cursor)}"
+
+
+def _prune_relay_candidate_cache(now: float) -> None:
+    expired_keys = [
+        key
+        for key, (cached_at, _) in _relay_candidate_cache.items()
+        if now - cached_at > RELAY_CANDIDATE_CACHE_TTL_SECONDS
+    ]
+    for key in expired_keys:
+        _relay_candidate_cache.pop(key, None)
+
+    overflow = len(_relay_candidate_cache) - RELAY_CANDIDATE_CACHE_MAX_ENTRIES
+    if overflow > 0:
+        oldest_keys = sorted(_relay_candidate_cache.items(), key=lambda item: item[1][0])[
+            :overflow
+        ]
+        for key, _ in oldest_keys:
+            _relay_candidate_cache.pop(key, None)
+
+
+def _get_cached_relay_candidates(
+    gateway_node_id: int, relay_last_byte: int, now: float
+) -> list[dict[str, Any]] | None:
+    cache_key = (gateway_node_id, relay_last_byte)
+    cached_entry = _relay_candidate_cache.get(cache_key)
+    if not cached_entry:
+        return None
+
+    cached_at, candidates = cached_entry
+    if now - cached_at > RELAY_CANDIDATE_CACHE_TTL_SECONDS:
+        _relay_candidate_cache.pop(cache_key, None)
+        return None
+
+    return [candidate.copy() for candidate in candidates]
+
+
+def _store_relay_candidates(
+    gateway_node_id: int,
+    relay_last_byte: int,
+    candidates: list[dict[str, Any]],
+    now: float,
+) -> None:
+    _relay_candidate_cache[(gateway_node_id, relay_last_byte)] = (
+        now,
+        [candidate.copy() for candidate in candidates],
+    )
+
+
+def _ensure_relay_candidate_indexes(cursor) -> None:
+    cache_key = _get_db_identity(cursor)
+    if cache_key in _relay_candidate_indexes_ready:
+        return
+
+    cursor.execute(
+        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_gateway_from
+           ON packet_history(gateway_id, from_node_id)
+           WHERE hop_start = hop_limit AND from_node_id IS NOT NULL"""
+    )
+    cursor.execute(
+        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_gateway_lastbyte
+           ON packet_history(gateway_id, (from_node_id & 255))
+           WHERE hop_start = hop_limit AND from_node_id IS NOT NULL"""
+    )
+    cursor.execute(
+        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_from_gateway
+           ON packet_history(from_node_id, gateway_id)
+           WHERE hop_start = hop_limit AND gateway_id IS NOT NULL"""
+    )
+    cursor.execute(
+        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_from_gateway_suffix
+           ON packet_history(from_node_id, lower(substr(gateway_id, -2)))
+           WHERE hop_start = hop_limit AND gateway_id IS NOT NULL"""
+    )
+    _relay_candidate_indexes_ready.add(cache_key)
 
 
 class DashboardRepository:
@@ -110,6 +205,58 @@ class DashboardRepository:
 
 class PacketRepository:
     """Repository for packet operations."""
+
+    @staticmethod
+    def has_raw_service_envelope_column(cursor: Any) -> bool:
+        """Check whether packet_history includes the stored ServiceEnvelope column."""
+        try:
+            cursor.execute("SELECT raw_service_envelope FROM packet_history LIMIT 0")
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def hydrate_packet_envelope(
+        packet: dict[str, Any],
+    ) -> tuple[mqtt_pb2.ServiceEnvelope | None, mesh_pb2.MeshPacket | None]:
+        """Deserialize the stored ServiceEnvelope and populate protobuf-derived metadata."""
+        raw_service_envelope = packet.get("raw_service_envelope")
+        if not raw_service_envelope:
+            return None, None
+
+        try:
+            env = mqtt_pb2.ServiceEnvelope()
+            env.ParseFromString(raw_service_envelope)
+            mesh_packet = env.packet
+
+            decryption_keys = get_config().get_decryption_keys()
+            if decryption_keys and getattr(mesh_packet, "encrypted", b""):
+                for key_base64 in decryption_keys:
+                    if try_decrypt_mesh_packet(mesh_packet, key_base64=key_base64):
+                        break
+
+                    channel_name = packet.get("channel_id") or ""
+                    if channel_name and try_decrypt_mesh_packet(
+                        mesh_packet,
+                        channel_name=channel_name,
+                        key_base64=key_base64,
+                    ):
+                        break
+
+            decoded = mesh_packet.decoded
+            if decoded.reply_id != 0:
+                packet["reply_id"] = decoded.reply_id
+            if decoded.emoji != 0:
+                packet["emoji"] = decoded.emoji
+
+            return env, mesh_packet
+        except Exception as exc:
+            logger.debug(
+                "Unable to deserialize ServiceEnvelope for packet %s: %s",
+                packet.get("id"),
+                exc,
+            )
+            return None, None
 
     @staticmethod
     def _decode_text_content(packet: dict[str, Any]) -> str | None:
@@ -1901,49 +2048,77 @@ class NodeRepository:
             if not gateway_node_ids or not relay_last_bytes:
                 return {}
 
+            _ensure_relay_candidate_indexes(cursor)
+
+            now = time.time()
+            _prune_relay_candidate_cache(now)
+
+            requested_gateway_ids = sorted(set(gateway_node_ids))
+            requested_last_bytes = sorted(set(relay_last_bytes))
+            result: dict[int, dict[int, list[dict[str, Any]]]] = {
+                gateway_id: {last_byte: [] for last_byte in requested_last_bytes}
+                for gateway_id in requested_gateway_ids
+            }
+
+            missing_pairs: list[tuple[int, int]] = []
+            for gateway_id in requested_gateway_ids:
+                for last_byte in requested_last_bytes:
+                    cached_candidates = _get_cached_relay_candidates(
+                        gateway_id, last_byte, now
+                    )
+                    if cached_candidates is None:
+                        missing_pairs.append((gateway_id, last_byte))
+                    else:
+                        result[gateway_id][last_byte] = cached_candidates
+
+            if not missing_pairs:
+                return result
+
+            missing_gateway_ids = sorted({gateway_id for gateway_id, _ in missing_pairs})
+            missing_last_bytes = sorted({last_byte for _, last_byte in missing_pairs})
+
             # Convert gateway IDs to hex format
-            gateway_hex_ids = [f"!{gw_id:08x}" for gw_id in gateway_node_ids]
+            gateway_hex_ids = [f"!{gw_id:08x}" for gw_id in missing_gateway_ids]
 
             # Part 1: Packets these gateways received directly (0 hops) from other nodes
             gw_placeholders = ",".join(["?"] * len(gateway_hex_ids))
-            lb_placeholders = ",".join(["?"] * len(relay_last_bytes))
+            lb_placeholders = ",".join(["?"] * len(missing_last_bytes))
             candidates_query_part1 = f"""
             SELECT DISTINCT p.from_node_id as node_id, p.gateway_id, (p.from_node_id & 0xFF) as last_byte
             FROM packet_history p
             WHERE p.gateway_id IN ({gw_placeholders})
                 AND p.from_node_id IS NOT NULL
-                AND (p.hop_start - p.hop_limit) = 0
+                AND p.hop_start = p.hop_limit
                 AND (p.from_node_id & 0xFF) IN ({lb_placeholders})
             """
 
             cursor.execute(
-                candidates_query_part1, (*gateway_hex_ids, *relay_last_bytes)
+                candidates_query_part1, (*gateway_hex_ids, *missing_last_bytes)
             )
             part1_results = cursor.fetchall()
 
             # Part 2: Packets from these gateway nodes received directly by other gateways
-            gw_id_placeholders = ",".join(["?"] * len(gateway_node_ids))
             candidates_query_part2 = f"""
             SELECT DISTINCT p.gateway_id, p.from_node_id
             FROM packet_history p
-            WHERE p.from_node_id IN ({gw_id_placeholders})
+            WHERE p.from_node_id IN ({",".join(["?"] * len(missing_gateway_ids))})
                 AND p.gateway_id IS NOT NULL
                 AND p.gateway_id LIKE '!%'
-                AND (p.hop_start - p.hop_limit) = 0
+                AND p.hop_start = p.hop_limit
             """
 
-            cursor.execute(candidates_query_part2, tuple(gateway_node_ids))
+            cursor.execute(candidates_query_part2, tuple(missing_gateway_ids))
             part2_results = cursor.fetchall()
 
             # Initialize nested structure: {gateway_id: {last_byte: set(node_ids)}}
             candidates_by_gateway: dict[int, dict[int, set[int]]] = {}
-            for gw_id in gateway_node_ids:
-                candidates_by_gateway[gw_id] = {lb: set() for lb in relay_last_bytes}
+            for gw_id in missing_gateway_ids:
+                candidates_by_gateway[gw_id] = {lb: set() for lb in missing_last_bytes}
 
             # Process part 1 results (direct receptions by gateways)
             gateway_hex_to_id = {
                 hex_id: gw_id
-                for gw_id, hex_id in zip(gateway_node_ids, gateway_hex_ids, strict=True)
+                for gw_id, hex_id in zip(missing_gateway_ids, gateway_hex_ids, strict=True)
             }
             for row in part1_results:
                 gateway_hex = row["gateway_id"]
@@ -1999,9 +2174,7 @@ class NodeRepository:
             )
 
             # Build final result with candidate details
-            result: dict[int, dict[int, list[dict[str, Any]]]] = {}
             for gw_id, last_byte_dict in candidates_limited.items():
-                result[gw_id] = {}
                 for last_byte, candidate_node_ids in last_byte_dict.items():
                     candidates = []
                     for cand_node_id in candidate_node_ids:
@@ -2019,9 +2192,161 @@ class NodeRepository:
                             }
                         )
                     result[gw_id][last_byte] = candidates
+                    _store_relay_candidates(gw_id, last_byte, candidates, now)
 
             return result
 
+        finally:
+            if should_close and conn:
+                cursor.close()
+                conn.close()
+
+    @staticmethod
+    def get_relay_node_candidates_for_pairs(
+        relay_pairs: list[tuple[int, int]], cursor=None
+    ) -> dict[int, dict[int, list[dict[str, Any]]]]:
+        """Get candidate nodes for exact gateway/relay-byte pairs."""
+        should_close = False
+        conn = None
+        if cursor is None:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            should_close = True
+
+        try:
+            unique_pairs = sorted(set(relay_pairs))
+            if not unique_pairs:
+                return {}
+
+            _ensure_relay_candidate_indexes(cursor)
+
+            now = time.time()
+            _prune_relay_candidate_cache(now)
+
+            result: dict[int, dict[int, list[dict[str, Any]]]] = {}
+            missing_pairs: list[tuple[int, int]] = []
+            for gateway_id, last_byte in unique_pairs:
+                result.setdefault(gateway_id, {})[last_byte] = []
+                cached_candidates = _get_cached_relay_candidates(
+                    gateway_id, last_byte, now
+                )
+                if cached_candidates is None:
+                    missing_pairs.append((gateway_id, last_byte))
+                else:
+                    result[gateway_id][last_byte] = cached_candidates
+
+            if not missing_pairs:
+                return result
+
+            requested_pair_placeholders = ", ".join(
+                ["(?, ?, ?, ?)"] * len(missing_pairs)
+            )
+            requested_pair_params = [
+                value
+                for gateway_id, last_byte in missing_pairs
+                for value in (
+                    gateway_id,
+                    f"!{gateway_id:08x}",
+                    last_byte,
+                    f"{last_byte:02x}",
+                )
+            ]
+
+            candidates_query_part1 = f"""
+            WITH requested_pairs(gateway_node_id, gateway_hex, last_byte, last_byte_hex) AS (
+                VALUES {requested_pair_placeholders}
+            )
+            SELECT DISTINCT
+                p.from_node_id as node_id,
+                requested_pairs.gateway_node_id as gateway_id,
+                requested_pairs.last_byte as last_byte
+            FROM requested_pairs
+            JOIN packet_history p INDEXED BY idx_packet_history_direct_gateway_lastbyte
+                ON p.gateway_id = requested_pairs.gateway_hex
+                AND (p.from_node_id & 0xFF) = requested_pairs.last_byte
+            WHERE p.from_node_id IS NOT NULL
+                AND p.hop_start = p.hop_limit
+            """
+            cursor.execute(candidates_query_part1, requested_pair_params)
+            part1_results = cursor.fetchall()
+
+            candidates_query_part2 = f"""
+            WITH requested_pairs(gateway_node_id, gateway_hex, last_byte, last_byte_hex) AS (
+                VALUES {requested_pair_placeholders}
+            )
+            SELECT DISTINCT
+                p.gateway_id,
+                requested_pairs.gateway_node_id as from_node_id,
+                requested_pairs.last_byte as last_byte
+            FROM requested_pairs
+            JOIN packet_history p INDEXED BY idx_packet_history_direct_from_gateway_suffix
+                ON p.from_node_id = requested_pairs.gateway_node_id
+                AND lower(substr(p.gateway_id, -2)) = requested_pairs.last_byte_hex
+            WHERE p.gateway_id IS NOT NULL
+                AND p.gateway_id LIKE '!%'
+                AND p.hop_start = p.hop_limit
+            """
+            cursor.execute(candidates_query_part2, requested_pair_params)
+            part2_results = cursor.fetchall()
+
+            candidates_by_pair: dict[tuple[int, int], set[int]] = {
+                pair: set() for pair in missing_pairs
+            }
+            for row in part1_results:
+                pair = (row["gateway_id"], row["last_byte"])
+                if pair in candidates_by_pair:
+                    candidates_by_pair[pair].add(row["node_id"])
+
+            for row in part2_results:
+                gw_hex = row["gateway_id"]
+                if not gw_hex or not gw_hex.startswith("!"):
+                    continue
+                try:
+                    candidate_gateway_id = int(gw_hex[1:], 16)
+                except ValueError:
+                    logger.debug(f"Skipping malformed gateway_id: {gw_hex}")
+                    continue
+                pair = (row["from_node_id"], row["last_byte"])
+                if pair in candidates_by_pair:
+                    candidates_by_pair[pair].add(candidate_gateway_id)
+
+            limited_candidates_by_pair: dict[tuple[int, int], list[int]] = {}
+            all_candidate_ids: set[int] = set()
+            for pair, candidate_ids in candidates_by_pair.items():
+                limited_candidates = sorted(candidate_ids)[:10]
+                limited_candidates_by_pair[pair] = limited_candidates
+                all_candidate_ids.update(limited_candidates)
+
+            candidate_names = (
+                NodeRepository.get_bulk_node_names(list(all_candidate_ids))
+                if all_candidate_ids
+                else {}
+            )
+            candidate_short_names = (
+                get_bulk_node_short_names(list(all_candidate_ids))
+                if all_candidate_ids
+                else {}
+            )
+
+            for (gateway_id, last_byte), candidate_ids in limited_candidates_by_pair.items():
+                candidates = []
+                for candidate_id in candidate_ids:
+                    hex_id = f"!{candidate_id:08x}"
+                    candidates.append(
+                        {
+                            "node_id": candidate_id,
+                            "node_name": candidate_names.get(candidate_id, hex_id),
+                            "hex_id": hex_id,
+                            "short_name": candidate_short_names.get(
+                                candidate_id, hex_id[-4:]
+                            ),
+                            "last_byte": f"{candidate_id & 0xFF:02x}",
+                        }
+                    )
+                result[gateway_id][last_byte] = candidates
+                _store_relay_candidates(gateway_id, last_byte, candidates, now)
+
+            return result
         finally:
             if should_close and conn:
                 cursor.close()

@@ -387,6 +387,26 @@ def init_database() -> None:
            WHERE hop_start = hop_limit"""
     )
     cursor.execute(
+        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_gateway_from
+           ON packet_history(gateway_id, from_node_id)
+           WHERE hop_start = hop_limit AND from_node_id IS NOT NULL"""
+    )
+    cursor.execute(
+        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_gateway_lastbyte
+           ON packet_history(gateway_id, (from_node_id & 255))
+           WHERE hop_start = hop_limit AND from_node_id IS NOT NULL"""
+    )
+    cursor.execute(
+        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_from_gateway
+           ON packet_history(from_node_id, gateway_id)
+           WHERE hop_start = hop_limit AND gateway_id IS NOT NULL"""
+    )
+    cursor.execute(
+        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_from_gateway_suffix
+           ON packet_history(from_node_id, lower(substr(gateway_id, -2)))
+           WHERE hop_start = hop_limit AND gateway_id IS NOT NULL"""
+    )
+    cursor.execute(
         """CREATE INDEX IF NOT EXISTS idx_packet_history_relay_time
            ON packet_history(timestamp, relay_node)
            WHERE relay_node IS NOT NULL AND relay_node != 0"""

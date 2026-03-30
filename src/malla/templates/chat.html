@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Chat - Malla{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/chat.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="chat-container">
+    <!-- Filter / toolbar bar -->
+    <div class="chat-filters">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- Channel filter -->
+            <div class="d-flex align-items-center gap-1">
+                <i class="bi bi-hash text-secondary"></i>
+                <select id="channelFilter" class="form-select form-select-sm chat-filter-select" title="Filter by channel">
+                    <option value="">All channels</option>
+                </select>
+            </div>
+
+            <!-- Search -->
+            <div class="chat-search-wrap">
+                <i class="bi bi-search chat-search-icon"></i>
+                <input type="text" id="chatSearch" class="form-control form-control-sm chat-search-input" placeholder="Search…" autocomplete="off">
+            </div>
+
+            <!-- Right side controls -->
+            <div class="ms-auto d-flex align-items-center gap-2">
+                <span id="chatStats" class="text-muted chat-stats d-none"></span>
+                <span id="chatStatus" class="badge bg-secondary">Connecting…</span>
+                <button id="pauseBtn" class="btn btn-sm btn-outline-secondary chat-ctrl-btn d-none" title="Pause live updates">
+                    <i class="bi bi-pause-fill"></i>
+                </button>
+                <button id="soundBtn" class="btn btn-sm btn-outline-secondary chat-ctrl-btn" title="Toggle notification sound">
+                    <i class="bi bi-bell-slash"></i>
+                </button>
+                <button id="scrollBottomBtn" class="btn btn-sm btn-outline-secondary chat-ctrl-btn d-none" title="Scroll to latest">
+                    <i class="bi bi-arrow-down"></i>
+                    <span id="unreadCount" class="chat-unread-count d-none">0</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Message area -->
+    <div id="chatMessages" class="chat-messages">
+        <div id="chatLoading" class="chat-loading">
+            <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
+            <span class="text-muted ms-2">Loading messages…</span>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+{% endblock %}

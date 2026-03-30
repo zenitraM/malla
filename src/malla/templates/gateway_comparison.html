@@ -590,8 +590,13 @@ if (chartData.timeline_snr.timestamps.length > 0) {
 }
 
 // Initialize DataTable for common packets
-$(document).ready(function() {
-    $('#commonPacketsTable').DataTable({
+document.addEventListener('DOMContentLoaded', function() {
+    const jq = window.jQuery || window.$;
+    if (!jq || !jq.fn || !jq.fn.DataTable) {
+        return;
+    }
+
+    jq('#commonPacketsTable').DataTable({
         responsive: true,
         pageLength: 25,
         order: [[0, 'desc']], // Sort by time descending

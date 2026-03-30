@@ -16,6 +16,9 @@
                 <div class="payload-hex">{{ raw_analysis.raw_hex }}</div>
             {% endif %}
         {% else %}
+            {% set mesh_packet = raw_analysis.mesh_packet %}
+            {% set mesh_packet_helpers = raw_analysis.mesh_packet_helpers %}
+            {% set decoded_packet = mesh_packet.decoded if mesh_packet.decoded is defined else none %}
             <!-- Tabbed interface for different analysis sections -->
             <ul class="nav nav-tabs" id="analysisTab" role="tablist">
                 <li class="nav-item" role="presentation">
@@ -72,8 +75,8 @@
                                 <tr><th>Total Size:</th><td>{{ raw_analysis.size_bytes }} bytes</td></tr>
                                 <tr><th>Gateway:</th><td>{{ raw_analysis.service_envelope.gateway_id or 'Unknown' }}</td></tr>
                                 <tr><th>Channel:</th><td>{{ raw_analysis.service_envelope.channel_id or 'Unknown' }}</td></tr>
-                                <tr><th>Payload Type:</th><td>{{ raw_analysis.mesh_packet.portnum_name or 'Unknown' }}</td></tr>
-                                <tr><th>Hop Count:</th><td>{{ raw_analysis.mesh_packet.hops_taken or 'Unknown' }} / {{ raw_analysis.mesh_packet.hop_start or 'Unknown' }}</td></tr>
+                                <tr><th>Payload Type:</th><td>{{ decoded_packet.portnum if decoded_packet else 'Unknown' }}</td></tr>
+                                <tr><th>Hop Count:</th><td>{{ mesh_packet_helpers.hops_taken if mesh_packet_helpers.hops_taken is not none else 'Unknown' }} / {{ mesh_packet.hop_start if mesh_packet.hop_start is defined and mesh_packet.hop_start is not none else (mesh_packet_helpers.hop_start if mesh_packet_helpers.hop_start is defined and mesh_packet_helpers.hop_start is not none else 'Unknown') }}</td></tr>
                             </table>
                         </div>
                         <div class="col-md-4">
@@ -164,7 +167,7 @@
                 <!-- MeshPacket Tab -->
                 <div class="tab-pane fade" id="mesh-packet" role="tabpanel">
                     <h6><i class="bi bi-diagram-3"></i> MeshPacket Fields</h6>
-                    <p class="text-muted">{{ raw_analysis.mesh_packet.description }}</p>
+                    <p class="text-muted">{{ mesh_packet_helpers.description }}</p>
 
                     <table class="table table-sm table-striped">
                         <thead>
@@ -174,8 +177,8 @@
                             <tr>
                                 <td><code>from</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.from_node_id %}
-                                        <code>{{ raw_analysis.mesh_packet.from_node_id }}</code>
+                                    {% if mesh_packet['from'] is defined %}
+                                        <code>{{ mesh_packet['from'] }}</code>
                                         <br><small class="text-muted">Source node ID</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -186,12 +189,12 @@
                             <tr>
                                 <td><code>to</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.to_node_id %}
-                                        {% if raw_analysis.mesh_packet.to_node_id in [0, 4294967295] %}
-                                            <code>{{ raw_analysis.mesh_packet.to_node_id }}</code> (Broadcast)
+                                    {% if mesh_packet['to'] is defined %}
+                                        {% if mesh_packet['to'] in [0, 4294967295] %}
+                                            <code>{{ mesh_packet['to'] }}</code> (Broadcast)
                                             <br><small class="text-warning">Visible to all nodes</small>
                                         {% else %}
-                                            <code>{{ raw_analysis.mesh_packet.to_node_id }}</code>
+                                            <code>{{ mesh_packet['to'] }}</code>
                                             <br><small class="text-muted">Target node ID</small>
                                         {% endif %}
                                     {% else %}
@@ -203,10 +206,10 @@
                             <tr>
                                 <td><code>decoded.portnum</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.portnum %}
-                                        <code>{{ raw_analysis.mesh_packet.portnum }}</code>
-                                        {% if raw_analysis.mesh_packet.portnum_name %}
-                                            <br><small class="text-muted">{{ raw_analysis.mesh_packet.portnum_name }}</small>
+                                    {% if decoded_packet and decoded_packet.portnum %}
+                                        <code>{{ decoded_packet.portnum }}</code>
+                                        {% if decoded_packet.parsed_payload is defined and decoded_packet.parsed_payload.portnum is defined %}
+                                            <br><small class="text-muted">{{ decoded_packet.parsed_payload.portnum }}</small>
                                         {% endif %}
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -217,8 +220,8 @@
                             <tr>
                                 <td><code>decoded.payload_length</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.payload_length %}
-                                        <code>{{ raw_analysis.mesh_packet.payload_length }}</code> bytes
+                                    {% if mesh_packet_helpers.payload_length is defined %}
+                                        <code>{{ mesh_packet_helpers.payload_length }}</code> bytes
                                     {% else %}
                                         <span class="text-muted">0 bytes</span>
                                     {% endif %}
@@ -249,11 +252,11 @@
                                 </td>
                                 <td><small>uint32</small></td>
                             </tr>
-                            {% if raw_analysis.mesh_packet.hops_taken is defined %}
+                                    {% if mesh_packet_helpers.hops_taken is defined %}
                             <tr class="table-info">
                                 <td><code>hops_taken</code></td>
                                 <td>
-                                    <code>{{ raw_analysis.mesh_packet.hops_taken }}</code>
+                                    <code>{{ mesh_packet_helpers.hops_taken }}</code>
                                     <br><small class="text-muted">Calculated: hop_start - hop_limit</small>
                                 </td>
                                 <td><small>derived</small></td>
@@ -262,8 +265,8 @@
                             <tr>
                                 <td><code>rx_rssi</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.rssi %}
-                                        <code>{{ raw_analysis.mesh_packet.rssi|format_rssi }}</code> dBm
+                                    {% if mesh_packet.rx_rssi is defined %}
+                                        <code>{{ mesh_packet.rx_rssi|format_rssi }}</code> dBm
                                         <br><small class="text-muted">Signal strength at gateway</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -274,8 +277,8 @@
                             <tr>
                                 <td><code>rx_snr</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.snr %}
-                                        <code>{{ raw_analysis.mesh_packet.snr|format_snr }}</code> dB
+                                    {% if mesh_packet.rx_snr is defined %}
+                                        <code>{{ mesh_packet.rx_snr|format_snr }}</code> dB
                                         <br><small class="text-muted">Signal quality at gateway</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -286,8 +289,8 @@
                             <tr>
                                 <td><code>rx_time</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.rx_time %}
-                                        <code>{{ raw_analysis.mesh_packet.rx_time }}</code>
+                                    {% if mesh_packet.rx_time %}
+                                        <code>{{ mesh_packet.rx_time }}</code>
                                         <br><small class="text-muted">Receive timestamp</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -298,7 +301,7 @@
                             <tr>
                                 <td><code>via_mqtt</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.via_mqtt %}
+                                    {% if mesh_packet_helpers.via_mqtt %}
                                         <span class="badge bg-warning">True</span>
                                         <br><small class="text-muted">Packet came via MQTT</small>
                                     {% else %}
@@ -311,7 +314,7 @@
                             <tr>
                                 <td><code>want_ack</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.want_ack %}
+                                    {% if mesh_packet_helpers.want_ack %}
                                         <span class="badge bg-info">True</span>
                                         <br><small class="text-muted">Acknowledgment requested</small>
                                     {% else %}
@@ -324,8 +327,8 @@
                             <tr>
                                 <td><code>priority</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.priority %}
-                                        <code>{{ raw_analysis.mesh_packet.priority }}</code>
+                                    {% if mesh_packet.priority %}
+                                        <code>{{ mesh_packet.priority }}</code>
                                         <br><small class="text-muted">Packet priority level</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -336,8 +339,8 @@
                             <tr>
                                 <td><code>delayed</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.delayed %}
-                                        <code>{{ raw_analysis.mesh_packet.delayed }}</code>
+                                    {% if mesh_packet.delayed %}
+                                        <code>{{ mesh_packet.delayed }}</code>
                                         <br><small class="text-muted">Delay status</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -348,8 +351,8 @@
                             <tr>
                                 <td><code>channel</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.channel_index %}
-                                        <code>{{ raw_analysis.mesh_packet.channel_index }}</code>
+                                    {% if mesh_packet.channel is defined %}
+                                        <code>{{ mesh_packet.channel }}</code>
                                         <br><small class="text-muted">Channel index</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -360,7 +363,7 @@
                             <tr>
                                 <td><code>pki_encrypted</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.pki_encrypted %}
+                                    {% if mesh_packet_helpers.pki_encrypted %}
                                         <span class="badge bg-success">True</span>
                                         <br><small class="text-muted">PKI encryption used</small>
                                     {% else %}
@@ -373,8 +376,8 @@
                             <tr>
                                 <td><code>next_hop</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.next_hop %}
-                                        <code>{{ raw_analysis.mesh_packet.next_hop }}</code>
+                                    {% if mesh_packet.next_hop %}
+                                        <code>{{ mesh_packet.next_hop }}</code>
                                         <br><small class="text-muted">Next hop node ID</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -385,8 +388,8 @@
                             <tr>
                                 <td><code>relay_node</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.relay_node %}
-                                        <code>{{ raw_analysis.mesh_packet.relay_node }}</code>
+                                    {% if mesh_packet.relay_node %}
+                                        <code>{{ mesh_packet.relay_node }}</code>
                                         <br><small class="text-muted">Relay node ID</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -397,8 +400,8 @@
                             <tr>
                                 <td><code>tx_after</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.tx_after %}
-                                        <code>{{ raw_analysis.mesh_packet.tx_after }}</code>
+                                    {% if mesh_packet.tx_after %}
+                                        <code>{{ mesh_packet.tx_after }}</code>
                                         <br><small class="text-muted">Transmission delay</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>
@@ -409,8 +412,8 @@
                             <tr>
                                 <td><code>timestamp</code></td>
                                 <td>
-                                    {% if raw_analysis.mesh_packet.timestamp %}
-                                        <code>{{ raw_analysis.mesh_packet.timestamp }}</code>
+                                    {% if mesh_packet.timestamp %}
+                                        <code>{{ mesh_packet.timestamp }}</code>
                                         <br><small class="text-muted">Unix timestamp</small>
                                     {% else %}
                                         <span class="text-muted">Not set</span>

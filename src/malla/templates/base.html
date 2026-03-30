@@ -55,51 +55,6 @@
             text-align: center;
         }
 
-        /* Node tooltip styles */
-        .node-link {
-            position: relative;
-            color: var(--bs-primary);
-            font-weight: 500;
-        }
-
-        .node-link:hover {
-            color: var(--bs-primary);
-            filter: brightness(0.85);
-        }
-
-        .tooltip.bs-tooltip-top .tooltip-inner,
-        .tooltip.bs-tooltip-bottom .tooltip-inner {
-            max-width: 300px;
-            text-align: left;
-            background-color: #212529;
-            border-radius: 0.375rem;
-            padding: 0.75rem;
-        }
-
-        .node-tooltip-content {
-            font-size: 0.875rem;
-            line-height: 1.4;
-        }
-
-        .node-tooltip-header {
-            font-weight: bold;
-            margin-bottom: 0.5rem;
-            color: #fff;
-        }
-
-        .node-tooltip-row {
-            margin-bottom: 0.25rem;
-        }
-
-        .node-tooltip-label {
-            color: #adb5bd;
-            font-weight: 500;
-        }
-
-        .node-tooltip-value {
-            color: #fff;
-        }
-
         .table-responsive {
             height: 100%;
             max-height: 100%;
@@ -126,6 +81,13 @@
                     <li class="nav-item">
                         <a class="nav-link {{ 'active' if request.endpoint == 'main.dashboard' }}" href="{{ url_for('main.dashboard') }}">
                             <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+
+                    <!-- Chat -->
+                    <li class="nav-item">
+                        <a class="nav-link {{ 'active' if request.endpoint == 'chat.chat' }}" href="{{ url_for('chat.chat') }}">
+                            <i class="bi bi-chat-dots"></i> Chat
                         </a>
                     </li>
 
@@ -320,69 +282,70 @@
             const tooltip = bootstrap.Tooltip.getInstance(element);
             if (!tooltip) return;
 
+            function buildTooltipContent(node, isError = false) {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'node-tooltip-content';
+
+                const header = document.createElement('div');
+                header.className = 'node-tooltip-header' + (isError ? ' text-danger' : '');
+                header.textContent = isError ? 'Error' : (node.long_name || node.short_name || node.hex_id || 'Unknown Node');
+                wrapper.appendChild(header);
+
+                if (isError) {
+                    const value = document.createElement('div');
+                    value.className = 'node-tooltip-value';
+                    value.textContent = node.error || 'Unknown error';
+                    wrapper.appendChild(value);
+                    return wrapper;
+                }
+
+                const table = document.createElement('div');
+                table.className = 'node-tooltip-table';
+
+                const addRow = (label, value, mono = false) => {
+                    const row = document.createElement('div');
+                    row.className = 'node-tooltip-row';
+
+                    const labelEl = document.createElement('span');
+                    labelEl.className = 'node-tooltip-label';
+                    labelEl.textContent = label;
+
+                    const valueEl = document.createElement('span');
+                    valueEl.className = 'node-tooltip-value';
+                    if (mono) valueEl.classList.add('node-tooltip-mono');
+                    valueEl.textContent = value;
+
+                    row.appendChild(labelEl);
+                    row.appendChild(valueEl);
+                    table.appendChild(row);
+                };
+
+                addRow('Node ID', node.hex_id || 'Unknown', true);
+                if (node.hw_model) addRow('Hardware', node.hw_model);
+                if (node.firmware_version) addRow('Firmware', node.firmware_version);
+                if (node.last_packet_str) addRow('Last seen', node.last_packet_str);
+                if (node.packet_count_24h !== undefined) addRow('24h pkts', String(node.packet_count_24h));
+                if (node.gateway_count_24h !== undefined && node.gateway_count_24h > 0) {
+                    addRow('Heard by', `${node.gateway_count_24h} gateway${node.gateway_count_24h > 1 ? 's' : ''}`);
+                }
+
+                if (table.childElementCount > 0) wrapper.appendChild(table);
+                return wrapper;
+            }
+
             if (nodeInfo.error) {
                 tooltip.setContent({
-                    '.tooltip-inner': `<div class="node-tooltip-content">
-                        <div class="node-tooltip-header text-danger">Error</div>
-                        <div class="node-tooltip-value">${nodeInfo.error}</div>
-                    </div>`
+                    '.tooltip-inner': buildTooltipContent(nodeInfo, true).outerHTML
                 });
                 return;
             }
 
             // Extract node data from the API response structure
             const node = nodeInfo.node || nodeInfo;
-            const displayName = node.long_name || node.short_name || node.hex_id || 'Unknown Node';
-
-            let content = `
-                <div class="node-tooltip-content">
-                    <div class="node-tooltip-header">${displayName}</div>
-                    <div class="node-tooltip-row">
-                        <span class="node-tooltip-label">ID:</span>
-                        <span class="node-tooltip-value">${node.hex_id || 'Unknown'}</span>
-                    </div>
-            `;
-
-            if (node.hw_model) {
-                content += `
-                    <div class="node-tooltip-row">
-                        <span class="node-tooltip-label">Hardware:</span>
-                        <span class="node-tooltip-value">${node.hw_model}</span>
-                    </div>
-                `;
-            }
-
-            if (node.last_packet_str) {
-                content += `
-                    <div class="node-tooltip-row">
-                        <span class="node-tooltip-label">Last Packet:</span>
-                        <span class="node-tooltip-value">${node.last_packet_str}</span>
-                    </div>
-                `;
-            }
-
-            if (node.packet_count_24h !== undefined) {
-                content += `
-                    <div class="node-tooltip-row">
-                        <span class="node-tooltip-label">24h Packets:</span>
-                        <span class="node-tooltip-value">${node.packet_count_24h}</span>
-                    </div>
-                `;
-            }
-
-            if (node.gateway_count_24h !== undefined && node.gateway_count_24h > 0) {
-                content += `
-                    <div class="node-tooltip-row">
-                        <span class="node-tooltip-label">Heard by:</span>
-                        <span class="node-tooltip-value">${node.gateway_count_24h} gateway${node.gateway_count_24h > 1 ? 's' : ''}</span>
-                    </div>
-                `;
-            }
-
-            content += '</div>';
+            const content = buildTooltipContent(node);
 
             tooltip.setContent({
-                '.tooltip-inner': content
+                '.tooltip-inner': content.outerHTML
             });
         }
 

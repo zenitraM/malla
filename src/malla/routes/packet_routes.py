@@ -11,7 +11,7 @@ from flask import Blueprint, render_template, request
 from ..database.connection import get_db_connection
 
 # Import from the new modular architecture
-from ..database.repositories import LocationRepository, NodeRepository
+from ..database.repositories import LocationRepository, NodeRepository, PacketRepository
 from ..models.traceroute import TraceroutePacket
 from ..utils.node_utils import convert_node_id, get_bulk_node_names
 from ..utils.traceroute_graph import build_combined_traceroute_graph
@@ -21,7 +21,9 @@ logger = logging.getLogger(__name__)
 packet_bp = Blueprint("packet", __name__)
 
 
-def sort_receptions_for_display(receptions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def sort_receptions_for_display(
+    receptions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Sort receptions for display on the packet detail page.
 
     Ordering:
@@ -48,7 +50,9 @@ def sort_receptions_for_display(receptions: list[dict[str, Any]]) -> list[dict[s
 
         timestamp = reception.get("timestamp")
         timestamp_is_unknown = not isinstance(timestamp, (int, float))
-        timestamp_sort = float(timestamp) if isinstance(timestamp, (int, float)) else 0.0
+        timestamp_sort = (
+            float(timestamp) if isinstance(timestamp, (int, float)) else 0.0
+        )
 
         return (
             hop_is_unknown,
@@ -72,15 +76,18 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        has_envelope_col = PacketRepository.has_raw_service_envelope_column(cursor)
+
         # Get the main packet information
+        env_col = ", raw_service_envelope" if has_envelope_col else ""
         cursor.execute(
-            """
+            f"""
             SELECT
                 id, timestamp, from_node_id, to_node_id, portnum, portnum_name,
                 gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_limit, hop_start,
                 payload_length, processed_successfully, raw_payload,
                 via_mqtt, want_ack, priority, delayed, channel_index, rx_time,
-                pki_encrypted, next_hop, relay_node, tx_after
+                pki_encrypted, next_hop, relay_node, tx_after{env_col}
             FROM packet_history
             WHERE id = ?
         """,
@@ -94,6 +101,7 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
             return None
 
         packet = dict(packet_row)
+        PacketRepository.hydrate_packet_envelope(packet)
 
         # Add derived fields
         packet["timestamp_str"] = datetime.fromtimestamp(
@@ -1064,9 +1072,12 @@ def get_raw_packet_analysis(packet: dict[str, Any]) -> dict[str, Any] | None:
     try:
         from meshtastic import mesh_pb2
 
+        env, mesh_packet_message = PacketRepository.hydrate_packet_envelope(packet)
+
         analysis: dict[str, Any] = {
             "service_envelope": {},
             "mesh_packet": {},
+            "mesh_packet_helpers": {},
             "mqtt_privacy": {},
             "topic_analysis": {},
             "raw_hex": packet["raw_payload"].hex() if packet["raw_payload"] else None,
@@ -1076,16 +1087,8 @@ def get_raw_packet_analysis(packet: dict[str, Any]) -> dict[str, Any] | None:
             else None,
         }
 
-        # For packets from MQTT, we need to reconstruct or get the ServiceEnvelope
-        # Since we only store the decoded MeshPacket payload, we'll work with what we have
-        # and create the ServiceEnvelope context from the stored fields
-
-        # ServiceEnvelope-level analysis from stored database fields
-        analysis["service_envelope"] = {
-            "gateway_id": packet.get("gateway_id"),
-            "channel_id": packet.get("channel_id"),
-            "topic": packet.get("topic"),
-            "description": "MQTT ServiceEnvelope contains the MeshPacket plus routing metadata",
+        analysis["service_envelope"] = protobuf_message_to_dict(env) or {
+            "description": "Original ServiceEnvelope protobuf unavailable for this packet.",
         }
 
         # Analyze the topic structure for MQTT privacy implications
@@ -1144,40 +1147,54 @@ def get_raw_packet_analysis(packet: dict[str, Any]) -> dict[str, Any] | None:
                 "privacy_implications": ["Topic information not available"],
             }
 
-        # MeshPacket field analysis
-        # We'll reconstruct what we can from the stored packet data
-        mesh_packet_data: dict[str, Any] = {
+        mesh_packet_fields = protobuf_message_to_dict(mesh_packet_message) or {
+            "description": "Original MeshPacket protobuf unavailable for this packet.",
+        }
+        analysis["mesh_packet"] = mesh_packet_fields
+        analysis["mesh_packet_db"] = {
+            "id": packet.get("id"),
+            "timestamp": packet.get("timestamp"),
+            "channel_id": packet.get("channel_id"),
+            "gateway_id": packet.get("gateway_id"),
             "from_node_id": packet.get("from_node_id"),
             "to_node_id": packet.get("to_node_id"),
+            "hop_start": packet.get("hop_start"),
+            "hop_limit": packet.get("hop_limit"),
+            "payload_length": packet.get("payload_length"),
             "portnum": packet.get("portnum"),
             "portnum_name": packet.get("portnum_name"),
-            "hop_limit": packet.get("hop_limit"),
-            "hop_start": packet.get("hop_start"),
-            "rssi": packet.get("rssi"),
-            "snr": packet.get("snr"),
-            "payload_length": packet.get("payload_length"),
-            "timestamp": packet.get("timestamp"),
-            "via_mqtt": packet.get("via_mqtt"),
-            "want_ack": packet.get("want_ack"),
-            "priority": packet.get("priority"),
-            "delayed": packet.get("delayed"),
-            "channel_index": packet.get("channel_index"),
-            "rx_time": packet.get("rx_time"),
-            "pki_encrypted": packet.get("pki_encrypted"),
-            "next_hop": packet.get("next_hop"),
-            "relay_node": packet.get("relay_node"),
-            "tx_after": packet.get("tx_after"),
-            "description": "Core mesh packet with routing and payload information",
         }
 
-        # Calculate derived fields
-        hop_start = packet.get("hop_start")
-        hop_limit = packet.get("hop_limit")
-        if hop_start is not None and hop_limit is not None:
-            mesh_packet_data["hops_taken"] = hop_start - hop_limit
-            mesh_packet_data["remaining_hops"] = hop_limit
+        mesh_packet_helpers: dict[str, Any] = {
+            "description": "Canonical MeshPacket view reconstructed from stored protobuf bytes.",
+        }
+        if mesh_packet_message is not None:
+            hop_start = getattr(mesh_packet_message, "hop_start", None)
+            hop_limit = getattr(mesh_packet_message, "hop_limit", None)
+            if hop_start is not None:
+                mesh_packet_helpers["hop_start"] = hop_start
+            if hop_limit is not None:
+                mesh_packet_helpers["hop_limit"] = hop_limit
+                mesh_packet_helpers["remaining_hops"] = hop_limit
+            if hop_start is not None and hop_limit is not None:
+                mesh_packet_helpers["hops_taken"] = hop_start - hop_limit
 
-        analysis["mesh_packet"] = mesh_packet_data
+            if mesh_packet_message.HasField("decoded"):
+                mesh_packet_helpers["payload_length"] = len(
+                    mesh_packet_message.decoded.payload
+                )
+
+            mesh_packet_helpers["via_mqtt"] = getattr(
+                mesh_packet_message, "via_mqtt", False
+            )
+            mesh_packet_helpers["want_ack"] = getattr(
+                mesh_packet_message, "want_ack", False
+            )
+            mesh_packet_helpers["pki_encrypted"] = getattr(
+                mesh_packet_message, "pki_encrypted", False
+            )
+
+        analysis["mesh_packet_helpers"] = mesh_packet_helpers
 
         # MQTT Privacy and Exposure Analysis
         mqtt_privacy: dict[str, Any] = {
@@ -1188,7 +1205,7 @@ def get_raw_packet_analysis(packet: dict[str, Any]) -> dict[str, Any] | None:
         }
 
         # Use the via_mqtt field directly
-        if packet.get("via_mqtt"):
+        if mesh_packet_helpers.get("via_mqtt"):
             mqtt_privacy["mqtt_specific_fields"]["via_mqtt"] = True
             mqtt_privacy["exposure_risks"].append(
                 "Packet originated from or passed through MQTT"
@@ -1199,17 +1216,19 @@ def get_raw_packet_analysis(packet: dict[str, Any]) -> dict[str, Any] | None:
             )
 
         # Use the pki_encrypted field directly
-        if packet.get("pki_encrypted"):
+        if mesh_packet_helpers.get("pki_encrypted"):
             mqtt_privacy["mqtt_specific_fields"]["pki_encrypted"] = True
             mqtt_privacy["privacy_features"].append("PKI encrypted packet")
 
         # Use the want_ack field
-        if packet.get("want_ack"):
+        if mesh_packet_helpers.get("want_ack"):
             mqtt_privacy["mqtt_specific_fields"]["want_ack"] = True
             mqtt_privacy["privacy_features"].append("Acknowledgment requested")
 
         # Determine exposure level based on available information
-        to_node_id = packet.get("to_node_id")
+        to_node_id = None
+        if mesh_packet_message is not None:
+            to_node_id = getattr(mesh_packet_message, "to", None)
         if to_node_id is not None and to_node_id not in [0, 0xFFFFFFFF]:
             mqtt_privacy["exposure_level"] = "Direct Message"
             mqtt_privacy["privacy_features"].append("Targeted to specific node")
@@ -1234,7 +1253,8 @@ def get_raw_packet_analysis(packet: dict[str, Any]) -> dict[str, Any] | None:
             mqtt_privacy["exposure_risks"].append("Packet visible to MQTT subscribers")
 
         # Position privacy analysis for POSITION_APP
-        if packet.get("portnum_name") == "POSITION_APP":
+        decoded_portnum = mesh_packet_fields.get("decoded", {}).get("portnum")
+        if decoded_portnum == "POSITION_APP":
             try:
                 position = mesh_pb2.Position()
                 position.ParseFromString(packet["raw_payload"])
@@ -1283,7 +1303,7 @@ def get_raw_packet_analysis(packet: dict[str, Any]) -> dict[str, Any] | None:
                 pass  # Ignore decode errors for this analysis
 
         # Hop analysis for privacy
-        hops_taken = mesh_packet_data.get("hops_taken", 0)
+        hops_taken = mesh_packet_helpers.get("hops_taken", 0)
         if hops_taken == 0:
             mqtt_privacy["mqtt_specific_fields"]["zero_hop_policy"] = True
             mqtt_privacy["privacy_features"].append(
@@ -1295,13 +1315,15 @@ def get_raw_packet_analysis(packet: dict[str, Any]) -> dict[str, Any] | None:
             )
 
         # Signal strength exposure
-        if packet.get("rssi") or packet.get("snr"):
+        rx_rssi = mesh_packet_fields.get("rx_rssi")
+        rx_snr = mesh_packet_fields.get("rx_snr")
+        if rx_rssi is not None or rx_snr is not None:
             mqtt_privacy["exposure_risks"].append(
                 "RF signal metrics exposed (location inference possible)"
             )
             mqtt_privacy["mqtt_specific_fields"]["signal_metrics"] = {
-                "rssi": packet.get("rssi"),
-                "snr": packet.get("snr"),
+                "rssi": rx_rssi,
+                "snr": rx_snr,
             }
 
         analysis["mqtt_privacy"] = mqtt_privacy
@@ -1311,66 +1333,36 @@ def get_raw_packet_analysis(packet: dict[str, Any]) -> dict[str, Any] | None:
 
         try:
             # Try to decode the actual ServiceEnvelope and MeshPacket from raw payload
-            if packet["raw_payload"]:
-                # For now, we'll use the reconstructed data since we don't store the original ServiceEnvelope
-                # In a real implementation, you'd decode the actual protobuf bytes here
+            if env and mesh_packet_message:
+                protobuf_decode["service_envelope"] = protobuf_message_to_dict(env)
 
-                # ServiceEnvelope fields (reconstructed from stored data)
-                protobuf_decode["service_envelope"] = {
-                    "gateway_id": packet.get("gateway_id"),
-                    "channel_id": packet.get("channel_id"),
-                    "packet": "MeshPacket (see mesh_packet below)",
-                }
+                decoded_dict = mesh_packet_fields.get("decoded")
+                if not isinstance(decoded_dict, dict):
+                    decoded_dict = {}
+                    mesh_packet_fields["decoded"] = decoded_dict
 
-                # MeshPacket fields (reconstructed from stored data)
-                mesh_packet_fields = {
-                    "from": packet.get("from_node_id"),
-                    "to": packet.get("to_node_id"),
-                    "id": packet.get("mesh_packet_id"),
-                    "rx_time": packet.get("rx_time"),
-                    "rx_snr": packet.get("snr"),
-                    "rx_rssi": packet.get("rssi"),
-                    "hop_limit": packet.get("hop_limit"),
-                    "hop_start": packet.get("hop_start"),
-                    "via_mqtt": packet.get("via_mqtt"),
-                    "want_ack": packet.get("want_ack"),
-                    "priority": packet.get("priority"),
-                    "delayed": packet.get("delayed"),
-                    "channel_index": packet.get("channel_index"),
-                    "pki_encrypted": packet.get("pki_encrypted"),
-                    "next_hop": packet.get("next_hop"),
-                    "relay_node": packet.get("relay_node"),
-                    "tx_after": packet.get("tx_after"),
-                }
+                try:
+                    protobuf_decode_packet = dict(packet)
+                    protobuf_portnum_name = decoded_dict.get("portnum")
+                    if protobuf_portnum_name:
+                        protobuf_decode_packet["portnum_name"] = protobuf_portnum_name
+                    if mesh_packet_message.HasField("decoded"):
+                        protobuf_decode_packet["portnum"] = (
+                            mesh_packet_message.decoded.portnum
+                        )
 
-                # Add decoded payload structure
-                if packet.get("portnum") and packet.get("raw_payload"):
-                    mesh_packet_fields["decoded"] = {
-                        "portnum": packet.get("portnum"),
-                        "payload": packet["raw_payload"].hex()
-                        if packet["raw_payload"]
-                        else None,
-                        "want_response": packet.get("want_response"),
-                        "dest": packet.get("dest"),
-                        "source": packet.get("source"),
-                        "request_id": packet.get("request_id"),
-                        "reply_id": packet.get("reply_id"),
-                        "emoji": packet.get("emoji"),
-                    }
-
-                    # Try to decode the actual payload protobuf based on portnum
-                    try:
-                        decoded_payload = decode_protobuf_payload(packet)
-                        if decoded_payload is not None:
-                            decoded_dict = mesh_packet_fields.get("decoded")
-                            if isinstance(decoded_dict, dict):
-                                decoded_dict["parsed_payload"] = decoded_payload
-                    except Exception as e:
-                        decoded_dict = mesh_packet_fields.get("decoded")
-                        if isinstance(decoded_dict, dict):
-                            decoded_dict["parse_error"] = str(e)
+                    decoded_payload = decode_protobuf_payload(protobuf_decode_packet)
+                    if decoded_payload is not None:
+                        decoded_dict["parsed_payload"] = decoded_payload
+                except Exception as e:
+                    decoded_dict["parse_error"] = str(e)
 
                 protobuf_decode["mesh_packet"] = mesh_packet_fields
+            else:
+                protobuf_decode = {
+                    "unavailable": True,
+                    "reason": "Original ServiceEnvelope protobuf is not stored for this packet, so no protobuf structure was reconstructed.",
+                }
 
         except Exception as e:
             logger.warning(

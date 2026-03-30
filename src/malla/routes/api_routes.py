@@ -34,6 +34,69 @@ from ..utils.traceroute_utils import parse_traceroute_payload
 logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
+CHAT_RELAY_CANDIDATE_CACHE_TTL_SECONDS = 600
+CHAT_RELAY_CANDIDATE_CACHE_MAX_ENTRIES = 512
+CHAT_RELAY_CANDIDATE_LOOKUP_LIMIT = 256
+_chat_relay_candidate_cache: dict[
+    tuple[int, int], tuple[float, list[dict[str, Any]]]
+] = {}
+
+
+def _prune_chat_relay_candidate_cache(now: float) -> None:
+    expired_keys = [
+        key
+        for key, (cached_at, _) in _chat_relay_candidate_cache.items()
+        if now - cached_at > CHAT_RELAY_CANDIDATE_CACHE_TTL_SECONDS
+    ]
+    for key in expired_keys:
+        _chat_relay_candidate_cache.pop(key, None)
+
+    overflow = len(_chat_relay_candidate_cache) - CHAT_RELAY_CANDIDATE_CACHE_MAX_ENTRIES
+    if overflow > 0:
+        oldest_keys = sorted(
+            _chat_relay_candidate_cache.items(), key=lambda item: item[1][0]
+        )[:overflow]
+        for key, _ in oldest_keys:
+            _chat_relay_candidate_cache.pop(key, None)
+
+
+def _get_cached_chat_relay_candidates(
+    gateway_node_id: int, relay_last_byte: int, now: float
+) -> list[dict[str, Any]] | None:
+    cache_key = (gateway_node_id, relay_last_byte)
+    cached_entry = _chat_relay_candidate_cache.get(cache_key)
+    if not cached_entry:
+        return None
+
+    cached_at, candidates = cached_entry
+    if now - cached_at > CHAT_RELAY_CANDIDATE_CACHE_TTL_SECONDS:
+        _chat_relay_candidate_cache.pop(cache_key, None)
+        return None
+
+    return candidates
+
+
+def _store_chat_relay_candidates(
+    gateway_node_id: int,
+    relay_last_byte: int,
+    candidates: list[dict[str, Any]],
+    now: float,
+) -> None:
+    _chat_relay_candidate_cache[(gateway_node_id, relay_last_byte)] = (now, candidates)
+
+
+def _serialize_chat_relay_candidates(
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": candidate["node_id"],
+            "name": candidate["node_name"],
+            "short": candidate.get("short_name", "") or "",
+        }
+        for candidate in candidates
+    ]
+
 
 @api_bp.route("/stats")
 def api_stats():
@@ -1901,6 +1964,271 @@ def api_channels():
     except Exception as e:
         logger.error(f"Error in API channels: {e}")
         return jsonify({"error": str(e), "channels": []}), 500
+
+
+@api_bp.route("/chat/messages")
+def api_chat_messages():
+    """Lightweight chat endpoint — streams raw TEXT_MESSAGE_APP rows.
+
+    The client handles dedup/grouping by mesh_packet_id and computes
+    reception counts itself.  This keeps the query trivially fast
+    (indexed scan on the primary key) and the response small (~55 KB
+    for 300 rows).
+
+    Query parameters:
+        after_id:  Only return rows with id > this value (polling cursor).
+        before_id: Only return rows with id < this value (initial history backfill).
+        channel:   Filter by channel_id (e.g. 'LongFast').
+        limit:     Max rows to return (default 300, max 500).
+
+    Response JSON:
+        packets:  list of raw packet dicts (ascending id order)
+        nodes:    dict mapping node_id -> {name, short} for every sender
+        last_id:  highest packet_history.id in the DB (polling tail)
+    """
+    try:
+        after_id = request.args.get("after_id", type=int, default=0)
+        before_id = request.args.get("before_id", type=int, default=0)
+        channel = request.args.get("channel", "").strip()
+        limit = max(1, min(request.args.get("limit", type=int, default=300), 500))
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT MAX(id) FROM packet_history")
+        row = cursor.fetchone()
+        db_last_id = row[0] if row and row[0] else 0
+
+        where = [
+            "portnum_name = 'TEXT_MESSAGE_APP'",
+            "raw_payload IS NOT NULL",
+            "payload_length > 0",
+        ]
+        params: list = []
+
+        if after_id > 0:
+            where.append("id > ?")
+            params.append(after_id)
+        elif before_id > 0:
+            where.append("id < ?")
+            params.append(before_id)
+
+        if channel:
+            where.append("channel_id = ?")
+            params.append(channel)
+
+        params.append(limit)
+
+        has_envelope_col = PacketRepository.has_raw_service_envelope_column(cursor)
+
+        env_col = ", raw_service_envelope" if has_envelope_col else ""
+        cursor.execute(
+            f"""
+            SELECT id, timestamp, from_node_id, to_node_id, channel_id,
+                   mesh_packet_id, hop_limit, hop_start, raw_payload,
+                   gateway_id, rssi, snr, relay_node{env_col}
+            FROM packet_history
+            WHERE {" AND ".join(where)}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            params,
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        from_ids: set[int] = set()
+        gateway_ids: set[int] = set()
+        packets = []
+        for r in reversed(rows):
+            raw = r["raw_payload"]
+            if isinstance(raw, bytes):
+                text = raw.decode("utf-8", errors="replace")
+            elif isinstance(raw, str):
+                text = raw
+            else:
+                continue
+
+            fid = r["from_node_id"]
+            if fid:
+                from_ids.add(fid)
+
+            gw = r["gateway_id"]
+            gateway_node_id = None
+            if gw and isinstance(gw, str) and gw.startswith("!"):
+                try:
+                    gateway_node_id = int(gw[1:], 16)
+                    gateway_ids.add(gateway_node_id)
+                except ValueError:
+                    pass
+
+            pkt: dict = {
+                "i": r["id"],
+                "t": r["timestamp"],
+                "f": fid,
+                "d": r["to_node_id"],
+                "ch": r["channel_id"],
+                "m": r["mesh_packet_id"],
+                "hl": r["hop_limit"],
+                "hs": r["hop_start"],
+                "tx": text,
+                "gw": gw,
+            }
+            if r["rssi"] is not None:
+                pkt["rs"] = r["rssi"]
+            if r["snr"] is not None:
+                pkt["sn"] = r["snr"]
+            if r["relay_node"] and r["relay_node"] != 0:
+                pkt["rl"] = r["relay_node"]
+
+            raw_env = r["raw_service_envelope"] if has_envelope_col else None
+            if raw_env:
+                packet_record = {
+                    "id": r["id"],
+                    "channel_id": r["channel_id"],
+                    "raw_service_envelope": raw_env,
+                }
+                PacketRepository.hydrate_packet_envelope(packet_record)
+                if packet_record.get("reply_id"):
+                    pkt["ri"] = packet_record["reply_id"]
+                if packet_record.get("emoji"):
+                    pkt["em"] = 1
+
+            packets.append(pkt)
+
+        all_node_ids = list(from_ids | gateway_ids)
+        names = get_bulk_node_names(all_node_ids) if all_node_ids else {}
+        shorts = get_bulk_node_short_names(all_node_ids) if all_node_ids else {}
+
+        nodes: dict[str, dict] = {}
+        for nid in all_node_ids:
+            nodes[str(nid)] = {
+                "name": names.get(nid, f"!{nid:08x}"),
+                "short": shorts.get(nid, ""),
+            }
+
+        # Cross-reference relay byte suffixes against all known nodes
+        relay_bytes: set[int] = set()
+        for p in packets:
+            rl = p.get("rl")
+            if rl:
+                relay_bytes.add(rl & 0xFF)
+
+        relays: dict[str, list] = {}
+        if relay_bytes:
+            conn2 = get_db_connection()
+            c2 = conn2.cursor()
+            placeholders = ",".join("?" for _ in relay_bytes)
+            c2.execute(
+                f"""
+                SELECT node_id, long_name, short_name
+                FROM node_info
+                WHERE (node_id & 255) IN ({placeholders})
+                AND (long_name IS NOT NULL OR short_name IS NOT NULL)
+                """,
+                list(relay_bytes),
+            )
+            for row in c2.fetchall():
+                byte_val = str(row["node_id"] & 0xFF)
+                if byte_val not in relays:
+                    relays[byte_val] = []
+                relays[byte_val].append(
+                    {
+                        "id": row["node_id"],
+                        "name": row["long_name"] or f"!{row['node_id']:08x}",
+                        "short": row["short_name"] or "",
+                    }
+                )
+            conn2.close()
+
+        relay_filters: dict[str, list[dict[str, Any]]] = {}
+
+        return jsonify(
+            {
+                "packets": packets,
+                "nodes": nodes,
+                "relays": relays,
+                "relay_filters": relay_filters,
+                "last_id": db_last_id,
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error in chat messages API: {e}")
+        return jsonify(
+            {
+                "error": str(e),
+                "packets": [],
+                "nodes": {},
+                "relays": {},
+                "relay_filters": {},
+                "last_id": 0,
+            }
+        ), 500
+
+
+@api_bp.route("/chat/relay-filters")
+def api_chat_relay_filters():
+    """Resolve narrow relay candidates for exact gateway/last-byte chat pairs."""
+    try:
+        parsed_pairs: list[tuple[int, int]] = []
+        for raw_pair in request.args.getlist("pair")[:CHAT_RELAY_CANDIDATE_LOOKUP_LIMIT]:
+            gateway_part, separator, relay_part = raw_pair.partition(":")
+            if not separator:
+                continue
+
+            try:
+                gateway_node_id = int(gateway_part)
+                relay_last_byte = int(relay_part)
+            except ValueError:
+                continue
+
+            if relay_last_byte < 0 or relay_last_byte > 255:
+                continue
+
+            parsed_pairs.append((gateway_node_id, relay_last_byte))
+
+        unique_pairs = sorted(set(parsed_pairs))
+        relay_filters: dict[str, list[dict[str, Any]]] = {}
+        if not unique_pairs:
+            return jsonify({"relay_filters": relay_filters})
+
+        now = time.time()
+        _prune_chat_relay_candidate_cache(now)
+        missing_pairs: list[tuple[int, int]] = []
+        for gateway_node_id, relay_last_byte in unique_pairs:
+            cache_key = f"{gateway_node_id}:{relay_last_byte}"
+            cached_candidates = _get_cached_chat_relay_candidates(
+                gateway_node_id, relay_last_byte, now
+            )
+            if cached_candidates is not None:
+                relay_filters[cache_key] = cached_candidates
+            else:
+                missing_pairs.append((gateway_node_id, relay_last_byte))
+
+        if missing_pairs:
+            looked_up_candidates = NodeRepository.get_relay_node_candidates_for_pairs(
+                missing_pairs
+            )
+            for gateway_node_id, relay_last_byte in missing_pairs:
+                serialized_candidates = _serialize_chat_relay_candidates(
+                    looked_up_candidates.get(gateway_node_id, {}).get(
+                        relay_last_byte, []
+                    )
+                )
+                _store_chat_relay_candidates(
+                    gateway_node_id,
+                    relay_last_byte,
+                    serialized_candidates,
+                    now,
+                )
+                relay_filters[f"{gateway_node_id}:{relay_last_byte}"] = (
+                    serialized_candidates
+                )
+
+        return jsonify({"relay_filters": relay_filters})
+    except Exception as e:
+        logger.error(f"Error in chat relay filters API: {e}")
+        return jsonify({"error": str(e), "relay_filters": {}}), 500
 
 
 def safe_jsonify(data, *args, **kwargs):
