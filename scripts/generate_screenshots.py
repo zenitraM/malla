@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import argparse
 import http.client
+import os
 import logging
+import shutil
 import socket
 import sqlite3
 import sys
@@ -70,6 +72,40 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)8s %(name)s │ %(message)s",
     datefmt="%H:%M:%S",
 )
+
+
+def _configure_playwright_nodejs_path() -> None:
+    """Force Playwright to use a system Node runtime when available."""
+
+    if os.environ.get("PLAYWRIGHT_NODEJS_PATH"):
+        return
+
+    node_path = shutil.which("node")
+    if node_path:
+        os.environ["PLAYWRIGHT_NODEJS_PATH"] = node_path
+
+
+def _discover_playwright_chromium_executable() -> str | None:
+    """Return a packaged Chromium executable if one is available."""
+
+    browsers_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if not browsers_path:
+        return None
+
+    browser_root = Path(browsers_path)
+    patterns = [
+        "chromium-*/chrome-linux/chrome",
+        "chromium-*/chrome-linux64/chrome",
+    ]
+    for pattern in patterns:
+        for candidate in sorted(browser_root.glob(pattern)):
+            if candidate.is_file():
+                return str(candidate)
+
+    return None
+
+
+_configure_playwright_nodejs_path()
 
 # The list of (route, output filename) to capture – order matters for README.
 # JPEG is used for smaller, README-friendly assets.
@@ -389,14 +425,21 @@ def _capture_screenshots(base_url: str, out_dir: Path) -> list[Path]:
     images: list[Path] = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
+        launch_kwargs = {
+            "headless": True,
+            "args": [
                 "--no-sandbox",
                 "--disable-gpu",
                 "--disable-dev-shm-usage",
             ],
-        )
+        }
+        chromium_executable = _discover_playwright_chromium_executable()
+        if chromium_executable:
+            launch_kwargs["executable_path"] = chromium_executable
+        else:
+            launch_kwargs["channel"] = "chromium"
+
+        browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(
             viewport={
                 "width": 1920,
