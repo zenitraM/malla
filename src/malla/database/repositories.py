@@ -24,7 +24,20 @@ logger = logging.getLogger(__name__)
 RELAY_CANDIDATE_CACHE_TTL_SECONDS = 1800
 RELAY_CANDIDATE_CACHE_MAX_ENTRIES = 4096
 _relay_candidate_cache: dict[tuple[int, int], tuple[float, list[dict[str, Any]]]] = {}
-_relay_candidate_indexes_ready = False
+_relay_candidate_indexes_ready: set[str] = set()
+
+
+def _get_db_identity(cursor) -> str:
+    try:
+        cursor.execute("PRAGMA database_list")
+        row = cursor.fetchone()
+        if row and len(row) >= 3:
+            return f"db:{row[2] or ':memory:'}"
+    except Exception:
+        pass
+
+    connection = getattr(cursor, "connection", None)
+    return f"connection:{id(connection) if connection is not None else id(cursor)}"
 
 
 def _prune_relay_candidate_cache(now: float) -> None:
@@ -74,8 +87,8 @@ def _store_relay_candidates(
 
 
 def _ensure_relay_candidate_indexes(cursor) -> None:
-    global _relay_candidate_indexes_ready
-    if _relay_candidate_indexes_ready:
+    cache_key = _get_db_identity(cursor)
+    if cache_key in _relay_candidate_indexes_ready:
         return
 
     cursor.execute(
@@ -98,7 +111,7 @@ def _ensure_relay_candidate_indexes(cursor) -> None:
            ON packet_history(from_node_id, lower(substr(gateway_id, -2)))
            WHERE hop_start = hop_limit AND gateway_id IS NOT NULL"""
     )
-    _relay_candidate_indexes_ready = True
+    _relay_candidate_indexes_ready.add(cache_key)
 
 
 class DashboardRepository:
