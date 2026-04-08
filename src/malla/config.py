@@ -38,6 +38,7 @@ class AppConfig:
     mqtt_password: str | None = None
     mqtt_topic_prefix: str = "msh"
     mqtt_topic_suffix: str = "/+/+/+/#"
+    mqtt_client_id: str | None = None
 
     # Meshtastic channel default key (for optional packet decryption)
     # Supports comma-separated list of base64-encoded keys
