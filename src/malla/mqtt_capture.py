@@ -69,6 +69,7 @@ MQTT_USERNAME: str | None = _cfg.mqtt_username
 MQTT_PASSWORD: str | None = _cfg.mqtt_password
 MQTT_TOPIC_PREFIX: str = _cfg.mqtt_topic_prefix
 MQTT_TOPIC_SUFFIX: str = _cfg.mqtt_topic_suffix
+MQTT_CLIENT_ID: str | None = _cfg.mqtt_client_id
 
 # Database file path
 DATABASE_FILE: str = _cfg.database_file
@@ -1399,7 +1400,12 @@ def main() -> None:
     load_node_cache()
 
     # Initialize MQTT Client
-    mqtt_client = mqtt.Client(CallbackAPIVersion.VERSION2)
+    mqtt_client = mqtt.Client(CallbackAPIVersion.VERSION2, client_id=MQTT_CLIENT_ID or "")
+
+    if MQTT_CLIENT_ID:
+        logging.info(f"Using configured MQTT client ID: {MQTT_CLIENT_ID}")
+    else:
+        logging.info("Using randomly generated MQTT client ID")
 
     if MQTT_USERNAME:
         mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)

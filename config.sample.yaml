@@ -40,6 +40,7 @@ debug: false
 # mqtt_password: ""  # optional
 # mqtt_topic_prefix: "msh"
 # mqtt_topic_suffix: "/+/+/+/#"
+# mqtt_client_id: ""  # optional, leave empty for a randomly generated client ID
 
 # Default channel key(s) used for decrypting secondary channels (base64)
 # Supports multiple comma-separated keys - each key will be tried in order
