@@ -82,50 +82,53 @@ class RelayNodeAnalysis {
         const tbody = container.querySelector('tbody');
         if (!tbody) return;
 
-        tbody.innerHTML = '';
+        tbody.replaceChildren();
 
         stats.forEach(stat => {
             const row = document.createElement('tr');
 
-            // Relay node column
             const relayCell = document.createElement('td');
-            relayCell.innerHTML = `<code class="text-primary">${stat.relay_hex}</code>`;
+            relayCell.appendChild(el('code', { className: 'text-primary' }, stat.relay_hex));
             row.appendChild(relayCell);
 
-            // Count column
             const countCell = document.createElement('td');
-            countCell.innerHTML = `<span class="badge bg-info">${stat.count}</span>`;
+            countCell.appendChild(badge(String(stat.count), 'bg-info'));
             row.appendChild(countCell);
 
-            // Avg RSSI column
             const rssiCell = document.createElement('td');
             if (stat.avg_rssi !== null && stat.avg_rssi !== undefined) {
                 const rssiValue = stat.avg_rssi.toFixed(1);
-                rssiCell.innerHTML = `<span class="text-muted">${rssiValue} dBm</span>`;
+                rssiCell.appendChild(el('span', { className: 'text-muted' }, `${rssiValue} dBm`));
             } else {
-                rssiCell.innerHTML = '<span class="text-muted">-</span>';
+                rssiCell.appendChild(el('span', { className: 'text-muted' }, '-'));
             }
             row.appendChild(rssiCell);
 
-            // Avg SNR column
             const snrCell = document.createElement('td');
             if (stat.avg_snr !== null && stat.avg_snr !== undefined) {
                 const snrValue = stat.avg_snr.toFixed(1);
-                snrCell.innerHTML = `<span class="text-muted">${snrValue} dB</span>`;
+                snrCell.appendChild(el('span', { className: 'text-muted' }, `${snrValue} dB`));
             } else {
-                snrCell.innerHTML = '<span class="text-muted">-</span>';
+                snrCell.appendChild(el('span', { className: 'text-muted' }, '-'));
             }
             row.appendChild(snrCell);
 
-            // Candidates column
             const candidatesCell = document.createElement('td');
             if (stat.candidates && stat.candidates.length > 0) {
-                const candidateLinks = stat.candidates.map(candidate => {
-                    return `<a href="/node/${candidate.node_id}" class="node-link text-decoration-none">${candidate.node_name}</a> <small class="text-muted">(${candidate.last_byte})</small>`;
-                }).join(', ');
-                candidatesCell.innerHTML = candidateLinks;
+                const candidateNodes = [];
+                stat.candidates.forEach((candidate, index) => {
+                    if (index > 0) candidateNodes.push(textNode(', '));
+                    candidateNodes.push(
+                        nodeLink(candidate.node_id, candidate.node_name, {
+                            className: 'node-link text-decoration-none'
+                        }),
+                        textNode(' '),
+                        el('small', { className: 'text-muted' }, `(${candidate.last_byte})`)
+                    );
+                });
+                candidatesCell.appendChild(fragment(candidateNodes));
             } else {
-                candidatesCell.innerHTML = '<span class="text-muted">No matching 0-hop nodes</span>';
+                candidatesCell.appendChild(el('span', { className: 'text-muted' }, 'No matching 0-hop nodes'));
             }
             row.appendChild(candidatesCell);
 
@@ -140,14 +143,16 @@ class RelayNodeAnalysis {
         const tbody = container.querySelector('tbody');
         if (!tbody) return;
 
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="5" class="text-center text-muted py-3">
-                    <i class="bi bi-info-circle"></i> No relay node data available for this gateway.
-                    <br><small>This node may not have reported any packets with relay_node information.</small>
-                </td>
-            </tr>
-        `;
+        tbody.replaceChildren(
+            el('tr', null,
+                el('td', { colspan: '5', className: 'text-center text-muted py-3' },
+                    icon('bi bi-info-circle'),
+                    textNode(' No relay node data available for this gateway.'),
+                    el('br'),
+                    el('small', null, 'This node may not have reported any packets with relay_node information.')
+                )
+            )
+        );
     }
 
     /**
@@ -161,13 +166,14 @@ class RelayNodeAnalysis {
         const tbody = tableContainer.querySelector('tbody');
         if (!tbody) return;
 
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="5" class="text-center text-danger py-3">
-                    <i class="bi bi-exclamation-triangle"></i> Error loading relay node analysis: ${error.message}
-                </td>
-            </tr>
-        `;
+        tbody.replaceChildren(
+            el('tr', null,
+                el('td', { colspan: '5', className: 'text-center text-danger py-3' },
+                    icon('bi bi-exclamation-triangle'),
+                    textNode(` Error loading relay node analysis: ${error.message}`)
+                )
+            )
+        );
     }
 }
 

@@ -310,7 +310,11 @@ function displayNodeList(nodes, isSearchResults = false) {
 
     if (nodes.length === 0) {
         const message = isSearchResults ? 'No nodes found' : 'No nodes available';
-        container.innerHTML = `<div class="text-center text-muted py-4"><small>${message}</small></div>`;
+        setChildren(container,
+            el('div', { className: 'text-center text-muted py-4' },
+                el('small', null, message)
+            )
+        );
         return;
     }
 
@@ -321,44 +325,59 @@ function displayNodeList(nodes, isSearchResults = false) {
         return nameA.localeCompare(nameB);
     });
 
-    container.innerHTML = sortedNodes.map(node => {
+    container.replaceChildren();
+
+    sortedNodes.forEach(node => {
         const nodeId = node.node_id || node.id;
         const nodeIdHex = nodeId ? nodeId.toString(16).padStart(8, '0') : '';
         const displayName = node.display_name || node.name || `Node ${nodeIdHex}`;
 
         // Handle different node data structures
-        let ageInfo = '';
-        let roleInfo = '';
-        let hwInfo = '';
+        let ageInfo = null;
+        let roleInfo = null;
+        let hwInfo = null;
 
         if (node.age_hours !== undefined) {
             const ageClass = getAgeClass(node.age_hours);
-            ageInfo = `<span class="age-indicator ${ageClass}">${formatAge(node.age_hours)}</span>`;
+            ageInfo = el('span', { className: `age-indicator ${ageClass}` }, formatAge(node.age_hours));
         } else if (node.last_seen) {
             const ageHours = (Date.now() / 1000 - node.last_seen) / 3600;
             const ageClass = getAgeClass(ageHours);
-            ageInfo = `<span class="age-indicator ${ageClass}">${formatAge(ageHours)}</span>`;
+            ageInfo = el('span', { className: `age-indicator ${ageClass}` }, formatAge(ageHours));
         }
 
         if (node.role) {
             const roleColor = getRoleColor(node.role);
-            roleInfo = ` <span class="badge badge-sm" style="background-color: ${roleColor}; font-size: 0.6em;">${formatRole(node.role)}</span>`;
+            roleInfo = el('span', {
+                className: 'badge badge-sm',
+                style: { backgroundColor: roleColor, fontSize: '0.6em' }
+            }, formatRole(node.role));
         }
 
         if (node.hw_model) {
-            hwInfo = `<small class="text-secondary ms-2">${node.hw_model}</small>`;
+            hwInfo = el('small', { className: 'text-secondary ms-2' }, node.hw_model);
         } else if (node.connections !== undefined) {
-            hwInfo = `<small class="text-secondary ms-2">${node.connections} connections</small>`;
+            hwInfo = el('small', { className: 'text-secondary ms-2' }, `${node.connections} connections`);
         }
 
-        return `
-            <div class="node-list-item" onclick="selectNodeFromList(${nodeId})">
-                <div><strong>${displayName}</strong>${roleInfo}</div>
-                <small class="text-muted">!${nodeIdHex}</small><br>
-                ${ageInfo}${hwInfo}
-            </div>
-        `;
-    }).join('');
+        const item = el('div', { className: 'node-list-item' });
+        item.dataset.nodeId = String(nodeId);
+        item.addEventListener('click', () => selectNodeFromList(nodeId));
+
+        item.append(
+            el('div', null,
+                el('strong', null, displayName),
+                roleInfo ? textNode(' ') : null,
+                roleInfo
+            ),
+            el('small', { className: 'text-muted' }, `!${nodeIdHex}`),
+            el('br'),
+            ageInfo,
+            hwInfo
+        );
+
+        container.appendChild(item);
+    });
 
     // Update selection highlighting
     updateNodeListSelection();
@@ -379,11 +398,8 @@ function selectNodeFromList(nodeId) {
 // Update node list selection highlighting
 function updateNodeListSelection() {
     document.querySelectorAll('.node-list-item').forEach(item => {
-        const onclick = item.getAttribute('onclick');
-        if (onclick) {
-            const nodeId = parseInt(onclick.match(/\d+/)[0]);
-            item.classList.toggle('selected', nodeId === selectedNodeId);
-        }
+        const nodeId = parseInt(item.dataset.nodeId || '', 10);
+        item.classList.toggle('selected', nodeId === selectedNodeId);
     });
 }
 
@@ -400,7 +416,7 @@ function clearSelection() {
 
     // Clear hover details if present
     if (document.getElementById('hoverDetails')) {
-        document.getElementById('hoverDetails').innerHTML = '<small class="text-muted">Hover over nodes or links for details</small>';
+        setChildren(document.getElementById('hoverDetails'), el('small', { className: 'text-muted' }, 'Hover over nodes or links for details'));
     }
 }
 

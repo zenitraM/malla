@@ -349,52 +349,51 @@
         const noDataDiv = document.getElementById('direct-no-data');
 
         if (links.length === 0) {
-            tableBody.innerHTML = '';
+            tableBody.replaceChildren();
             noDataDiv.style.display = 'block';
             return;
         }
 
         noDataDiv.style.display = 'none';
-        
-        let html = '';
+        tableBody.replaceChildren();
+
         links.forEach((link, index) => {
             const snrBadgeClass = getSNRBadgeClass(link.avg_snr);
             const snrText = link.avg_snr !== null ? `${link.avg_snr.toFixed(1)} dB` : 'N/A';
-            
-            // Handle null distance values
             const distanceText = link.distance_km !== null ? `${link.distance_km.toFixed(2)} km` : 'Unknown';
             const isLongDistance = link.distance_km !== null && link.distance_km >= 10;
-            
-            html += `
-                <tr>
-                    <td><strong>${index + 1}</strong></td>
-                    <td>
-                        <a href="/node/${link.from_node_id}" class="node-link" title="${link.from_node_name}">
-                            ${link.from_node_name}
-                        </a>
-                    </td>
-                    <td>
-                        <a href="/node/${link.to_node_id}" class="node-link" title="${link.to_node_name}">
-                            ${link.to_node_name}
-                        </a>
-                    </td>
-                    <td class="${isLongDistance ? 'text-warning fw-bold' : ''}">${distanceText}</td>
-                    <td><span class="badge ${snrBadgeClass}">${snrText}</span></td>
-                    <td class="text-center">${link.traceroute_count}</td>
-                    <td>
-                        <a href="${link.packet_url}" class="btn btn-sm btn-outline-primary" title="View packet details">
-                            <i class="fas fa-eye"></i> Packet ${link.packet_id}
-                        </a>
-                        <a href="/traceroute-hops?from_node=${link.from_node_id}&to_node=${link.to_node_id}" 
-                           class="btn btn-sm btn-outline-info ms-1" title="Analyze this link">
-                            <i class="fas fa-route"></i> Analyze
-                        </a>
-                    </td>
-                </tr>
-            `;
-        });
 
-        tableBody.innerHTML = html;
+            const packetUrl = safeUrl(link.packet_url);
+            const row = el('tr', null,
+                el('td', null, el('strong', null, String(index + 1))),
+                el('td', null, nodeLink(link.from_node_id, link.from_node_name, { className: 'node-link', tooltip: false, title: link.from_node_name || 'View node details' })),
+                el('td', null, nodeLink(link.to_node_id, link.to_node_name, { className: 'node-link', tooltip: false, title: link.to_node_name || 'View node details' })),
+                el('td', { className: isLongDistance ? 'text-warning fw-bold' : '' }, distanceText),
+                el('td', null, badge(snrText, snrBadgeClass)),
+                el('td', { className: 'text-center' }, String(link.traceroute_count)),
+                el('td', null,
+                    packetUrl
+                        ? buttonLink({
+                            href: packetUrl,
+                            className: 'btn btn-sm btn-outline-primary',
+                            title: 'View packet details',
+                            iconClass: 'fas fa-eye',
+                            text: `Packet ${link.packet_id}`
+                        })
+                        : el('span', { className: 'text-muted' }, 'Packet unavailable'),
+                    textNode(' '),
+                    buttonLink({
+                        href: safePath('/traceroute-hops', { from_node: link.from_node_id, to_node: link.to_node_id }),
+                        className: 'btn btn-sm btn-outline-info ms-1',
+                        title: 'Analyze this link',
+                        iconClass: 'fas fa-route',
+                        text: 'Analyze'
+                    })
+                )
+            );
+
+            tableBody.appendChild(row);
+        });
     }
 
     function displayIndirectLinks(links) {
@@ -402,66 +401,64 @@
         const noDataDiv = document.getElementById('indirect-no-data');
 
         if (links.length === 0) {
-            tableBody.innerHTML = '';
+            tableBody.replaceChildren();
             noDataDiv.style.display = 'block';
             return;
         }
 
         noDataDiv.style.display = 'none';
-        
-        let html = '';
+        tableBody.replaceChildren();
+
         links.forEach((link, index) => {
             const snrBadgeClass = getSNRBadgeClass(link.avg_snr);
             const snrText = link.avg_snr !== null ? `${link.avg_snr.toFixed(1)} dB` : 'N/A';
-            
-            // Handle null distance values
             const distanceText = link.total_distance_km !== null ? `${link.total_distance_km.toFixed(2)} km` : 'Unknown';
             const isVeryLongPath = link.total_distance_km !== null && link.total_distance_km >= 20;
-            
-            // Format route display
-            let routeDisplay = '';
+
+            let routeDisplay;
             if (link.route_preview && link.route_preview.length > 0) {
                 const maxNodes = 3;
-                const preview = link.route_preview.slice(0, maxNodes);
-                routeDisplay = preview.join(' → ');
+                const preview = link.route_preview.slice(0, maxNodes).map((name) => textNode(name));
+                routeDisplay = joinNodes(preview, ' -> ');
                 if (link.route_preview.length > maxNodes) {
-                    routeDisplay += ` (+${link.route_preview.length - maxNodes} more)`;
+                    routeDisplay.appendChild(textNode(` (+${link.route_preview.length - maxNodes} more)`));
                 }
             } else {
-                routeDisplay = 'Direct route';
+                routeDisplay = textNode('Direct route');
             }
-            
-            html += `
-                <tr>
-                    <td><strong>${index + 1}</strong></td>
-                    <td>
-                        <a href="/node/${link.from_node_id}" class="node-link" title="${link.from_node_name}">
-                            ${link.from_node_name}
-                        </a>
-                    </td>
-                    <td>
-                        <a href="/node/${link.to_node_id}" class="node-link" title="${link.to_node_name}">
-                            ${link.to_node_name}
-                        </a>
-                    </td>
-                    <td class="${isVeryLongPath ? 'text-warning fw-bold' : ''}">${distanceText}</td>
-                    <td class="text-center">${link.hop_count}</td>
-                    <td><span class="badge ${snrBadgeClass}">${snrText}</span></td>
-                    <td><small class="text-muted route-preview">${routeDisplay}</small></td>
-                    <td>
-                        <a href="${link.packet_url}" class="btn btn-sm btn-outline-primary" title="View packet details">
-                            <i class="fas fa-eye"></i> Packet ${link.packet_id}
-                        </a>
-                        <a href="/traceroute-hops?from_node=${link.from_node_id}&to_node=${link.to_node_id}" 
-                           class="btn btn-sm btn-outline-info ms-1" title="Analyze this path">
-                            <i class="fas fa-route"></i> Analyze
-                        </a>
-                    </td>
-                </tr>
-            `;
-        });
 
-        tableBody.innerHTML = html;
+            const packetUrl = safeUrl(link.packet_url);
+            const row = el('tr', null,
+                el('td', null, el('strong', null, String(index + 1))),
+                el('td', null, nodeLink(link.from_node_id, link.from_node_name, { className: 'node-link', tooltip: false, title: link.from_node_name || 'View node details' })),
+                el('td', null, nodeLink(link.to_node_id, link.to_node_name, { className: 'node-link', tooltip: false, title: link.to_node_name || 'View node details' })),
+                el('td', { className: isVeryLongPath ? 'text-warning fw-bold' : '' }, distanceText),
+                el('td', { className: 'text-center' }, String(link.hop_count)),
+                el('td', null, badge(snrText, snrBadgeClass)),
+                el('td', null, el('small', { className: 'text-muted route-preview' }, routeDisplay)),
+                el('td', null,
+                    packetUrl
+                        ? buttonLink({
+                            href: packetUrl,
+                            className: 'btn btn-sm btn-outline-primary',
+                            title: 'View packet details',
+                            iconClass: 'fas fa-eye',
+                            text: `Packet ${link.packet_id}`
+                        })
+                        : el('span', { className: 'text-muted' }, 'Packet unavailable'),
+                    textNode(' '),
+                    buttonLink({
+                        href: safePath('/traceroute-hops', { from_node: link.from_node_id, to_node: link.to_node_id }),
+                        className: 'btn btn-sm btn-outline-info ms-1',
+                        title: 'Analyze this path',
+                        iconClass: 'fas fa-route',
+                        text: 'Analyze'
+                    })
+                )
+            );
+
+            tableBody.appendChild(row);
+        });
     }
 
     function getSNRBadgeClass(snr) {

@@ -120,15 +120,15 @@ class DirectReceptionsChart {
      * Show no data message
      */
     showNoDataMessage(direction, chartContainer) {
-        chartContainer.innerHTML = `
-            <div class="d-flex align-items-center justify-content-center h-100">
-                <div class="text-center text-muted">
-                    <i class="bi bi-info-circle" style="font-size: 2rem;"></i>
-                    <div class="mt-2">No direct ${direction} data available</div>
-                    <div class="small">Try switching to the other direction</div>
-                </div>
-            </div>
-        `;
+        chartContainer.replaceChildren(
+            el('div', { className: 'd-flex align-items-center justify-content-center h-100' },
+                el('div', { className: 'text-center text-muted' },
+                    el('i', { className: 'bi bi-info-circle', style: { fontSize: '2rem' } }),
+                    el('div', { className: 'mt-2' }, `No direct ${direction} data available`),
+                    el('div', { className: 'small' }, 'Try switching to the other direction')
+                )
+            )
+        );
     }
 
     /**
@@ -139,15 +139,15 @@ class DirectReceptionsChart {
         document.getElementById('direct-receptions-loading').style.display = 'none';
         document.getElementById('direct-receptions-content').style.display = 'block';
 
-        chartContainer.innerHTML = `
-            <div class="d-flex align-items-center justify-content-center h-100">
-                <div class="text-center text-danger">
-                    <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
-                    <div class="mt-2">Error loading direct receptions data</div>
-                    <div class="small">${error.message}</div>
-                </div>
-            </div>
-        `;
+        chartContainer.replaceChildren(
+            el('div', { className: 'd-flex align-items-center justify-content-center h-100' },
+                el('div', { className: 'text-center text-danger' },
+                    el('i', { className: 'bi bi-exclamation-triangle', style: { fontSize: '2rem' } }),
+                    el('div', { className: 'mt-2' }, 'Error loading direct receptions data'),
+                    el('div', { className: 'small' }, error.message)
+                )
+            )
+        );
 
         this.clearLegendTable('Error loading data');
     }
@@ -304,7 +304,7 @@ class DirectReceptionsChart {
         const tbody = document.querySelector('#direct-receptions-legend tbody');
         if (!tbody) return;
 
-        tbody.innerHTML = '';
+        tbody.replaceChildren();
 
         this.nodeStats.forEach((stats, index) => {
             const row = document.createElement('tr');
@@ -314,22 +314,34 @@ class DirectReceptionsChart {
             // Format values with proper null handling
             const formatValue = (val, decimals = 1) => val !== null ? val.toFixed(decimals) : 'N/A';
 
-            row.innerHTML = `
-                <td>
-                    <span class="d-inline-block" style="width: 12px; height: 12px; background-color: ${stats.color}; margin-right: 8px;"></span>
-                    ${stats.label}
-                </td>
-                <td>${stats.packetCount}</td>
-                <td>${formatValue(stats.rssiAvg)}</td>
-                <td>${formatValue(stats.rssiMin)}</td>
-                <td>${formatValue(stats.rssiMax)}</td>
-                <td>${formatValue(stats.snrAvg)}</td>
-                <td>${formatValue(stats.snrMin)}</td>
-                <td>${formatValue(stats.snrMax)}</td>
-                <td>
-                    <input type="checkbox" ${stats.visible ? 'checked' : ''} class="form-check-input">
-                </td>
-            `;
+            const checkbox = el('input', {
+                type: 'checkbox',
+                checked: stats.visible,
+                className: 'form-check-input'
+            });
+
+            row.append(
+                el('td', null,
+                    el('span', {
+                        className: 'd-inline-block',
+                        style: {
+                            width: '12px',
+                            height: '12px',
+                            backgroundColor: stats.color,
+                            marginRight: '8px'
+                        }
+                    }),
+                    textNode(stats.label)
+                ),
+                el('td', null, String(stats.packetCount)),
+                el('td', null, formatValue(stats.rssiAvg)),
+                el('td', null, formatValue(stats.rssiMin)),
+                el('td', null, formatValue(stats.rssiMax)),
+                el('td', null, formatValue(stats.snrAvg)),
+                el('td', null, formatValue(stats.snrMin)),
+                el('td', null, formatValue(stats.snrMax)),
+                el('td', null, checkbox)
+            );
 
             // Add click handler for row
             row.addEventListener('click', (e) => {
@@ -341,7 +353,6 @@ class DirectReceptionsChart {
             });
 
             // Add change handler for checkbox
-            const checkbox = row.querySelector('input[type="checkbox"]');
             checkbox.addEventListener('change', () => {
                 const datasetIndex = parseInt(row.dataset.datasetIndex);
                 this.nodeStats[datasetIndex].visible = checkbox.checked;
@@ -420,7 +431,11 @@ class DirectReceptionsChart {
     clearLegendTable(message = 'No data available') {
         const tbody = document.querySelector('#direct-receptions-legend tbody');
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted">${message}</td></tr>`;
+            tbody.replaceChildren(
+                el('tr', null,
+                    el('td', { colspan: '9', className: 'text-center text-muted' }, message)
+                )
+            );
         }
     }
 

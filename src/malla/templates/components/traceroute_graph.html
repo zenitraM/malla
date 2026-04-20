@@ -386,10 +386,35 @@ let combinedGraphSvg = null;
 let combinedGraphG = null;
 let pathElements = [];
 
+function tooltipLine(label, value) {
+    return el('div', null,
+        el('strong', null, `${label}:`),
+        textNode(` ${value}`)
+    );
+}
+
+function tooltipWithTitle(title, ...lines) {
+    return el('div', null,
+        el('div', { className: 'tooltip-title' }, title),
+        el('div', { className: 'tooltip-content' }, lines)
+    );
+}
+
+function setGraphTooltip(tooltip, event, contentNode) {
+    tooltip.node().replaceChildren(contentNode);
+    tooltip
+        .style('left', (event.pageX + 15) + 'px')
+        .style('top', (event.pageY - 10) + 'px');
+}
+
 function loadCombinedTracerouteGraph() {
     const container = document.getElementById('combined-traceroute-graph');
     if (!container || !window.packetGraphData || window.packetGraphData.nodes.length === 0) {
-        container.innerHTML = '<div class="d-flex align-items-center justify-content-center h-100"><p class="text-muted">No graph data available.</p></div>';
+        setChildren(container,
+            el('div', { className: 'd-flex align-items-center justify-content-center h-100' },
+                el('p', { className: 'text-muted' }, 'No graph data available.')
+            )
+        );
         return;
     }
 
@@ -398,7 +423,7 @@ function loadCombinedTracerouteGraph() {
     if (loader) loader.remove();
 
     // Clear container
-    container.innerHTML = '';
+    container.replaceChildren();
 
     // Set up D3 dimensions
     const containerRect = container.getBoundingClientRect();
@@ -619,51 +644,51 @@ function loadCombinedTracerouteGraph() {
             const sourceNode = nodes.find(n => n.id === (d.source.id || d.source));
             const targetNode = nodes.find(n => n.id === (d.target.id || d.target));
 
-            let content = '';
+            let contentNode;
             if (d.type === 'gateway-connection') {
-                content = `
-                    <div class="tooltip-title">🎯 Gateway Connection (${d.hop_count || 'N/A'} hops)</div>
-                    <div class="tooltip-content">
-                        <strong>From:</strong> ${sourceNode ? sourceNode.label : d.source}<br/>
-                        <strong>To Gateway:</strong> ${targetNode ? targetNode.label : d.target}<br/>
-                        <strong>Type:</strong> Gateway heard packet at this hop<br/>
-                        <strong>Packets:</strong> ${d.packet_ids.join(', ')}<br/>
-                        <strong>Gateway ID:</strong> ${d.gateway_id || 'Unknown'}
-                    </div>
-                `;
+                contentNode = tooltipWithTitle(
+                    `Gateway Connection (${d.hop_count || 'N/A'} hops)`,
+                    tooltipLine('From', sourceNode ? sourceNode.label : d.source),
+                    tooltipLine('To Gateway', targetNode ? targetNode.label : d.target),
+                    tooltipLine('Type', 'Gateway heard packet at this hop'),
+                    tooltipLine('Packets', d.packet_ids.join(', ')),
+                    tooltipLine('Gateway ID', d.gateway_id || 'Unknown')
+                );
             } else if (d.type === 'gateway-connection-zero-hop') {
-                content = `
-                    <div class="tooltip-title">📡 Direct Gateway Reception (0 hops)</div>
-                    <div class="tooltip-content">
-                        <strong>From:</strong> ${sourceNode ? sourceNode.label : d.source}<br/>
-                        <strong>To Gateway:</strong> ${targetNode ? targetNode.label : d.target}<br/>
-                        <strong>Type:</strong> Gateway received packet directly from source<br/>
-                        <strong>Hops:</strong> 0 (Direct reception)<br/>
-                        <strong>Note:</strong> No RF routing involved
-                    </div>
-                `;
+                contentNode = tooltipWithTitle(
+                    'Direct Gateway Reception (0 hops)',
+                    tooltipLine('From', sourceNode ? sourceNode.label : d.source),
+                    tooltipLine('To Gateway', targetNode ? targetNode.label : d.target),
+                    tooltipLine('Type', 'Gateway received packet directly from source'),
+                    tooltipLine('Hops', '0 (Direct reception)'),
+                    tooltipLine('Note', 'No RF routing involved')
+                );
             } else {
-                let pathInfo = '';
-                if (d.paths && d.paths.length > 0) {
-                    pathInfo = `<br><span class="tooltip-badge">Packets: ${d.paths.join(', ')}</span>`;
+                const lines = [
+                    tooltipLine('From', sourceNode ? sourceNode.label : d.source),
+                    tooltipLine('To', targetNode ? targetNode.label : d.target),
+                    tooltipLine('Observations', d.value),
+                    tooltipLine('Type', d.is_bidirectional ? 'Bidirectional' : 'Unidirectional')
+                ];
+
+                if (d.avg_snr) {
+                    lines.push(tooltipLine('Avg SNR', `${d.avg_snr.toFixed(1)} dB`));
                 }
 
-                content = `
-                    <div class="tooltip-title">🔗 RF Link Details</div>
-                    <div class="tooltip-content">
-                        <strong>From:</strong> ${sourceNode ? sourceNode.label : d.source}<br/>
-                        <strong>To:</strong> ${targetNode ? targetNode.label : d.target}<br/>
-                        <strong>Observations:</strong> ${d.value}<br/>
-                        <strong>Type:</strong> ${d.is_bidirectional ? 'Bidirectional' : 'Unidirectional'}<br/>
-                        ${d.avg_snr ? `<strong>Avg SNR:</strong> ${d.avg_snr.toFixed(1)} dB<br/>` : ''}
-                        <strong>Unique Packets:</strong> ${d.packet_ids.length}${pathInfo}
-                    </div>
-                `;
+                lines.push(tooltipLine('Unique Packets', String(d.packet_ids.length)));
+
+                if (d.paths && d.paths.length > 0) {
+                    lines.push(el('div', null,
+                        el('strong', null, 'Packets:'),
+                        textNode(' '),
+                        d.paths.map((packetId) => el('span', { className: 'tooltip-badge' }, String(packetId)))
+                    ));
+                }
+
+                contentNode = tooltipWithTitle('RF Link Details', ...lines);
             }
 
-            tooltip.html(content)
-                .style('left', (event.pageX + 15) + 'px')
-                .style('top', (event.pageY - 10) + 'px');
+            setGraphTooltip(tooltip, event, contentNode);
         })
         .on('mouseout', function(event, d) {
             // Reset link appearance
@@ -773,14 +798,20 @@ function loadCombinedTracerouteGraph() {
 
             // Find paths that include this node
             const nodePaths = paths.filter(path => path.nodes.includes(d.id));
-            let pathInfo = '';
+            const details = [
+                tooltipLine('Name', d.label),
+                tooltipLine('ID', `!${d.id.toString(16).padStart(8, '0')}`),
+                tooltipLine('Type', `${nodeTypeName}${d.is_gateway ? ' (receives packets)' : ''}`),
+                tooltipLine('RF Connections', String(allLinks.filter(l => (l.source.id || l.source) === d.id || (l.target.id || l.target) === d.id).length))
+            ];
+
             if (nodePaths.length > 0) {
-                pathInfo = `<br><strong>Packet Paths:</strong> ${nodePaths.length}<br/>`;
-                pathInfo += nodePaths.slice(0, 3).map(path =>
-                    `<span class="tooltip-badge">Packet ${path.packet_id}</span>`
-                ).join(' ');
+                details.push(tooltipLine('Packet Paths', String(nodePaths.length)));
+                details.push(el('div', null,
+                    nodePaths.slice(0, 3).map((path) => el('span', { className: 'tooltip-badge' }, `Packet ${path.packet_id}`))
+                ));
                 if (nodePaths.length > 3) {
-                    pathInfo += ` <span class="tooltip-badge">+${nodePaths.length - 3} more</span>`;
+                    details.push(el('div', null, el('span', { className: 'tooltip-badge' }, `+${nodePaths.length - 3} more`)));
                 }
             }
 
@@ -789,22 +820,11 @@ function loadCombinedTracerouteGraph() {
                 l.type === 'gateway-connection' &&
                 ((l.source.id || l.source) === d.id || (l.target.id || l.target) === d.id)
             );
-            let gatewayInfo = '';
             if (gatewayConnections.length > 0) {
-                gatewayInfo = `<br><strong>Gateway Connections:</strong> ${gatewayConnections.length}`;
+                details.push(tooltipLine('Gateway Connections', String(gatewayConnections.length)));
             }
 
-            tooltip.html(`
-                <div class="tooltip-title">${nodeTypeIcon} ${nodeTypeName} Details</div>
-                <div class="tooltip-content">
-                    <strong>Name:</strong> ${d.label}<br/>
-                    <strong>ID:</strong> !${d.id.toString(16).padStart(8, '0')}<br/>
-                    <strong>Type:</strong> ${nodeTypeName}${d.is_gateway ? ' (receives packets)' : ''}<br/>
-                    <strong>RF Connections:</strong> ${allLinks.filter(l => (l.source.id || l.source) === d.id || (l.target.id || l.target) === d.id).length}${pathInfo}${gatewayInfo}
-                </div>
-            `)
-                .style('left', (event.pageX + 15) + 'px')
-                .style('top', (event.pageY - 10) + 'px');
+            setGraphTooltip(tooltip, event, tooltipWithTitle(`${nodeTypeIcon} ${nodeTypeName} Details`, ...details));
         })
         .on('mouseout', function(event, d) {
             // Reset node appearance
@@ -955,11 +975,11 @@ function highlightPath(pathData, highlight) {
 function populateLegendPaths(paths, nodes) {
     const container = document.getElementById('legend-paths-container');
     if (!container || !paths || paths.length === 0) {
-        container.innerHTML = '<small class="text-muted">No paths available</small>';
+        setChildren(container, el('small', { className: 'text-muted' }, 'No paths available'));
         return;
     }
 
-    container.innerHTML = '';
+    container.replaceChildren();
 
     // Sort paths by hop count and packet ID
     const sortedPaths = [...paths].sort((a, b) => {
@@ -981,19 +1001,14 @@ function populateLegendPaths(paths, nodes) {
         const gatewayInfo = path.gateway_node_id ?
             nodes.find(n => n.id === path.gateway_node_id) : null;
 
-        pathItem.innerHTML = `
-            <div class="legend-path-color" style="background-color: ${path.color};"></div>
-            <div class="legend-path-info">
-                <div class="legend-path-title">
-                    Packet ${path.packet_id} (${path.hop_count} hops)
-                </div>
-                <div class="legend-path-details">
-                    ${pathNodes.join(' → ')}
-                    ${gatewayInfo ? ` → 📡 ${gatewayInfo.label}` : ''}
-                </div>
-                ${path.avg_snr ? `<div class="legend-path-details">Avg SNR: ${path.avg_snr.toFixed(1)} dB</div>` : ''}
-            </div>
-        `;
+        pathItem.append(
+            el('div', { className: 'legend-path-color', style: { backgroundColor: path.color } }),
+            el('div', { className: 'legend-path-info' },
+                el('div', { className: 'legend-path-title' }, `Packet ${path.packet_id} (${path.hop_count} hops)`),
+                el('div', { className: 'legend-path-details' }, `${pathNodes.join(' -> ')}${gatewayInfo ? ` -> Gateway ${gatewayInfo.label}` : ''}`),
+                path.avg_snr ? el('div', { className: 'legend-path-details' }, `Avg SNR: ${path.avg_snr.toFixed(1)} dB`) : null
+            )
+        );
 
         // Add hover interactions
         pathItem.addEventListener('mouseenter', () => {
@@ -1056,51 +1071,55 @@ function showLinkDetails(sourceNode, targetNode, linkData) {
     modal.className = 'modal-content';
     modal.onclick = (e) => e.stopPropagation(); // Prevent closing when clicking inside modal
 
-    const snrBadge = linkData.avg_snr ?
-        `<span class="badge ${linkData.avg_snr > -10 ? 'bg-success' : linkData.avg_snr > -20 ? 'bg-warning' : 'bg-danger'}">${linkData.avg_snr.toFixed(1)} dB</span>` :
-        '<span class="badge bg-secondary">N/A</span>';
+    const snrBadge = linkData.avg_snr
+        ? badge(`${linkData.avg_snr.toFixed(1)} dB`, linkData.avg_snr > -10 ? 'bg-success' : linkData.avg_snr > -20 ? 'bg-warning' : 'bg-danger')
+        : badge('N/A', 'bg-secondary');
 
-    modal.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h5 style="margin: 0;"><i class="bi bi-arrow-left-right"></i> RF Link Details</h5>
-            <button onclick="document.querySelector('.modal-backdrop').remove()" class="btn-close btn-close-white" aria-label="Close"></button>
-        </div>
-        <div>
-            <div class="row mb-3">
-                <div class="col-6">
-                    <strong>From:</strong><br>
-                    <span class="text-primary">${sourceNode.label}</span>
-                </div>
-                <div class="col-6">
-                    <strong>To:</strong><br>
-                    <span class="text-primary">${targetNode.label}</span>
-                </div>
-            </div>
-            <div class="row mb-3">
-                <div class="col-4">
-                    <strong>Observations:</strong><br>
-                    <span class="badge bg-info">${linkData.value}</span>
-                </div>
-                <div class="col-4">
-                    <strong>Type:</strong><br>
-                    <span class="badge ${linkData.is_bidirectional ? 'bg-success' : 'bg-warning'}">${linkData.is_bidirectional ? 'Bidirectional' : 'Unidirectional'}</span>
-                </div>
-                <div class="col-4">
-                    <strong>Avg SNR:</strong><br>
-                    ${snrBadge}
-                </div>
-            </div>
-            <div class="mb-3">
-                <strong>Packets:</strong> ${linkData.packet_ids.join(', ')}
-            </div>
-            <div style="margin-top: 20px;">
-                <a href="#" onclick="openTracerouteHops(${sourceNode.id}, ${targetNode.id}); return false;"
-                   class="btn btn-outline-primary btn-sm" title="View hops between these nodes">
-                    <i class="bi bi-diagram-3"></i> Hops
-                </a>
-            </div>
-        </div>
-    `;
+    const closeButton = el('button', {
+        className: 'btn-close btn-close-white',
+        ariaLabel: 'Close',
+        type: 'button'
+    });
+    closeButton.addEventListener('click', () => backdrop.remove());
+
+    const hopsButton = buttonLink({
+        href: '#',
+        className: 'btn btn-outline-primary btn-sm',
+        title: 'View hops between these nodes',
+        iconClass: 'bi bi-diagram-3',
+        text: 'Hops'
+    });
+    hopsButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        openTracerouteHops(sourceNode.id, targetNode.id);
+    });
+
+    setChildren(modal,
+        el('div', {
+            style: {
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '20px'
+            }
+        },
+            el('h5', { style: { margin: '0' } }, icon('bi bi-arrow-left-right'), textNode(' RF Link Details')),
+            closeButton
+        ),
+        el('div', null,
+            el('div', { className: 'row mb-3' },
+                el('div', { className: 'col-6' }, el('strong', null, 'From:'), el('br'), el('span', { className: 'text-primary' }, sourceNode.label)),
+                el('div', { className: 'col-6' }, el('strong', null, 'To:'), el('br'), el('span', { className: 'text-primary' }, targetNode.label))
+            ),
+            el('div', { className: 'row mb-3' },
+                el('div', { className: 'col-4' }, el('strong', null, 'Observations:'), el('br'), badge(String(linkData.value), 'bg-info')),
+                el('div', { className: 'col-4' }, el('strong', null, 'Type:'), el('br'), badge(linkData.is_bidirectional ? 'Bidirectional' : 'Unidirectional', linkData.is_bidirectional ? 'bg-success' : 'bg-warning')),
+                el('div', { className: 'col-4' }, el('strong', null, 'Avg SNR:'), el('br'), snrBadge)
+            ),
+            el('div', { className: 'mb-3' }, el('strong', null, 'Packets:'), textNode(` ${linkData.packet_ids.join(', ')}`)),
+            el('div', { style: { marginTop: '20px' } }, hopsButton)
+        )
+    );
 
     backdrop.appendChild(modal);
     document.body.appendChild(backdrop);

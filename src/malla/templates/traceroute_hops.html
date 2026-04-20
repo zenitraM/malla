@@ -279,7 +279,7 @@
         }
 
         // Show loading state
-        node2Select.innerHTML = '<option value="">Loading related nodes...</option>';
+        node2Select.replaceChildren(new Option('Loading related nodes...', ''));
         node2Select.disabled = true;
 
         return fetch(`/api/traceroute/related-nodes/${nodeId}`)
@@ -359,7 +359,7 @@
         const currentValue = node2Select.value;
 
         // Clear existing options (except the first one)
-        node2Select.innerHTML = '<option value="">Choose second node...</option>';
+        node2Select.replaceChildren(new Option('Choose second node...', ''));
 
         nodes.forEach(node => {
             // Create option text with traceroute count if available
@@ -382,20 +382,13 @@
         const infoDiv = document.getElementById(`${nodeType}-info`);
 
         if (!nodeId) {
-            infoDiv.innerHTML = '';
+            infoDiv.replaceChildren();
             return;
         }
 
         const node = availableNodes.find(n => n.node_id == nodeId);
         if (node) {
-            let info = `<strong>${node.hex_id}</strong>`;
-            if (node.location) {
-                info += ` • <i class="bi bi-geo-alt"></i> ${node.location.latitude.toFixed(4)}, ${node.location.longitude.toFixed(4)}`;
-            }
-            if (node.hw_model) {
-                info += ` • ${node.hw_model}`;
-            }
-            infoDiv.innerHTML = info;
+            setChildren(infoDiv, buildNodeInfoContent(node));
         }
     }
 
@@ -404,23 +397,43 @@
         const node = availableNodes.find(n => n.node_id == nodeId);
 
         if (node) {
-            let info = `<strong>${node.hex_id}</strong>`;
-            if (node.location) {
-                info += ` • <i class="bi bi-geo-alt"></i> ${node.location.latitude.toFixed(4)}, ${node.location.longitude.toFixed(4)}`;
-            }
-            if (node.hw_model) {
-                info += ` • ${node.hw_model}`;
-            }
-
-            // Add related nodes count
-            if (relatedCount > 0) {
-                info += ` • <i class="bi bi-diagram-3"></i> ${relatedCount} related nodes`;
-            } else {
-                info += ` • <i class="bi bi-exclamation-triangle text-warning"></i> No related nodes found`;
-            }
-
-            infoDiv.innerHTML = info;
+            setChildren(infoDiv, buildNodeInfoContent(node, relatedCount));
         }
+    }
+
+    function buildInfoSeparator() {
+        return el('span', { className: 'mx-1 text-muted' }, '•');
+    }
+
+    function buildNodeInfoContent(node, relatedCount = null) {
+        const content = fragment(el('strong', node.hex_id));
+
+        if (node.location) {
+            appendChildren(
+                content,
+                buildInfoSeparator(),
+                icon('bi bi-geo-alt'),
+                ' ',
+                `${node.location.latitude.toFixed(4)}, ${node.location.longitude.toFixed(4)}`
+            );
+        }
+
+        if (node.hw_model) {
+            appendChildren(content, buildInfoSeparator(), node.hw_model);
+        }
+
+        if (relatedCount !== null) {
+            const relatedIconClass = relatedCount > 0
+                ? 'bi bi-diagram-3'
+                : 'bi bi-exclamation-triangle text-warning';
+            const relatedLabel = relatedCount > 0
+                ? `${relatedCount} related nodes`
+                : 'No related nodes found';
+
+            appendChildren(content, buildInfoSeparator(), icon(relatedIconClass), ' ', relatedLabel);
+        }
+
+        return content;
     }
 
     function analyzeHop() {
@@ -505,20 +518,25 @@
 
     function createNodeLink(nodeId, displayText, includeTooltip = true) {
         const nodeInfo = getNodeDisplayInfo(nodeId);
-        let tooltip = '';
+        const tooltipLines = [nodeInfo.name];
 
-        if (includeTooltip) {
-            tooltip = `title="${nodeInfo.name}`;
-            if (nodeInfo.location) {
-                tooltip += `\nLocation: ${nodeInfo.location.latitude.toFixed(4)}, ${nodeInfo.location.longitude.toFixed(4)}`;
-            }
-            if (nodeInfo.hw_model) {
-                tooltip += `\nHardware: ${nodeInfo.hw_model}`;
-            }
-            tooltip += `\nClick to view details"`;
+        if (nodeInfo.location) {
+            tooltipLines.push(`Location: ${nodeInfo.location.latitude.toFixed(4)}, ${nodeInfo.location.longitude.toFixed(4)}`);
         }
 
-        return `<a href="/node/${nodeId}" ${tooltip} class="text-decoration-none">${displayText || nodeInfo.name}</a>`;
+        if (nodeInfo.hw_model) {
+            tooltipLines.push(`Hardware: ${nodeInfo.hw_model}`);
+        }
+
+        if (includeTooltip) {
+            tooltipLines.push('Click to view details');
+        }
+
+        return nodeLink(nodeId, displayText || nodeInfo.name, {
+            className: 'text-decoration-none node-link',
+            tooltip: includeTooltip,
+            title: tooltipLines.join('\n')
+        });
     }
 
     function formatNodeIdForDisplay(nodeId) {
@@ -586,34 +604,39 @@
     function displayDirectionInfo(directionCounts, fromNodeId, toNodeId) {
         const directionDiv = document.getElementById('direction-info');
 
-        // Create formatted node links for the direction display
-        const fromNodeLink = createNodeLink(fromNodeId, formatNodeIdForDisplay(fromNodeId));
-        const toNodeLink = createNodeLink(toNodeId, formatNodeIdForDisplay(toNodeId));
-
-        let html = `<strong>Link Analysis:</strong> `;
-        html += `${fromNodeLink} ↔ ${toNodeLink}<br>`;
-
         const directions = Object.keys(directionCounts);
+        const content = fragment(
+            el('strong', 'Link Analysis:'),
+            ' ',
+            createNodeLink(fromNodeId, formatNodeIdForDisplay(fromNodeId)),
+            ' ↔ ',
+            createNodeLink(toNodeId, formatNodeIdForDisplay(toNodeId)),
+            el('br')
+        );
+
         if (directions.length > 1) {
-            html += '<span class="badge bg-success signal-badge">Bidirectional Link</span>';
+            appendChildren(content, badge('Bidirectional Link', 'bg-success signal-badge'));
         } else if (directions.length === 1) {
-            html += '<span class="badge bg-warning signal-badge">Unidirectional Link</span>';
+            appendChildren(content, badge('Unidirectional Link', 'bg-warning signal-badge'));
         } else {
-            html += '<span class="badge bg-secondary signal-badge">No Data</span>';
+            appendChildren(content, badge('No Data', 'bg-secondary signal-badge'));
         }
 
-        // Show traffic distribution if bidirectional
         if (directions.length > 1) {
-            html += '<br><small class="text-muted mt-1 d-block">';
-            directions.forEach(direction => {
+            const details = el('small', { className: 'text-muted mt-1 d-block' });
+            const total = Object.values(directionCounts).reduce((a, b) => a + b, 0);
+            directions.forEach((direction, index) => {
                 const count = directionCounts[direction];
-                const percentage = (count / Object.values(directionCounts).reduce((a, b) => a + b, 0) * 100).toFixed(1);
-                html += `${direction}: ${count} traceroutes (${percentage}%)<br>`;
+                const percentage = (count / total * 100).toFixed(1);
+                if (index > 0) {
+                    details.appendChild(el('br'));
+                }
+                details.append(`${direction}: ${count} traceroutes (${percentage}%)`);
             });
-            html += '</small>';
+            appendChildren(content, el('br'), details);
         }
 
-        directionDiv.innerHTML = html;
+        setChildren(directionDiv, content);
     }
 
     function updateSNRChart(traceroutes) {
@@ -728,17 +751,17 @@
         const listDiv = document.getElementById('traceroute-list');
 
         if (traceroutes.length === 0) {
-            listDiv.innerHTML = '<p class="text-muted">No traceroutes found.</p>';
+            setChildren(listDiv, el('p', { className: 'text-muted' }, 'No traceroutes found.'));
             return;
         }
 
-        let html = '';
+        const cards = [];
         traceroutes.forEach((tr, index) => {
             const snrBadgeClass = getSNRBadgeClass(tr.hop_snr);
             const snrText = tr.hop_snr !== null ? `${tr.hop_snr.toFixed(1)} dB` : 'N/A';
 
             // Create route display using structured data
-            let routeDisplay = '';
+            let routeDisplay;
             if (tr.route_hops && tr.route_hops.length > 0) {
                 // Filter out the last hop if it has no SNR (indicating it's incomplete)
                 const hopsToShow = tr.route_hops.filter((hop, hopIndex) => {
@@ -749,101 +772,137 @@
                     return true;
                 });
 
-                routeDisplay = '<div class="table-responsive"><table class="table table-sm table-borderless mb-0" style="font-size: 0.85em;">';
-                routeDisplay += '<thead><tr class="text-muted" style="font-size: 0.75em;">';
-                routeDisplay += '<th style="width: 12%;">Hop</th>';
-                routeDisplay += '<th style="width: 30%;">From</th>';
-                routeDisplay += '<th style="width: 30%;">To</th>';
-                routeDisplay += '<th style="width: 13%;">SNR</th>';
-                routeDisplay += '<th style="width: 15%;">Direction</th>';
-                routeDisplay += '</tr></thead><tbody>';
+                const table = el('table', {
+                    className: 'table table-sm table-borderless mb-0',
+                    style: { fontSize: '0.85em' }
+                });
+                const theadRow = el('tr', {
+                    className: 'text-muted',
+                    style: { fontSize: '0.75em' }
+                });
+                [
+                    ['Hop', '12%'],
+                    ['From', '30%'],
+                    ['To', '30%'],
+                    ['SNR', '13%'],
+                    ['Direction', '15%']
+                ].forEach(([label, width]) => {
+                    theadRow.appendChild(el('th', { style: { width } }, label));
+                });
+                table.appendChild(el('thead', theadRow));
+                const tbody = el('tbody');
 
                 hopsToShow.forEach(hop => {
-                    const rowClass = hop.is_target_hop ? 'table-primary' : '';
-                    const fontWeight = hop.is_target_hop ? 'font-weight: bold; color: #0d6efd;' : '';
+                    const row = el('tr', { className: hop.is_target_hop ? 'table-primary' : '' });
+                    const nodeCellClass = hop.is_target_hop ? 'fw-bold text-primary' : '';
 
-                    let snrDisplay = '—';
+                    let snrDisplay = el('span', '—');
                     if (hop.snr !== null && hop.snr !== undefined) {
                         const snrClass = hop.snr >= 0 ? 'text-success' : 'text-danger';
-                        snrDisplay = `<span class="${snrClass}">${hop.snr.toFixed(1)}</span>`;
+                        snrDisplay = el('span', { className: snrClass }, hop.snr.toFixed(1));
                     }
 
-                    // Create node links with proper formatting
-                    const fromNodeLink = createNodeLink(hop.from_node_id, hop.from_node_name);
-                    const toNodeLink = createNodeLink(hop.to_node_id, hop.to_node_name);
-
-                    // Format direction display
-                    let directionDisplay = '—';
+                    let directionDisplay = el('span', '—');
                     if (hop.direction) {
                         if (hop.direction === 'forward_rf') {
-                            directionDisplay = '<span class="badge bg-primary" style="font-size: 0.7em;">Forward</span>';
+                            directionDisplay = badge('Forward', 'bg-primary');
                         } else if (hop.direction === 'return_rf') {
-                            directionDisplay = '<span class="badge bg-success" style="font-size: 0.7em;">Return</span>';
+                            directionDisplay = badge('Return', 'bg-success');
                         } else {
-                            directionDisplay = `<span class="badge bg-secondary" style="font-size: 0.7em;">${hop.direction}</span>`;
+                            directionDisplay = badge(hop.direction, 'bg-secondary');
                         }
+                        directionDisplay.style.fontSize = '0.7em';
                     }
 
-                    routeDisplay += `<tr class="${rowClass}">`;
-                    routeDisplay += `<td><small class="text-muted">#${hop.hop_number}</small></td>`;
-                    routeDisplay += `<td style="${fontWeight}"><small>${fromNodeLink}</small></td>`;
-                    routeDisplay += `<td style="${fontWeight}"><small>${toNodeLink}</small></td>`;
-                    routeDisplay += `<td><small>${snrDisplay}</small></td>`;
-                    routeDisplay += `<td><small>${directionDisplay}</small></td>`;
-                    routeDisplay += '</tr>';
+                    const hopLabel = el('small', { className: 'text-muted' }, `#${hop.hop_number}`);
+                    const fromNode = el('small', { className: nodeCellClass || null });
+                    fromNode.appendChild(createNodeLink(hop.from_node_id, hop.from_node_name));
+                    const toNode = el('small', { className: nodeCellClass || null });
+                    toNode.appendChild(createNodeLink(hop.to_node_id, hop.to_node_name));
+                    const snrNode = el('small');
+                    snrNode.appendChild(snrDisplay);
+                    const directionNode = el('small');
+                    directionNode.appendChild(directionDisplay);
+
+                    appendChildren(
+                        row,
+                        el('td', hopLabel),
+                        el('td', fromNode),
+                        el('td', toNode),
+                        el('td', snrNode),
+                        el('td', directionNode)
+                    );
+                    tbody.appendChild(row);
                 });
 
                 // Add warning row if we filtered out incomplete hops
                 if (hopsToShow.length < tr.route_hops.length) {
                     const filteredHop = tr.route_hops[tr.route_hops.length - 1];
-                    const destinationNodeLink = createNodeLink(filteredHop.to_node_id, filteredHop.to_node_name, false);
-                    routeDisplay += `<tr class="table-warning">`;
-                    routeDisplay += `<td colspan="5" class="text-center" style="font-size: 0.8em;">`;
-                    routeDisplay += `<i class="bi bi-exclamation-triangle"></i> `;
-                    routeDisplay += `<strong>Incomplete</strong> - Last hop to ${destinationNodeLink} not confirmed`;
-                    routeDisplay += `</td></tr>`;
+                    const warningRow = el('tr', { className: 'table-warning' });
+                    const warningCell = el('td', {
+                        colspan: 5,
+                        className: 'text-center',
+                        style: { fontSize: '0.8em' }
+                    });
+                    appendChildren(
+                        warningCell,
+                        icon('bi bi-exclamation-triangle'),
+                        ' ',
+                        el('strong', 'Incomplete'),
+                        ' - Last hop to ',
+                        createNodeLink(filteredHop.to_node_id, filteredHop.to_node_name, false),
+                        ' not confirmed'
+                    );
+                    warningRow.appendChild(warningCell);
+                    tbody.appendChild(warningRow);
                 }
 
-                routeDisplay += '</tbody></table></div>';
+                table.appendChild(tbody);
+                routeDisplay = el('div', { className: 'table-responsive' }, table);
             } else {
                 // Fallback to complete_path_display if route_hops not available
-                routeDisplay = tr.complete_path_display || 'Route data unavailable';
+                routeDisplay = el('div', tr.complete_path_display || 'Route data unavailable');
             }
 
-            html += `
-                <div class="card mb-2">
-                    <div class="card-body p-3">
-                        <div class="row align-items-center">
-                            <div class="col-md-8">
-                                <div class="d-flex align-items-center">
-                                    <span class="badge ${snrBadgeClass} me-2">${snrText}</span>
-                                    <small class="text-muted">${getRelativeTime(tr.timestamp)}</small>
-                                </div>
-                            </div>
-                            <div class="col-md-4 text-md-end">
-                                <div class="d-flex flex-column align-items-end">
-                                    <small class="text-muted mb-1">
-                                        <strong>From:</strong> ${createNodeLink(tr.from_node_id, tr.from_node_name)}
-                                        ${tr.gateway_node_name ? `(via ${tr.gateway_node_name})` : ''}
-                                    </small>
-                                    <small class="text-muted mb-1">
-                                        <strong>To:</strong> ${createNodeLink(tr.to_node_id, tr.to_node_name)}
-                                    </small>
-                                    ${tr.id ? `<a href="/packet/${tr.id}" class="btn btn-sm btn-outline-primary" title="View packet details">
-                                        <i class="bi bi-info-circle"></i> Packet Details
-                                    </a>` : ''}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="mt-2">
-                            ${routeDisplay}
-                        </div>
-                    </div>
-                </div>
-            `;
+            const fromInfo = el('small', { className: 'text-muted mb-1' });
+            appendChildren(fromInfo, el('strong', 'From:'), ' ', createNodeLink(tr.from_node_id, tr.from_node_name));
+            if (tr.gateway_node_name) {
+                fromInfo.append(` (via ${tr.gateway_node_name})`);
+            }
+
+            const toInfo = el('small', { className: 'text-muted mb-1' });
+            appendChildren(toInfo, el('strong', 'To:'), ' ', createNodeLink(tr.to_node_id, tr.to_node_name));
+
+            const actions = el('div', { className: 'd-flex flex-column align-items-end' }, fromInfo, toInfo);
+            if (tr.id) {
+                actions.appendChild(buttonLink({
+                    href: safePath(`/packet/${tr.id}`),
+                    className: 'btn btn-sm btn-outline-primary',
+                    title: 'View packet details',
+                    iconClass: 'bi bi-info-circle',
+                    text: 'Packet Details'
+                }));
+            }
+
+            cards.push(
+                el('div', { className: 'card mb-2' },
+                    el('div', { className: 'card-body p-3' },
+                        el('div', { className: 'row align-items-center' },
+                            el('div', { className: 'col-md-8' },
+                                el('div', { className: 'd-flex align-items-center' },
+                                    badge(snrText, `${snrBadgeClass} me-2`),
+                                    el('small', { className: 'text-muted' }, getRelativeTime(tr.timestamp))
+                                )
+                            ),
+                            el('div', { className: 'col-md-4 text-md-end' }, actions)
+                        ),
+                        el('div', { className: 'mt-2' }, routeDisplay)
+                    )
+                )
+            );
         });
 
-        listDiv.innerHTML = html;
+        setChildren(listDiv, cards);
 
         // Re-initialize tooltips for the new content
         reinitializeTooltips();

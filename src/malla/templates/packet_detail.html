@@ -934,6 +934,101 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+function popupBadge(text, className, style = null) {
+    return el('span', {
+        className: className ? `badge ${className}` : 'badge',
+        style: style || null
+    }, text);
+}
+
+function popupSmall(text) {
+    return el('small', text);
+}
+
+function buildRouteLocationPopup(location, index, totalLocations) {
+    const popup = el('div');
+    const isStart = index === 0;
+    const isEnd = index === totalLocations - 1;
+
+    appendChildren(popup, el('strong', location.display_name || location.original_id), el('br'));
+
+    if (isStart) {
+        appendChildren(popup, popupBadge('Start', 'bg-success'), ' ');
+    }
+    if (isEnd) {
+        appendChildren(popup, popupBadge('End', 'bg-danger'), ' ');
+    }
+    if (!isStart && !isEnd) {
+        appendChildren(popup, popupBadge(`Hop ${index}`, 'bg-primary'), ' ');
+    }
+    if (location.interpolated) {
+        appendChildren(popup, popupBadge('Interpolated', 'bg-warning'));
+    }
+
+    appendChildren(
+        popup,
+        el('br'),
+        popupSmall(location.interpolated ? 'Estimated location' : `Last seen: ${location.timestamp_str}`)
+    );
+
+    return popup;
+}
+
+function buildRelayCandidatePopup(title, badgeText, details, badgeStyle = null) {
+    const popup = el('div', el('strong', title), el('br'), popupBadge(badgeText, '', badgeStyle));
+    details.forEach((detail) => {
+        appendChildren(popup, el('br'), popupSmall(detail));
+    });
+    return popup;
+}
+
+function buildGatewayPopup(gateway) {
+    const popup = el('div');
+    appendChildren(
+        popup,
+        el('strong', gateway.display_name || gateway.gateway_id),
+        el('br'),
+        popupBadge(gateway.is_primary ? 'Primary Gateway' : 'Reception', gateway.is_primary ? 'bg-success' : 'bg-info'),
+        el('br'),
+        popupSmall(`Location: ${gateway.timestamp_str}`)
+    );
+
+    if (!gateway.is_primary) {
+        appendChildren(popup, el('br'), popupSmall(`Time offset: ${gateway.time_diff > 0 ? '+' : ''}${gateway.time_diff.toFixed(3)}s`));
+    }
+
+    if (gateway.hop_count !== null && gateway.hop_count !== undefined) {
+        appendChildren(popup, el('br'), popupSmall(`Hops: ${gateway.hop_count}`));
+    }
+
+    if (gateway.rssi) {
+        appendChildren(popup, el('br'), popupSmall(`RSSI: ${gateway.rssi} dBm`));
+    }
+
+    if (gateway.snr) {
+        appendChildren(popup, el('br'), popupSmall(`SNR: ${gateway.snr} dB`));
+    }
+
+    return popup;
+}
+
+function buildMapError(mapContainer, message) {
+    setChildren(
+        mapContainer,
+        el('div', { className: 'd-flex align-items-center justify-content-center h-100' },
+            el('div', { className: 'text-center text-muted' },
+                icon('bi bi-exclamation-triangle'),
+                el('p', { className: 'mt-2' }, message)
+            )
+        )
+    );
+
+    const iconEl = mapContainer.querySelector('i');
+    if (iconEl) {
+        iconEl.style.fontSize = '2rem';
+    }
+}
+
 async function loadTracerouteMap(routeNodes) {
     try {
         // Convert node IDs to integers for API call, handling both integers and hex strings
@@ -1123,18 +1218,7 @@ async function loadTracerouteMap(routeNodes) {
                 fillOpacity: 0.8
             }).addTo(map);
 
-            // Add popup
-            const popupContent = `
-                <div>
-                    <strong>${location.display_name || location.original_id}</strong><br>
-                    ${isStart ? '<span class="badge bg-success">Start</span>' : ''}
-                    ${isEnd ? '<span class="badge bg-danger">End</span>' : ''}
-                    ${!isStart && !isEnd ? '<span class="badge bg-primary">Hop ' + index + '</span>' : ''}
-                    ${location.interpolated ? '<span class="badge bg-warning">Interpolated</span>' : ''}
-                    <br><small>${location.interpolated ? 'Estimated location' : 'Last seen: ' + location.timestamp_str}</small>
-                </div>
-            `;
-            marker.bindPopup(popupContent);
+            marker.bindPopup(buildRouteLocationPopup(location, index, routeLocations.length));
 
             routeCoords.push([location.latitude, location.longitude]);
         });
@@ -1182,14 +1266,12 @@ async function loadTracerouteMap(routeNodes) {
                     fillOpacity: 0.8
                 }).addTo(map);
 
-                // Add popup for relay candidate
-                relayMarker.bindPopup(`
-                    <div>
-                        <strong>${relayCandidateLocation.display_name || relayCandidate.hex_id}</strong><br>
-                        <span class="badge" style="background-color: #ff6b35;">Relay Candidate (0x${window.packetData.relayHex})</span>
-                        <br><small>Last hop that likely relayed this packet</small>
-                    </div>
-                `);
+                relayMarker.bindPopup(buildRelayCandidatePopup(
+                    relayCandidateLocation.display_name || relayCandidate.hex_id,
+                    `Relay Candidate (0x${window.packetData.relayHex})`,
+                    ['Last hop that likely relayed this packet'],
+                    { backgroundColor: '#ff6b35', color: '#fff' }
+                ));
 
                 // Update bounds to include relay candidate
                 routeCoords.push([relayCandidateLocation.latitude, relayCandidateLocation.longitude]);
@@ -1324,33 +1406,7 @@ async function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocation
                 fillOpacity: 0.8
             }).addTo(map);
 
-            // Create popup content
-            let popupContent = `
-                <div>
-                    <strong>${gateway.display_name || gateway.gateway_id}</strong><br>
-                    ${gateway.is_primary ? '<span class="badge bg-success">Primary Gateway</span>' : '<span class="badge bg-info">Reception</span>'}
-                    <br><small>Location: ${gateway.timestamp_str}</small>
-            `;
-
-            if (!gateway.is_primary) {
-                popupContent += `<br><small>Time offset: ${gateway.time_diff > 0 ? '+' : ''}${gateway.time_diff.toFixed(3)}s</small>`;
-            }
-
-            if (gateway.hop_count !== null && gateway.hop_count !== undefined) {
-                popupContent += `<br><small>Hops: ${gateway.hop_count}</small>`;
-            }
-
-            if (gateway.rssi) {
-                popupContent += `<br><small>RSSI: ${gateway.rssi} dBm</small>`;
-            }
-
-            if (gateway.snr) {
-                popupContent += `<br><small>SNR: ${gateway.snr} dB</small>`;
-            }
-
-            popupContent += '</div>';
-
-            marker.bindPopup(popupContent);
+            marker.bindPopup(buildGatewayPopup(gateway));
 
             // Add hop count label if available
             if (gateway.hop_count !== null && gateway.hop_count !== undefined) {
@@ -1397,15 +1453,16 @@ async function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocation
                 }).addTo(map);
 
                 // Add popup for relay candidate
-                relayMarker.bindPopup(`
-                    <div>
-                        <strong>${relay.display_name || relay.node_name}</strong><br>
-                        <span class="badge" style="background-color: #ff6b35;">Relay Candidate</span>
-                        <br><small>Node: ${relay.short_name} (0x${window.packetData.relayHex})</small>
-                        <br><small>Last hop that likely relayed this packet</small>
-                        <br><small>Location: ${relay.timestamp_str}</small>
-                    </div>
-                `);
+                relayMarker.bindPopup(buildRelayCandidatePopup(
+                    relay.display_name || relay.node_name,
+                    'Relay Candidate',
+                    [
+                        `Node: ${relay.short_name} (0x${window.packetData.relayHex})`,
+                        'Last hop that likely relayed this packet',
+                        `Location: ${relay.timestamp_str}`
+                    ],
+                    { backgroundColor: '#ff6b35', color: '#fff' }
+                ));
 
                 // Add relay location to coords for bounds
                 coords.push([relay.latitude, relay.longitude]);
@@ -1447,15 +1504,16 @@ async function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocation
                             }).addTo(map);
 
                             // Add popup for relay candidate
-                            relayMarker.bindPopup(`
-                                <div>
-                                    <strong>${location.display_name || candidate.node_name}</strong><br>
-                                    <span class="badge" style="background-color: #ff6b35;">Relay Candidate</span>
-                                    <br><small>Node: ${candidate.short_name} (0x${reception.relay_hex})</small>
-                                    <br><small>Relayed to: ${gatewayLocation.display_name}</small>
-                                    <br><small>Location: ${location.timestamp_str}</small>
-                                </div>
-                            `);
+                            relayMarker.bindPopup(buildRelayCandidatePopup(
+                                location.display_name || candidate.node_name,
+                                'Relay Candidate',
+                                [
+                                    `Node: ${candidate.short_name} (0x${reception.relay_hex})`,
+                                    `Relayed to: ${gatewayLocation.display_name}`,
+                                    `Location: ${location.timestamp_str}`
+                                ],
+                                { backgroundColor: '#ff6b35', color: '#fff' }
+                            ));
 
                             // Add relay location to coords for bounds
                             coords.push([location.latitude, location.longitude]);
@@ -1478,14 +1536,7 @@ async function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocation
 function showMapError(mapId, message) {
     const mapContainer = document.getElementById(mapId);
     if (mapContainer) {
-        mapContainer.innerHTML = `
-            <div class="d-flex align-items-center justify-content-center h-100">
-                <div class="text-center text-muted">
-                    <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
-                    <p class="mt-2">${message}</p>
-                </div>
-            </div>
-        `;
+        buildMapError(mapContainer, message);
     }
 }
 

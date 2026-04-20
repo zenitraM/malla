@@ -254,9 +254,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 title: 'Node ID',
                 sortable: true,
                 render: (value, row) => {
-                    return `<a href="/node/${row.node_id}" class="text-decoration-none font-monospace" title="View node details">
-                                <small>${value}</small>
-                            </a>`;
+                    return el('a', {
+                        href: safePath(`/node/${encodeURIComponent(String(row.node_id))}`),
+                        className: 'text-decoration-none font-monospace',
+                        title: 'View node details'
+                    }, el('small', null, value || ''));
                 }
             },
             {
@@ -264,10 +266,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 title: 'Name',
                 sortable: true,
                 render: (value, row) => {
-                    const displayName = value || 'Unnamed';
-                    return `<a href="/node/${row.node_id}" class="text-decoration-none" title="View node details">
-                                ${displayName}
-                            </a>`;
+                    return el('a', {
+                        href: safePath(`/node/${encodeURIComponent(String(row.node_id))}`),
+                        className: 'text-decoration-none',
+                        title: 'View node details'
+                    }, value || 'Unnamed');
                 }
             },
             {
@@ -275,10 +278,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 title: 'Hardware',
                 sortable: true,
                 render: (value, row) => {
-                    if (value && value !== 'Unknown') {
-                        return `<span class="badge bg-info">${value}</span>`;
-                    }
-                    return `<span class="badge bg-light text-dark">Unknown</span>`;
+                    return badge(value && value !== 'Unknown' ? value : 'Unknown', value && value !== 'Unknown' ? 'bg-info' : 'bg-light text-dark');
                 }
             },
             {
@@ -287,19 +287,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 sortable: true,
                 render: (value, row) => {
                     if (value && value !== 'Unknown') {
-                        let badgeClass = 'bg-secondary';
-                        if (value === 'CLIENT') badgeClass = 'bg-primary';
-                        else if (value === 'ROUTER') badgeClass = 'bg-success';
-                        else if (value === 'ROUTER_LATE') badgeClass = 'bg-success';
-                        else if (value === 'REPEATER') badgeClass = 'bg-warning';
-                        else if (value === 'CLIENT_MUTE') badgeClass = 'bg-secondary';
-                        else if (value === 'CLIENT_BASE') badgeClass = 'bg-secondary';
-                        else if (value === 'ROUTER_CLIENT') badgeClass = 'bg-info';
-                        else if (value === 'SENSOR') badgeClass = 'bg-dark';
-
-                        return `<span class="badge ${badgeClass}">${value}</span>`;
+                        const roleColors = {
+                            CLIENT: 'bg-primary',
+                            ROUTER: 'bg-success',
+                            ROUTER_LATE: 'bg-success',
+                            REPEATER: 'bg-warning',
+                            CLIENT_MUTE: 'bg-secondary',
+                            CLIENT_BASE: 'bg-secondary',
+                            ROUTER_CLIENT: 'bg-info',
+                            SENSOR: 'bg-dark'
+                        };
+                        return badge(value, roleColors[value] || 'bg-secondary');
                     }
-                    return `<span class="badge bg-light text-dark">Unknown</span>`;
+                    return badge('Unknown', 'bg-light text-dark');
                 }
             },
             {
@@ -309,12 +309,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 sortKey: 'last_packet_time',
                 render: (value, row) => {
                     if (value && value !== 'Never') {
-                        // Use last_packet_time (unix timestamp) if available, otherwise use value (pre-formatted string)
                         const timestamp = row.last_packet_time || value;
-                        const formatted = formatTimestamp(timestamp);
-                        return `<small class="timestamp-display" data-timestamp="${timestamp}">${formatted}</small>`;
+                        return el('small', {
+                            className: 'timestamp-display',
+                            dataset: { timestamp }
+                        }, formatTimestamp(timestamp));
                     }
-                    return `<span class="text-muted">Never</span>`;
+                    return el('span', { className: 'text-muted' }, 'Never');
                 }
             },
             {
@@ -328,9 +329,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (count < 10) badgeClass = 'bg-warning';
                         else if (count < 50) badgeClass = 'bg-info';
 
-                        return `<span class="badge ${badgeClass}">${count}</span>`;
+                        return badge(String(count), badgeClass);
                     }
-                    return `<span class="badge bg-light text-dark">0</span>`;
+                    return badge('0', 'bg-light text-dark');
                 }
             },
             {
@@ -338,7 +339,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 title: 'Channel',
                 sortable: true,
                 render: (value) => {
-                    return value ? `<span class="badge bg-secondary">${value}</span>` : '<span class="text-muted">Unknown</span>';
+                    return value ? badge(value, 'bg-secondary') : el('span', { className: 'text-muted' }, 'Unknown');
                 }
             },
             {
@@ -346,7 +347,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 title: 'Actions',
                 sortable: false,
                 render: (value, row) => {
-                    // Create filtered URLs using the URL manager
                     const packetsUrl = urlManager.createFilteredURL('/packets', {
                         from_node: value
                     });
@@ -354,21 +354,26 @@ document.addEventListener('DOMContentLoaded', function() {
                         from_node: value
                     });
 
-                    return `
-                        <div class="btn-group" role="group">
-                            <a href="/node/${value}"
-                               class="btn btn-sm btn-outline-primary" title="View node details">
-                                <i class="bi bi-info-circle"></i>
-                            </a>
-                            <a href="${packetsUrl}"
-                               class="btn btn-sm btn-outline-secondary" title="View packets from this node">
-                                <i class="bi bi-envelope"></i>
-                            </a>
-                            <a href="${tracerouteUrl}"
-                               class="btn btn-sm btn-outline-info" title="View traceroutes from this node">
-                                <i class="bi bi-diagram-3"></i>
-                            </a>
-                        </div>`;
+                    return el('div', { className: 'btn-group', role: 'group' },
+                        buttonLink({
+                            href: safePath(`/node/${encodeURIComponent(String(value))}`),
+                            className: 'btn btn-sm btn-outline-primary',
+                            title: 'View node details',
+                            iconClass: 'bi bi-info-circle'
+                        }),
+                        buttonLink({
+                            href: packetsUrl,
+                            className: 'btn btn-sm btn-outline-secondary',
+                            title: 'View packets from this node',
+                            iconClass: 'bi bi-envelope'
+                        }),
+                        buttonLink({
+                            href: tracerouteUrl,
+                            className: 'btn btn-sm btn-outline-info',
+                            title: 'View traceroutes from this node',
+                            iconClass: 'bi bi-diagram-3'
+                        })
+                    );
                 }
             }
         ]

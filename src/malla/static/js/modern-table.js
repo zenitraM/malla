@@ -1,8 +1,3 @@
-/**
- * Modern Table Implementation using HTMX and TanStack Table concepts
- * Replaces DataTables with a more modern, lightweight solution
- */
-
 class ModernTable {
     constructor(containerId, options = {}) {
         this.container = document.getElementById(containerId);
@@ -29,142 +24,148 @@ class ModernTable {
             loading: false,
             data: [],
             totalCount: 0,
-            totalPages: 0
+            totalPages: 0,
+            isGrouped: false
         };
 
         this.searchTimeout = null;
-        this.eventListeners = {}; // Add event listener support
+        this.eventListeners = {};
+        this.paginationClickHandler = null;
         this.init();
     }
 
     init() {
         this.setupContainer();
         this.setupEventListeners();
+
+        window.modernTableInstances = window.modernTableInstances || [];
+        window.modernTableInstances.push(this);
+
         if (!this.options.deferInitialLoad) {
             this.loadData();
         }
     }
 
     setupContainer() {
-        this.container.innerHTML = `
-            <div class="modern-table-container">
-                ${this.options.enableSearch ? this.renderSearchBar() : ''}
-                <div class="table-wrapper">
-                    <table class="modern-table">
-                        <thead>
-                            ${this.renderTableHeader()}
-                        </thead>
-                        <tbody id="${this.container.id}-tbody">
-                            ${this.renderLoadingState()}
-                        </tbody>
-                    </table>
-                </div>
-                ${this.options.enablePagination ? this.renderPagination() : ''}
-            </div>
-        `;
+        this.container.replaceChildren(
+            el('div', { className: 'modern-table-container' },
+                this.options.enableSearch ? this.buildSearchBar() : null,
+                el('div', { className: 'table-wrapper' },
+                    el('table', { className: 'modern-table' },
+                        el('thead'),
+                        el('tbody', { id: `${this.container.id}-tbody` })
+                    )
+                ),
+                this.options.enablePagination ? this.buildPaginationShell() : null
+            )
+        );
+
+        this.updateTableHeader();
+        this.showLoading();
     }
 
-    renderSearchBar() {
-        return `
-            <div class="table-search-bar" style="padding: 1rem 1.5rem; border-bottom: 1px solid #e5e7eb;">
-                <div class="row align-items-center">
-                    <div class="col-md-6">
-                        <div class="input-group">
-                            <span class="input-group-text">
-                                <i class="bi bi-search"></i>
-                            </span>
-                            <input type="text"
-                                   class="form-control"
-                                   placeholder="Search..."
-                                   id="${this.container.id}-search">
-                        </div>
-                    </div>
-                    <div class="col-md-6 text-end">
-                        <div class="page-size-selector">
-                            <label for="${this.container.id}-pagesize">Show:</label>
-                            <select id="${this.container.id}-pagesize" class="form-select form-select-sm" style="width: auto; display: inline-block;">
-                                <option value="10" ${this.state.pageSize === 10 ? 'selected' : ''}>10</option>
-                                <option value="25" ${this.state.pageSize === 25 ? 'selected' : ''}>25</option>
-                                <option value="50" ${this.state.pageSize === 50 ? 'selected' : ''}>50</option>
-                                <option value="100" ${this.state.pageSize === 100 ? 'selected' : ''}>100</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
+    buildSearchBar() {
+        const select = el('select', {
+            id: `${this.container.id}-pagesize`,
+            className: 'form-select form-select-sm',
+            style: { width: 'auto', display: 'inline-block' }
+        });
+
+        [10, 25, 50, 100].forEach((size) => {
+            select.appendChild(el('option', {
+                value: String(size),
+                selected: this.state.pageSize === size
+            }, String(size)));
+        });
+
+        return el('div', {
+            className: 'table-search-bar',
+            style: { padding: '1rem 1.5rem', borderBottom: '1px solid #e5e7eb' }
+        },
+            el('div', { className: 'row align-items-center' },
+                el('div', { className: 'col-md-6' },
+                    el('div', { className: 'input-group' },
+                        el('span', { className: 'input-group-text' }, icon('bi bi-search')),
+                        el('input', {
+                            type: 'text',
+                            className: 'form-control',
+                            placeholder: this.options.searchPlaceholder || 'Search...',
+                            id: `${this.container.id}-search`
+                        })
+                    )
+                ),
+                el('div', { className: 'col-md-6 text-end' },
+                    el('div', { className: 'page-size-selector' },
+                        el('label', { htmlFor: `${this.container.id}-pagesize` }, 'Show:'),
+                        textNode(' '),
+                        select
+                    )
+                )
+            )
+        );
     }
 
-    renderTableHeader() {
-        return `
-            <tr>
-                ${this.options.columns.map(column => {
-                    const sortable = column.sortable !== false;
-                    const sortKey = column.sortKey || column.key;
-                    const isSorted = this.state.sortBy === sortKey;
+    buildPaginationShell() {
+        return el('div', { className: 'modern-pagination' },
+            el('div', { className: 'pagination-info' },
+                'Showing ',
+                el('span', { id: `${this.container.id}-start` }, '0'),
+                ' to ',
+                el('span', { id: `${this.container.id}-end` }, '0'),
+                ' of ',
+                el('span', { id: `${this.container.id}-total` }, '0'),
+                ' entries'
+            ),
+            el('div', { className: 'pagination-controls', id: `${this.container.id}-pagination` })
+        );
+    }
 
-                    // Use proper CSS classes for ::after pseudo-element
-                    let sortClass = sortable ? 'sortable' : '';
-                    if (isSorted) {
-                        sortClass += ` ${this.state.sortOrder}`;
-                    }
+    buildHeaderRow() {
+        return el('tr', null,
+            this.options.columns.map((column) => {
+                const sortable = column.sortable !== false;
+                const sortKey = column.sortKey || column.key;
+                const isSorted = this.state.sortBy === sortKey;
+                let sortClass = sortable ? 'sortable' : '';
+                if (isSorted) {
+                    sortClass += ` ${this.state.sortOrder}`;
+                }
 
-                    return `
-                        <th class="${sortClass}"
-                            ${sortable ? `data-sort="${sortKey}"` : ''}>
-                            ${column.title}
-                        </th>
-                    `;
-                }).join('')}
-            </tr>
-        `;
+                return el('th', {
+                    className: sortClass,
+                    ...(sortable ? { 'data-sort': sortKey } : {})
+                }, column.title);
+            })
+        );
     }
 
     renderLoadingState() {
-        return `
-            <tr>
-                <td colspan="${this.options.columns.length}" class="text-center py-4">
-                    <div class="loading-spinner mx-auto"></div>
-                    <div class="mt-2 text-muted">Loading...</div>
-                </td>
-            </tr>
-        `;
+        return el('tr', null,
+            el('td', {
+                colspan: String(this.options.columns.length),
+                className: 'text-center py-4'
+            },
+                el('div', { className: 'loading-spinner mx-auto' }),
+                el('div', { className: 'mt-2 text-muted' }, 'Loading...')
+            )
+        );
     }
 
     renderEmptyState() {
-        return `
-            <tr>
-                <td colspan="${this.options.columns.length}">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">
-                            <i class="bi bi-inbox"></i>
-                        </div>
-                        <div class="empty-state-title">No data found</div>
-                        <div class="empty-state-description">
-                            ${this.state.search ? 'Try adjusting your search terms' : 'No records match your current filters'}
-                        </div>
-                    </div>
-                </td>
-            </tr>
-        `;
-    }
-
-    renderPagination() {
-        return `
-            <div class="modern-pagination">
-                <div class="pagination-info">
-                    Showing <span id="${this.container.id}-start">0</span> to <span id="${this.container.id}-end">0</span>
-                    of <span id="${this.container.id}-total">0</span> entries
-                </div>
-                <div class="pagination-controls" id="${this.container.id}-pagination">
-                    <!-- Pagination buttons will be rendered here -->
-                </div>
-            </div>
-        `;
+        return el('tr', null,
+            el('td', { colspan: String(this.options.columns.length) },
+                el('div', { className: 'empty-state' },
+                    el('div', { className: 'empty-state-icon' }, icon('bi bi-inbox')),
+                    el('div', { className: 'empty-state-title' }, this.options.emptyMessage || 'No data found'),
+                    el('div', { className: 'empty-state-description' },
+                        this.state.search ? 'Try adjusting your search terms' : 'No records match your current filters'
+                    )
+                )
+            )
+        );
     }
 
     setupEventListeners() {
-        // Search functionality
         if (this.options.enableSearch) {
             const searchInput = document.getElementById(`${this.container.id}-search`);
             if (searchInput) {
@@ -178,39 +179,37 @@ class ModernTable {
                 });
             }
 
-            // Page size selector
             const pageSizeSelect = document.getElementById(`${this.container.id}-pagesize`);
             if (pageSizeSelect) {
                 pageSizeSelect.addEventListener('change', (e) => {
-                    this.state.pageSize = parseInt(e.target.value);
+                    this.state.pageSize = parseInt(e.target.value, 10);
                     this.state.page = 1;
                     this.loadData();
                 });
             }
         }
 
-        // Add sorting event listeners
         if (this.options.enableSorting) {
             this.container.addEventListener('click', (e) => {
                 const th = e.target.closest('th[data-sort]');
-                if (th) {
-                    const sortBy = th.dataset.sort;
-                    if (this.state.sortBy === sortBy) {
-                        this.state.sortOrder = this.state.sortOrder === 'asc' ? 'desc' : 'asc';
-                    } else {
-                        this.state.sortBy = sortBy;
-                        this.state.sortOrder = 'desc';
-                    }
-                    this.updateTableHeader();
-                    this.loadData();
+                if (!th) return;
+
+                const sortBy = th.dataset.sort;
+                if (this.state.sortBy === sortBy) {
+                    this.state.sortOrder = this.state.sortOrder === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.state.sortBy = sortBy;
+                    this.state.sortOrder = 'desc';
                 }
+                this.updateTableHeader();
+                this.loadData();
             });
         }
     }
 
     updateTableHeader() {
         const thead = this.container.querySelector('thead');
-        thead.innerHTML = this.renderTableHeader();
+        setChildren(thead, this.buildHeaderRow());
     }
 
     async loadData() {
@@ -229,15 +228,12 @@ class ModernTable {
                 ...this.state.filters
             });
 
-            // Add grouping parameter - prefer filter value over DOM check to avoid race conditions
             if ('group_packets' in this.state.filters) {
-                // Use the filter value when available (from reactive updates)
                 params.set('group_packets', this.state.filters.group_packets.toString());
             } else {
-                // Fall back to DOM check for backward compatibility
                 const groupingCheckbox = document.getElementById('groupPackets') ||
-                                       document.getElementById('groupTraceroutes') ||
-                                       document.getElementById('group_packets');
+                    document.getElementById('groupTraceroutes') ||
+                    document.getElementById('group_packets');
                 if (groupingCheckbox && groupingCheckbox.checked) {
                     params.set('group_packets', 'true');
                 }
@@ -252,15 +248,11 @@ class ModernTable {
             this.state.data = data.data || [];
             this.state.totalCount = data.total_count || 0;
             this.state.totalPages = Math.ceil(this.state.totalCount / this.state.pageSize);
-
-            // Track if this is a grouped query for pagination display
             this.state.isGrouped = params.get('group_packets') === 'true';
 
             this.renderTableBody();
             this.updatePagination();
-
             this.emit('dataLoaded', { data: this.state.data, totalCount: this.state.totalCount });
-
         } catch (error) {
             console.error('Error loading table data:', error);
             this.showError(error.message);
@@ -271,38 +263,38 @@ class ModernTable {
 
     showLoading() {
         const tbody = document.getElementById(`${this.container.id}-tbody`);
-        tbody.innerHTML = this.renderLoadingState();
+        setChildren(tbody, this.renderLoadingState());
     }
 
     showError(message) {
         const tbody = document.getElementById(`${this.container.id}-tbody`);
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="${this.options.columns.length}" class="text-center py-4 text-danger">
-                    <i class="bi bi-exclamation-triangle fs-1 mb-2"></i>
-                    <div>Error loading data: ${message}</div>
-                </td>
-            </tr>
-        `;
+        setChildren(tbody,
+            el('tr', null,
+                el('td', {
+                    colspan: String(this.options.columns.length),
+                    className: 'text-center py-4 text-danger'
+                },
+                    icon('bi bi-exclamation-triangle fs-1 mb-2'),
+                    el('div', null, `Error loading data: ${message}`)
+                )
+            )
+        );
     }
 
     renderTableBody() {
         const tbody = document.getElementById(`${this.container.id}-tbody`);
 
         if (this.state.data.length === 0) {
-            tbody.innerHTML = this.renderEmptyState();
+            setChildren(tbody, this.renderEmptyState());
             return;
         }
 
-        tbody.innerHTML = this.state.data.map(row => `
-            <tr>
-                ${this.options.columns.map(column => `
-                    <td>${this.renderCell(row, column)}</td>
-                `).join('')}
-            </tr>
-        `).join('');
+        const rows = this.state.data.map((row) => el('tr', null,
+            this.options.columns.map((column) => el('td', null, this.renderCell(row, column)))
+        ));
 
-        // Re-initialize tooltips and other interactive elements
+        setChildren(tbody, rows);
+
         if (window.reinitializeTooltips) {
             window.reinitializeTooltips();
         }
@@ -312,7 +304,11 @@ class ModernTable {
         const value = this.getNestedValue(row, column.key);
 
         if (column.render && typeof column.render === 'function') {
-            return column.render(value, row);
+            const rendered = column.render(value, row);
+            if (typeof rendered === 'string') {
+                throw new Error(`ModernTable renderers must return DOM nodes, not strings (column: ${column.key})`);
+            }
+            return rendered == null ? textNode('') : rendered;
         }
 
         if (column.type === 'badge') {
@@ -328,24 +324,30 @@ class ModernTable {
         }
 
         if (column.type === 'link') {
-            return `<a href="${column.linkTemplate.replace('{id}', row.id)}" class="text-decoration-none">${value || 'Unknown'}</a>`;
+            return this.renderLink(value, row, column);
         }
 
-        return value || '';
+        return textNode(value == null ? '' : String(value));
     }
 
     getNestedValue(obj, path) {
         return path.split('.').reduce((current, key) => current?.[key], obj);
     }
 
+    renderLink(value, row, column) {
+        const href = safePath(column.linkTemplate.replace('{id}', encodeURIComponent(String(row.id))));
+        return el('a', { href, className: 'text-decoration-none' }, value || 'Unknown');
+    }
+
     renderBadge(value, badgeMap = {}) {
-        const badgeClass = badgeMap[value] || 'modern-badge-secondary';
-        return `<span class="modern-badge ${badgeClass}">${value}</span>`;
+        return el('span', {
+            className: `modern-badge ${badgeMap[value] || 'modern-badge-secondary'}`
+        }, value == null ? '' : String(value));
     }
 
     renderSignalIndicator(value, unit = '') {
         if (value === null || value === undefined || value === '') {
-            return '<span class="text-muted">N/A</span>';
+            return el('span', { className: 'text-muted' }, 'N/A');
         }
 
         const numValue = parseFloat(value);
@@ -361,37 +363,30 @@ class ModernTable {
             else if (numValue > -5) className = 'signal-fair';
         }
 
-        return `<span class="${className}">${value}${unit ? ' ' + unit : ''}</span>`;
+        return el('span', { className }, `${value}${unit ? ` ${unit}` : ''}`);
     }
 
     renderActions(row, actions = []) {
-        return `
-            <div class="action-buttons">
-                ${actions.map(action => `
-                    <a href="${action.url.replace('{id}', row.id)}"
-                       class="action-btn ${action.class || ''}"
-                       title="${action.title || ''}">
-                        <i class="bi bi-${action.icon}"></i>
-                    </a>
-                `).join('')}
-            </div>
-        `;
+        return el('div', { className: 'action-buttons' },
+            actions.map((action) => el('a', {
+                href: safePath(action.url.replace('{id}', encodeURIComponent(String(row.id)))),
+                className: `action-btn ${action.class || ''}`.trim(),
+                title: action.title || ''
+            }, icon(`bi bi-${action.icon}`)))
+        );
     }
 
     updatePagination() {
         if (!this.options.enablePagination) return;
 
-        // Update info
         const start = (this.state.page - 1) * this.state.pageSize + 1;
         const end = Math.min(this.state.page * this.state.pageSize, this.state.totalCount);
 
         document.getElementById(`${this.container.id}-start`).textContent = this.state.totalCount > 0 ? start : 0;
         document.getElementById(`${this.container.id}-end`).textContent = end;
 
-        // Handle estimated counts for grouped queries
         const totalElement = document.getElementById(`${this.container.id}-total`);
         if (this.state.isGrouped && this.state.data.length === this.state.pageSize) {
-            // For grouped queries where we got a full page, show estimated count
             totalElement.textContent = `${this.state.totalCount}+`;
             totalElement.title = 'Estimated count (optimized for performance)';
         } else {
@@ -399,99 +394,88 @@ class ModernTable {
             totalElement.title = '';
         }
 
-        // Update pagination controls
         const paginationContainer = document.getElementById(`${this.container.id}-pagination`);
-        paginationContainer.innerHTML = this.renderPaginationButtons();
+        setChildren(paginationContainer, this.renderPaginationButtons());
 
-        // Add event listeners to pagination buttons
-        paginationContainer.addEventListener('click', (e) => {
+        if (this.paginationClickHandler) {
+            paginationContainer.removeEventListener('click', this.paginationClickHandler);
+        }
+
+        this.paginationClickHandler = (e) => {
             const button = e.target.closest('.pagination-btn');
             if (button && !button.disabled) {
-                const page = parseInt(button.dataset.page);
+                const page = parseInt(button.dataset.page, 10);
                 if (page && page !== this.state.page) {
                     this.state.page = page;
                     this.loadData();
                 }
             }
-        });
+        };
+
+        paginationContainer.addEventListener('click', this.paginationClickHandler);
     }
 
     renderPaginationButtons() {
         const { page, totalPages } = this.state;
-        const buttons = [];
+        const nodes = [];
 
-        // Previous button
-        buttons.push(`
-            <button class="pagination-btn"
-                    data-page="${page - 1}"
-                    ${page <= 1 ? 'disabled' : ''}>
-                <i class="bi bi-chevron-left"></i> Previous
-            </button>
-        `);
+        nodes.push(el('button', {
+            className: 'pagination-btn',
+            dataset: { page: page - 1 },
+            disabled: page <= 1
+        }, icon('bi bi-chevron-left'), textNode(' Previous')));
 
-        // For grouped queries with estimated counts, limit pagination display
         if (this.state.isGrouped && this.state.data.length === this.state.pageSize) {
-            // Show current page and next few pages only
             const maxDisplayPages = Math.min(totalPages, page + 5);
-
             for (let i = Math.max(1, page - 2); i <= Math.min(maxDisplayPages, page + 2); i++) {
-                buttons.push(`
-                    <button class="pagination-btn ${i === page ? 'active' : ''}"
-                            data-page="${i}">
-                        ${i}
-                    </button>
-                `);
+                nodes.push(this.createPageButton(i, i === page));
             }
-
             if (page < maxDisplayPages) {
-                buttons.push(`<span class="pagination-ellipsis">...</span>`);
+                nodes.push(el('span', { className: 'pagination-ellipsis' }, '...'));
             }
         } else {
-            // Standard pagination for exact counts
             const startPage = Math.max(1, page - 2);
             const endPage = Math.min(totalPages, page + 2);
 
             if (startPage > 1) {
-                buttons.push(`<button class="pagination-btn" data-page="1">1</button>`);
+                nodes.push(this.createPageButton(1, false));
                 if (startPage > 2) {
-                    buttons.push(`<span class="pagination-ellipsis">...</span>`);
+                    nodes.push(el('span', { className: 'pagination-ellipsis' }, '...'));
                 }
             }
 
             for (let i = startPage; i <= endPage; i++) {
-                buttons.push(`
-                    <button class="pagination-btn ${i === page ? 'active' : ''}"
-                            data-page="${i}">
-                        ${i}
-                    </button>
-                `);
+                nodes.push(this.createPageButton(i, i === page));
             }
 
             if (endPage < totalPages) {
                 if (endPage < totalPages - 1) {
-                    buttons.push(`<span class="pagination-ellipsis">...</span>`);
+                    nodes.push(el('span', { className: 'pagination-ellipsis' }, '...'));
                 }
-                buttons.push(`<button class="pagination-btn" data-page="${totalPages}">${totalPages}</button>`);
+                nodes.push(this.createPageButton(totalPages, false));
             }
         }
 
-        // Next button - for grouped queries, only disable if we got less than a full page
         const hasNextPage = this.state.isGrouped ?
             this.state.data.length === this.state.pageSize :
             page < totalPages;
 
-        buttons.push(`
-            <button class="pagination-btn"
-                    data-page="${page + 1}"
-                    ${!hasNextPage ? 'disabled' : ''}>
-                Next <i class="bi bi-chevron-right"></i>
-            </button>
-        `);
+        nodes.push(el('button', {
+            className: 'pagination-btn',
+            dataset: { page: page + 1 },
+            disabled: !hasNextPage
+        }, textNode('Next '), icon('bi bi-chevron-right')));
 
-        return buttons.join('');
+        return nodes;
     }
 
-    // Public methods for external control
+    createPageButton(pageNumber, active) {
+        return el('button', {
+            className: `pagination-btn${active ? ' active' : ''}`,
+            dataset: { page: pageNumber }
+        }, String(pageNumber));
+    }
+
     setFilters(filters) {
         this.state.filters = filters;
         this.state.page = 1;
@@ -511,7 +495,6 @@ class ModernTable {
     updateColumns(newColumns) {
         this.options.columns = newColumns;
         this.updateTableHeader();
-        // Re-render the table body with the new columns
         this.renderTableBody();
     }
 
@@ -538,7 +521,6 @@ class ModernTable {
         this.loadData();
     }
 
-    // Add event listener support
     on(event, callback) {
         if (!this.eventListeners[event]) {
             this.eventListeners[event] = [];
@@ -546,13 +528,11 @@ class ModernTable {
         this.eventListeners[event].push(callback);
     }
 
-    // Emit events
     emit(event, data) {
         if (this.eventListeners[event]) {
-            this.eventListeners[event].forEach(callback => callback(data));
+            this.eventListeners[event].forEach((callback) => callback(data));
         }
     }
 }
 
-// Export for use in other scripts
 window.ModernTable = ModernTable;

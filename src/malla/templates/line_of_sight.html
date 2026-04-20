@@ -487,7 +487,7 @@ async function sortToNodesByDistance(fromNodeId) {
                         const distanceSpan = document.createElement('span');
                         distanceSpan.className = 'ms-2 distance-info';
                         distanceSpan.style.color = 'var(--bs-success)';
-                        distanceSpan.innerHTML = `📍 ${node._distance.toFixed(1)} km`;
+                        distanceSpan.textContent = `📍 ${node._distance.toFixed(1)} km`;
                         details.appendChild(distanceSpan);
                     }
                 }
@@ -707,71 +707,81 @@ function displayResults(data) {
     const toTerrainElevation = geoPoints[geoPoints.length - 1].elevation;
 
     const useNodeElevation = document.getElementById('useNodeElevationToggle').checked;
+    const elevationModeDescription = document.getElementById('elevationModeDescription');
+    const analysisStatusBadge = document.getElementById('analysisStatusBadge');
+    const analysisMetrics = document.getElementById('analysisMetrics');
 
     // Analyze line of sight first (needed for table)
     const losAnalysis = checkLineOfSight(geoPoints, fromAltitude, toAltitude, useNodeElevation);
 
     // Display link information as table with node names as columns and info as rows
     const distanceKm = (elevationData.metrics.distance / 1000).toFixed(2);
-    document.getElementById('linkInfoHeader').innerHTML = `
-        <th style="width: 25%; border-bottom: 2px solid var(--bs-border-color);"></th>
-        <th class="text-center" style="width: 37.5%; border-bottom: 2px solid var(--bs-border-color);">
-            <i class="bi bi-geo-alt-fill text-success"></i> ${fromName}
-        </th>
-        <th class="text-center" style="width: 37.5%; border-bottom: 2px solid var(--bs-border-color);">
-            <i class="bi bi-geo-alt-fill text-danger"></i> ${toName}
-        </th>
-    `;
-    document.getElementById('linkInfoTable').innerHTML = `
-        <tr>
-            <td><strong>Node Altitude</strong></td>
-            <td class="text-center">${fromAltitude.toFixed(0)} m</td>
-            <td class="text-center">${toAltitude.toFixed(0)} m</td>
-        </tr>
-        <tr>
-            <td><strong>Terrain Elevation</strong></td>
-            <td class="text-center text-muted">${fromTerrainElevation.toFixed(0)} m</td>
-            <td class="text-center text-muted">${toTerrainElevation.toFixed(0)} m</td>
-        </tr>
-        <tr style="border-top: 2px solid var(--bs-border-color);">
-            <td><strong>Distance</strong></td>
-            <td colspan="2" class="text-center" style="font-size: 1.2rem; font-weight: bold; color: var(--bs-primary);">
-                ${distanceKm} km
-            </td>
-        </tr>
-        <tr>
-            <td><strong>Min Clearance</strong></td>
-            <td colspan="2" class="text-center">${losAnalysis.minClearance.toFixed(1)} m</td>
-        </tr>
-        <tr>
-            <td><strong>Obstacles</strong></td>
-            <td colspan="2" class="text-center">${losAnalysis.obstacles.length}</td>
-        </tr>
-        <tr>
-            <td><strong>Terrain Rise</strong></td>
-            <td colspan="2" class="text-center">${elevationData.metrics.climb.toFixed(0)} m</td>
-        </tr>
-        <tr>
-            <td><strong>Terrain Fall</strong></td>
-            <td colspan="2" class="text-center">${Math.abs(elevationData.metrics.descent).toFixed(0)} m</td>
-        </tr>
-    `;
+    const linkInfoHeader = document.getElementById('linkInfoHeader');
+    const linkInfoTable = document.getElementById('linkInfoTable');
+
+    setChildren(linkInfoHeader,
+        el('th', { style: { width: '25%', borderBottom: '2px solid var(--bs-border-color)' } }),
+        el('th', {
+            className: 'text-center',
+            style: { width: '37.5%', borderBottom: '2px solid var(--bs-border-color)' }
+        }, icon('bi bi-geo-alt-fill text-success'), textNode(' '), fromName),
+        el('th', {
+            className: 'text-center',
+            style: { width: '37.5%', borderBottom: '2px solid var(--bs-border-color)' }
+        }, icon('bi bi-geo-alt-fill text-danger'), textNode(' '), toName)
+    );
+
+    const tableRow = (label, left, right, options = {}) => el('tr', options.rowAttrs || null,
+        el('td', null, el('strong', null, label)),
+        options.singleValue
+            ? el('td', {
+                colspan: '2',
+                className: options.valueClass || 'text-center',
+                style: options.valueStyle || null
+            }, left)
+            : [
+                el('td', { className: options.leftClass || 'text-center' }, left),
+                el('td', { className: options.rightClass || 'text-center' }, right)
+            ]
+    );
+
+    setChildren(linkInfoTable,
+        tableRow('Node Altitude', `${fromAltitude.toFixed(0)} m`, `${toAltitude.toFixed(0)} m`),
+        tableRow('Terrain Elevation', `${fromTerrainElevation.toFixed(0)} m`, `${toTerrainElevation.toFixed(0)} m`, {
+            leftClass: 'text-center text-muted',
+            rightClass: 'text-center text-muted'
+        }),
+        tableRow('Distance', `${distanceKm} km`, null, {
+            singleValue: true,
+            rowAttrs: { style: { borderTop: '2px solid var(--bs-border-color)' } },
+            valueStyle: { fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--bs-primary)' }
+        }),
+        tableRow('Min Clearance', `${losAnalysis.minClearance.toFixed(1)} m`, null, { singleValue: true }),
+        tableRow('Obstacles', String(losAnalysis.obstacles.length), null, { singleValue: true }),
+        tableRow('Terrain Rise', `${elevationData.metrics.climb.toFixed(0)} m`, null, { singleValue: true }),
+        tableRow('Terrain Fall', `${Math.abs(elevationData.metrics.descent).toFixed(0)} m`, null, { singleValue: true })
+    );
 
     // Update elevation mode description
     const startElev = useNodeElevation ? (fromAltitude || fromTerrainElevation) : fromTerrainElevation;
     const endElev = useNodeElevation ? (toAltitude || toTerrainElevation) : toTerrainElevation;
-    document.getElementById('elevationModeDescription').innerHTML = useNodeElevation
+    elevationModeDescription.textContent = useNodeElevation
         ? `Using node altitudes (${startElev.toFixed(0)}m → ${endElev.toFixed(0)}m) as elevation above sea level.`
         : `Using terrain elevation (${startElev.toFixed(0)}m → ${endElev.toFixed(0)}m) at node locations. Use this when node altitude values are incorrect.`;
 
-    const statusBadge = losAnalysis.clear
-        ? '<span class="badge bg-success status-badge"><i class="bi bi-check-circle-fill"></i> Clear Line of Sight</span>'
-        : '<span class="badge bg-warning text-dark status-badge"><i class="bi bi-exclamation-triangle-fill"></i> Potential Obstructions</span>';
-
-    document.getElementById('analysisStatusBadge').innerHTML = statusBadge;
+    setChildren(
+        analysisStatusBadge,
+        el('span', {
+            className: losAnalysis.clear
+                ? 'badge bg-success status-badge'
+                : 'badge bg-warning text-dark status-badge'
+        },
+        icon(losAnalysis.clear ? 'bi bi-check-circle-fill' : 'bi bi-exclamation-triangle-fill'),
+        textNode(losAnalysis.clear ? ' Clear Line of Sight' : ' Potential Obstructions'))
+    );
 
     // Clear metrics display (now integrated into the table)
-    document.getElementById('analysisMetrics').innerHTML = '';
+    analysisMetrics.replaceChildren();
 
     // Update map
     updateMap(fromNode, toNode, geoPoints, losAnalysis.obstacles);
@@ -781,11 +791,29 @@ function displayResults(data) {
 
     // Update attribution
     const dataSet = elevationData.dataSet;
-    document.getElementById('dataSourceAttribution').innerHTML = `
-        <p class="mb-1"><strong>Elevation Data:</strong> ${dataSet.description} (${dataSet.resolutionMeters}m resolution)</p>
-        ${dataSet.publicUrl ? `<p class="mb-0"><a href="${dataSet.publicUrl}" target="_blank" rel="noopener">More information about this dataset <i class="bi bi-box-arrow-up-right"></i></a></p>` : ''}
-    `;
-    document.getElementById('demDataSource').innerHTML = `<strong>Elevation Data Provider</strong> - ${dataSet.description}`;
+    const dataSourceAttribution = document.getElementById('dataSourceAttribution');
+    const demDataSource = document.getElementById('demDataSource');
+    const publicUrl = safeUrl(dataSet.publicUrl);
+
+    setChildren(dataSourceAttribution,
+        el('p', { className: 'mb-1' },
+            el('strong', null, 'Elevation Data:'),
+            textNode(` ${dataSet.description} (${dataSet.resolutionMeters}m resolution)`)
+        ),
+        publicUrl
+            ? el('p', { className: 'mb-0' },
+                el('a', {
+                    href: publicUrl,
+                    target: '_blank',
+                    rel: 'noopener noreferrer'
+                }, 'More information about this dataset ', icon('bi bi-box-arrow-up-right'))
+            )
+            : null
+    );
+    setChildren(demDataSource,
+        el('strong', null, 'Elevation Data Provider'),
+        textNode(` - ${dataSet.description}`)
+    );
 }
 
 // Update map with line and obstacles
@@ -815,8 +843,14 @@ function updateMap(fromNode, toNode, geoPoints, obstacles) {
         })
     }).addTo(map);
 
-    startMarker.bindPopup(`<strong>From:</strong> ${fromNode.long_name || fromNode.short_name || fromNode.hex_id}`);
-    endMarker.bindPopup(`<strong>To:</strong> ${toNode.long_name || toNode.short_name || toNode.hex_id}`);
+    startMarker.bindPopup(el('div', null,
+        el('strong', null, 'From:'),
+        textNode(` ${fromNode.long_name || fromNode.short_name || fromNode.hex_id}`)
+    ));
+    endMarker.bindPopup(el('div', null,
+        el('strong', null, 'To:'),
+        textNode(` ${toNode.long_name || toNode.short_name || toNode.hex_id}`)
+    ));
 
     // Draw line between nodes using the elevation profile points
     const linePoints = geoPoints.map(p => [p.latitude, p.longitude]);
@@ -909,13 +943,17 @@ function updateMap(fromNode, toNode, geoPoints, obstacles) {
             color: '#dc3545',
             weight: 2,
             fillOpacity: 0.9
-        }).addTo(map).bindPopup(`
-            <strong>Obstacle ${index + 1}</strong><br>
-            Distance: ${(obstacle.distance / 1000).toFixed(2)} km<br>
-            Elevation: ${obstacle.elevation.toFixed(0)} m<br>
-            Clearance: ${obstacle.clearance.toFixed(1)} m<br>
-            Required: ${obstacle.requiredClearance.toFixed(1)} m
-        `);
+        }).addTo(map).bindPopup(el('div', null,
+            el('strong', null, `Obstacle ${index + 1}`),
+            el('br'),
+            textNode(`Distance: ${(obstacle.distance / 1000).toFixed(2)} km`),
+            el('br'),
+            textNode(`Elevation: ${obstacle.elevation.toFixed(0)} m`),
+            el('br'),
+            textNode(`Clearance: ${obstacle.clearance.toFixed(1)} m`),
+            el('br'),
+            textNode(`Required: ${obstacle.requiredClearance.toFixed(1)} m`)
+        ));
     });
 
     // Fit map to bounds using all points along the line (not just the nodes)
