@@ -16,6 +16,7 @@ def build_nodeinfo_message(hw_model: int) -> SimpleNamespace:
     user.role = config_pb2.Config.DeviceConfig.Role.CLIENT
 
     mesh_packet = mesh_pb2.MeshPacket()
+    # Generated protobuf field is named "from"; use setattr because "from" is a keyword.
     setattr(mesh_packet, "from", 0x7F6E5D4C)
     mesh_packet.to = 0
     mesh_packet.decoded.portnum = portnums_pb2.PortNum.NODEINFO_APP

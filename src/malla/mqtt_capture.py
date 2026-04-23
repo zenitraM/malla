@@ -729,6 +729,9 @@ def get_enum_name(
         enum_descriptor: Protobuf enum descriptor exposing ``values_by_number``.
         enum_value: Numeric enum value to resolve.
         unknown_prefix: Prefix used when the enum value is not present locally.
+
+    Returns:
+        The enum name if it exists locally, otherwise ``{unknown_prefix}_{enum_value}``.
     """
     if descriptor_value := enum_descriptor.values_by_number.get(enum_value):
         return descriptor_value.name
