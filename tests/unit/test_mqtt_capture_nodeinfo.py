@@ -56,9 +56,20 @@ class TestOnMessageNodeInfo:
             mac_address=None,
             primary_channel="Bulgaria",
         )
-        _, _, _, processed_successfully, _, parsing_error = (
+        (
+            logged_topic,
+            logged_service_envelope,
+            logged_mesh_packet,
+            processed_successfully,
+            raw_service_envelope_data,
+            parsing_error,
+        ) = (
             mock_log_packet_to_database.call_args.args
         )
+        assert logged_topic == "msh/Bulgaria/2/e/Bulgaria/!a2e96b40"
+        assert logged_service_envelope is not None
+        assert logged_mesh_packet is not None
+        assert raw_service_envelope_data is not None
         assert processed_successfully is True
         assert parsing_error is None
 
@@ -77,8 +88,19 @@ class TestOnMessageNodeInfo:
 
         mock_update_node_cache.assert_called_once()
         assert mock_update_node_cache.call_args.kwargs["hw_model"] == "UNKNOWN_999"
-        _, _, _, processed_successfully, _, parsing_error = (
+        (
+            logged_topic,
+            logged_service_envelope,
+            logged_mesh_packet,
+            processed_successfully,
+            raw_service_envelope_data,
+            parsing_error,
+        ) = (
             mock_log_packet_to_database.call_args.args
         )
+        assert logged_topic == "msh/Bulgaria/2/e/Bulgaria/!a2e96b40"
+        assert logged_service_envelope is not None
+        assert logged_mesh_packet is not None
+        assert raw_service_envelope_data is not None
         assert processed_successfully is True
         assert parsing_error is None
