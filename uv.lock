@@ -624,8 +624,8 @@ wheels = [
 
 [[package]]
 name = "meshtastic"
-version = "2.7.3"
-source = { git = "https://github.com/meshtastic/python#dcd077d85efd5aaa39a9f4a772ffbd117bff136c" }
+version = "2.7.8"
+source = { git = "https://github.com/meshtastic/python#cec79a7c1f10c189588f3aae2a7370f9ce9904de" }
 dependencies = [
     { name = "bleak" },
     { name = "packaging" },
