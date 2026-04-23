@@ -5,6 +5,7 @@ Tests for MQTT client ID configuration functionality.
 
 import os
 import sys
+from threading import Event
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
@@ -82,15 +83,23 @@ class TestMQTTClientIdUsage:
         mock_mqtt_client_class.return_value = mock_client
         mock_client.connect.return_value = None
         mock_client.loop_start.return_value = None
+        stop_main = Event()
+
+        def stop_after_first_sleep(_seconds):
+            stop_main.set()
+            raise KeyboardInterrupt()
 
         with (
             patch("malla.mqtt_capture.MQTT_CLIENT_ID", "test-client-id"),
             patch("malla.mqtt_capture.MQTT_USERNAME", None),
             patch("malla.mqtt_capture.cleanup_thread", None),
+            patch("malla.mqtt_capture.time.sleep", side_effect=stop_after_first_sleep),
         ):
             from malla.mqtt_capture import main
 
             main()
+
+        assert stop_main.is_set()
 
         mock_mqtt_client_class.assert_called_once_with(
             CallbackAPIVersion.VERSION2, client_id="test-client-id"
@@ -119,15 +128,23 @@ class TestMQTTClientIdUsage:
         mock_mqtt_client_class.return_value = mock_client
         mock_client.connect.return_value = None
         mock_client.loop_start.return_value = None
+        stop_main = Event()
+
+        def stop_after_first_sleep(_seconds):
+            stop_main.set()
+            raise KeyboardInterrupt()
 
         with (
             patch("malla.mqtt_capture.MQTT_CLIENT_ID", None),
             patch("malla.mqtt_capture.MQTT_USERNAME", None),
             patch("malla.mqtt_capture.cleanup_thread", None),
+            patch("malla.mqtt_capture.time.sleep", side_effect=stop_after_first_sleep),
         ):
             from malla.mqtt_capture import main
 
             main()
+
+        assert stop_main.is_set()
 
         mock_mqtt_client_class.assert_called_once_with(
             CallbackAPIVersion.VERSION2, client_id=""

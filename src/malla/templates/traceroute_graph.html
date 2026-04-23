@@ -437,9 +437,8 @@ function renderGraph(data) {
 
         if (!data.nodes || data.nodes.length === 0) {
             console.log('No nodes found in data');
-            container.append('div')
-                .attr('class', 'loading-overlay')
-                .html('<i class="bi bi-diagram-3"></i><br>No network data found for the selected criteria');
+            const empty = el('div', { className: 'loading-overlay' }, icon('bi bi-diagram-3'), el('br'), textNode('No network data found for the selected criteria'));
+            container.node().appendChild(empty);
             return;
         }
 
@@ -825,19 +824,20 @@ function displaySearchResults(results) {
     const container = document.getElementById('searchResults');
 
     if (results.length === 0) {
-        container.innerHTML = '<small class="text-muted">No nodes found</small>';
+        setChildren(container, el('small', { className: 'text-muted' }, 'No nodes found'));
         return;
     }
 
-    container.innerHTML = results.map((node, index) => {
+    container.replaceChildren();
+    results.forEach((node, index) => {
         const nodeIdHex = node.id.toString(16).padStart(8, '0');
-        return `
-            <div class="search-result-item" onclick="selectSearchResult(${index})">
-                <div><strong>${node.name}</strong></div>
-                <small class="text-muted">!${nodeIdHex} • ${node.connections} connections</small>
-            </div>
-        `;
-    }).join('');
+        const item = el('div', { className: 'search-result-item' },
+            el('div', null, el('strong', null, node.name)),
+            el('small', { className: 'text-muted' }, `!${nodeIdHex} • ${node.connections} connections`)
+        );
+        item.addEventListener('click', () => selectSearchResult(index));
+        container.appendChild(item);
+    });
 }
 
 function selectSearchResult(index) {
@@ -1121,54 +1121,60 @@ function clearSelection() {
 }
 
 function clearSearchResults() {
-    document.getElementById('searchResults').innerHTML = '';
+    document.getElementById('searchResults').replaceChildren();
     searchResults = [];
+}
+
+function setSelectedDetails(title, ...content) {
+    document.getElementById('selectedDetailsTitle').textContent = title;
+    setChildren(document.getElementById('selectedDetailsContent'), ...content);
+    document.getElementById('selectedDetails').style.display = 'block';
+}
+
+function setHoverDetails(...content) {
+    setChildren(document.getElementById('hoverDetails'), ...content);
 }
 
 function showSelectedNodeDetails(node) {
     const nodeIdHex = node.id.toString(16).padStart(8, '0');
-    const content = `
-        <div class="row">
-            <div class="col-12">
-                <h6>${node.name}</h6>
-                <p class="text-muted">Node ID: !${nodeIdHex}</p>
-                <div class="alert alert-info py-2 px-2 small mb-2">
-                    <i class="bi bi-lightbulb"></i> Click another node to show paths between them
-                </div>
-            </div>
-        </div>
-        <div class="row">
-            <div class="col-6">
-                <strong>Connections:</strong><br>
-                <span class="h5 text-primary">${node.connections}</span>
-            </div>
-            <div class="col-6">
-                <strong>Packets:</strong><br>
-                <span class="h5 text-info">${node.packet_count}</span>
-            </div>
-        </div>
-        <div class="row mt-2">
-            <div class="col-6">
-                <strong>Avg SNR:</strong><br>
-                <span class="h6 ${node.avg_snr ? (node.avg_snr > -10 ? 'text-success' : 'text-warning') : 'text-muted'}">${node.avg_snr ? node.avg_snr + ' dB' : 'N/A'}</span>
-            </div>
-            <div class="col-6">
-                <strong>Last Seen:</strong><br>
-                <small class="text-muted">${new Date(node.last_seen * 1000).toLocaleString()}</small>
-            </div>
-        </div>
-        <div class="row mt-2">
-            <div class="col-12">
-                <a href="/node/${node.id}" class="btn btn-primary btn-sm w-100">
-                    <i class="bi bi-router"></i> View Node Details
-                </a>
-            </div>
-        </div>
-    `;
-
-    document.getElementById('selectedDetailsTitle').textContent = 'Selected Node';
-    document.getElementById('selectedDetailsContent').innerHTML = content;
-    document.getElementById('selectedDetails').style.display = 'block';
+    setSelectedDetails('Selected Node',
+        el('div', { className: 'row' },
+            el('div', { className: 'col-12' },
+                el('h6', null, node.name),
+                el('p', { className: 'text-muted' }, `Node ID: !${nodeIdHex}`),
+                el('div', { className: 'alert alert-info py-2 px-2 small mb-2' },
+                    icon('bi bi-lightbulb'),
+                    textNode(' Click another node to show paths between them')
+                )
+            )
+        ),
+        el('div', { className: 'row' },
+            el('div', { className: 'col-6' }, el('strong', null, 'Connections:'), el('br'), el('span', { className: 'h5 text-primary' }, String(node.connections))),
+            el('div', { className: 'col-6' }, el('strong', null, 'Packets:'), el('br'), el('span', { className: 'h5 text-info' }, String(node.packet_count)))
+        ),
+        el('div', { className: 'row mt-2' },
+            el('div', { className: 'col-6' },
+                el('strong', null, 'Avg SNR:'),
+                el('br'),
+                el('span', { className: `h6 ${node.avg_snr ? (node.avg_snr > -10 ? 'text-success' : 'text-warning') : 'text-muted'}` }, node.avg_snr ? `${node.avg_snr} dB` : 'N/A')
+            ),
+            el('div', { className: 'col-6' },
+                el('strong', null, 'Last Seen:'),
+                el('br'),
+                el('small', { className: 'text-muted' }, new Date(node.last_seen * 1000).toLocaleString())
+            )
+        ),
+        el('div', { className: 'row mt-2' },
+            el('div', { className: 'col-12' },
+                buttonLink({
+                    href: safePath(`/node/${encodeURIComponent(String(node.id))}`),
+                    className: 'btn btn-primary btn-sm w-100',
+                    iconClass: 'bi bi-router',
+                    text: 'View Node Details'
+                })
+            )
+        )
+    );
 }
 
 function showPathComparisonDetails() {
@@ -1180,67 +1186,64 @@ function showPathComparisonDetails() {
     const node1IdHex = selectedNode.id.toString(16).padStart(8, '0');
     const node2IdHex = comparisonNode.id.toString(16).padStart(8, '0');
 
-    let pathsHtml = '';
+    let pathsBlock;
     if (pathsData.paths.length === 0) {
-        pathsHtml = '<div class="alert alert-warning py-2 px-2 small">No path found between these nodes</div>';
+        pathsBlock = el('div', { className: 'alert alert-warning py-2 px-2 small' }, 'No path found between these nodes');
     } else {
-        pathsHtml = `
-            <div class="mb-2">
-                <strong>${pathsData.paths.length} path${pathsData.paths.length > 1 ? 's' : ''} found</strong>
-                <small class="text-muted"> (${pathsData.distance} hop${pathsData.distance > 1 ? 's' : ''})</small>
-            </div>
-            <div class="small" style="max-height: 200px; overflow-y: auto;">
-        `;
-
+        const pathList = el('div', { className: 'small', style: { maxHeight: '200px', overflowY: 'auto' } });
         pathsData.paths.forEach((path, idx) => {
-            const pathNames = path.map(nodeId => getNodeNameById(nodeId)).join(' → ');
-            pathsHtml += `<div class="mb-2 p-2 bg-light rounded"><strong>${idx + 1}.</strong> ${pathNames}</div>`;
+            const pathNames = path.map(nodeId => getNodeNameById(nodeId)).join(' -> '.replace('->', '→'));
+            pathList.appendChild(el('div', { className: 'mb-2 p-2 bg-light rounded' }, el('strong', null, `${idx + 1}.`), textNode(` ${pathNames}`)));
         });
-
-        pathsHtml += '</div>';
+        pathsBlock = fragment(
+            el('div', { className: 'mb-2' },
+                el('strong', null, `${pathsData.paths.length} path${pathsData.paths.length > 1 ? 's' : ''} found`),
+                textNode(` `),
+                el('small', { className: 'text-muted' }, `(${pathsData.distance} hop${pathsData.distance > 1 ? 's' : ''})`)
+            ),
+            pathList
+        );
     }
 
-    const content = `
-        <div class="mb-3">
-            <div class="d-flex align-items-center mb-2">
-                <span class="badge bg-primary me-2">1</span>
-                <div>
-                    <strong>${selectedNode.name}</strong><br>
-                    <small class="text-muted">!${node1IdHex}</small>
-                </div>
-            </div>
-            <div class="d-flex align-items-center">
-                <span class="badge bg-success me-2">2</span>
-                <div>
-                    <strong>${comparisonNode.name}</strong><br>
-                    <small class="text-muted">!${node2IdHex}</small>
-                </div>
-            </div>
-        </div>
-
-        ${pathsHtml}
-
-        <div class="alert alert-info py-2 px-2 small mt-2 mb-2">
-            <i class="bi bi-lightbulb"></i> Click a node again to deselect it, or click elsewhere to select different nodes
-        </div>
-
-        <div class="row mt-2">
-            <div class="col-6">
-                <a href="/node/${selectedNode.id}" class="btn btn-outline-primary btn-sm w-100" target="_blank">
-                    <i class="bi bi-router"></i> Node 1
-                </a>
-            </div>
-            <div class="col-6">
-                <a href="/node/${comparisonNode.id}" class="btn btn-outline-success btn-sm w-100" target="_blank">
-                    <i class="bi bi-router"></i> Node 2
-                </a>
-            </div>
-        </div>
-    `;
-
-    document.getElementById('selectedDetailsTitle').textContent = 'Path Comparison';
-    document.getElementById('selectedDetailsContent').innerHTML = content;
-    document.getElementById('selectedDetails').style.display = 'block';
+    setSelectedDetails('Path Comparison',
+        el('div', { className: 'mb-3' },
+            el('div', { className: 'd-flex align-items-center mb-2' },
+                badge('1', 'bg-primary me-2'),
+                el('div', null, el('strong', null, selectedNode.name), el('br'), el('small', { className: 'text-muted' }, `!${node1IdHex}`))
+            ),
+            el('div', { className: 'd-flex align-items-center' },
+                badge('2', 'bg-success me-2'),
+                el('div', null, el('strong', null, comparisonNode.name), el('br'), el('small', { className: 'text-muted' }, `!${node2IdHex}`))
+            )
+        ),
+        pathsBlock,
+        el('div', { className: 'alert alert-info py-2 px-2 small mt-2 mb-2' },
+            icon('bi bi-lightbulb'),
+            textNode(' Click a node again to deselect it, or click elsewhere to select different nodes')
+        ),
+        el('div', { className: 'row mt-2' },
+            el('div', { className: 'col-6' },
+                buttonLink({
+                    href: safePath(`/node/${encodeURIComponent(String(selectedNode.id))}`),
+                    className: 'btn btn-outline-primary btn-sm w-100',
+                    iconClass: 'bi bi-router',
+                    text: 'Node 1',
+                    target: '_blank',
+                    rel: 'noopener noreferrer'
+                })
+            ),
+            el('div', { className: 'col-6' },
+                buttonLink({
+                    href: safePath(`/node/${encodeURIComponent(String(comparisonNode.id))}`),
+                    className: 'btn btn-outline-success btn-sm w-100',
+                    iconClass: 'bi bi-router',
+                    text: 'Node 2',
+                    target: '_blank',
+                    rel: 'noopener noreferrer'
+                })
+            )
+        )
+    );
 }
 
 function calculatePathsBetweenNodes(startNodeId, endNodeId) {
@@ -1384,118 +1387,109 @@ function showSelectedLinkDetails(link) {
     const sourceNode = currentGraph.nodes.find(n => n.id === link.source.id || n.id === link.source);
     const targetNode = currentGraph.nodes.find(n => n.id === link.target.id || n.id === link.target);
 
-    const content = `
-        <div class="row">
-            <div class="col-12">
-                <h6>${sourceNode ? sourceNode.name : link.source} ↔ ${targetNode ? targetNode.name : link.target}</h6>
-                <p class="text-muted">${link.type === 'direct' ? 'Direct RF Link' : 'Multi-hop Connection'}</p>
-            </div>
-        </div>
-        <div class="row">
-            <div class="col-6">
-                <strong>Average SNR:</strong><br>
-                <span class="h5 ${link.avg_snr > -10 ? 'text-success' : 'text-warning'}">${link.avg_snr} dB</span>
-            </div>
-            <div class="col-6">
-                <strong>Packets:</strong><br>
-                <span class="h5 text-info">${link.packet_count || link.path_count || 0}</span>
-            </div>
-        </div>
-        ${link.hop_count ? `
-        <div class="row mt-2">
-            <div class="col-6">
-                <strong>Hop Count:</strong><br>
-                <span class="h6 text-primary">${link.hop_count}</span>
-            </div>
-        </div>
-        ` : ''}
-        <div class="row mt-2">
-            <div class="col-6">
-                <strong>Last Seen:</strong><br>
-                <small class="text-muted">${new Date(link.last_seen * 1000).toLocaleString()}</small>
-            </div>
-            <div class="col-6">
-                <a href="/traceroute-hops?from_node=${link.source.id}&to_node=${link.target.id}" class="btn btn-outline-primary btn-sm">
-                    <i class="bi bi-diagram-3"></i> View Link
-                </a>
-            </div>
-        </div>
-    `;
-
-    document.getElementById('selectedDetailsContent').innerHTML = content;
-    document.getElementById('selectedDetails').style.display = 'block';
+    setSelectedDetails('Selected Link',
+        el('div', { className: 'row' },
+            el('div', { className: 'col-12' },
+                el('h6', null, `${sourceNode ? sourceNode.name : link.source} ↔ ${targetNode ? targetNode.name : link.target}`),
+                el('p', { className: 'text-muted' }, link.type === 'direct' ? 'Direct RF Link' : 'Multi-hop Connection')
+            )
+        ),
+        el('div', { className: 'row' },
+            el('div', { className: 'col-6' },
+                el('strong', null, 'Average SNR:'),
+                el('br'),
+                el('span', { className: `h5 ${link.avg_snr > -10 ? 'text-success' : 'text-warning'}` }, `${link.avg_snr} dB`)
+            ),
+            el('div', { className: 'col-6' },
+                el('strong', null, 'Packets:'),
+                el('br'),
+                el('span', { className: 'h5 text-info' }, String(link.packet_count || link.path_count || 0))
+            )
+        ),
+        link.hop_count ? el('div', { className: 'row mt-2' },
+            el('div', { className: 'col-6' }, el('strong', null, 'Hop Count:'), el('br'), el('span', { className: 'h6 text-primary' }, String(link.hop_count)))
+        ) : null,
+        el('div', { className: 'row mt-2' },
+            el('div', { className: 'col-6' },
+                el('strong', null, 'Last Seen:'),
+                el('br'),
+                el('small', { className: 'text-muted' }, new Date(link.last_seen * 1000).toLocaleString())
+            ),
+            el('div', { className: 'col-6' },
+                buttonLink({
+                    href: safePath('/traceroute-hops', { from_node: link.source.id, to_node: link.target.id }),
+                    className: 'btn btn-outline-primary btn-sm',
+                    iconClass: 'bi bi-diagram-3',
+                    text: 'View Link'
+                })
+            )
+        )
+    );
 }
 
 function showNodeHoverDetails(node) {
     const nodeIdHex = node.id.toString(16).padStart(8, '0');
 
-    let pathInfo = '';
+    let pathInfoNode = null;
     if (selectedNode && hopFilterEnabled && nodeDistances && node.id !== selectedNode.id) {
         const distance = nodeDistances.distances.get(node.id);
         if (distance !== undefined) {
             const allPaths = getAllPathsToNode(node.id, nodeDistances.parents, selectedNode.id);
 
             if (allPaths.length > 0) {
-                pathInfo = `<div class="mb-2"><strong>Hops from ${selectedNode.name}:</strong> ${distance}</div>`;
+                const pathParts = [el('div', { className: 'mb-2' }, el('strong', null, `Hops from ${selectedNode.name}:`), textNode(` ${distance}`))];
 
                 if (allPaths.length === 1) {
-                    // Single path
                     const path = allPaths[0];
-                    const pathNames = path.map(nodeId => getNodeNameById(nodeId)).join(' → ');
-                    pathInfo += `<div class="small text-muted" style="max-height: 150px; overflow-y: auto;">${pathNames}</div>`;
+                    const pathNames = path.map(nodeId => getNodeNameById(nodeId)).join(' -> '.replace('->', '→'));
+                    pathParts.push(el('div', { className: 'small text-muted', style: { maxHeight: '150px', overflowY: 'auto' } }, pathNames));
                 } else {
-                    // Multiple paths
-                    pathInfo += `<div class="small"><strong>${allPaths.length} shortest paths:</strong></div>`;
-                    pathInfo += `<div class="small text-muted" style="max-height: 150px; overflow-y: auto;">`;
+                    const pathList = el('div', { className: 'small text-muted', style: { maxHeight: '150px', overflowY: 'auto' } });
+                    pathParts.push(el('div', { className: 'small' }, el('strong', null, `${allPaths.length} shortest paths:`)));
 
                     allPaths.forEach((path, idx) => {
-                        const pathNames = path.map(nodeId => getNodeNameById(nodeId)).join(' → ');
-                        pathInfo += `<div class="mb-1">${idx + 1}. ${pathNames}</div>`;
+                        const pathNames = path.map(nodeId => getNodeNameById(nodeId)).join(' -> '.replace('->', '→'));
+                        pathList.appendChild(el('div', { className: 'mb-1' }, `${idx + 1}. ${pathNames}`));
                     });
-
-                    pathInfo += `</div>`;
+                    pathParts.push(pathList);
                 }
+
+                pathInfoNode = fragment(pathParts);
             }
         }
     }
 
-    const content = `
-        <div><strong>${node.name}</strong></div>
-        <div class="text-muted">!${nodeIdHex}</div>
-        <hr class="my-2">
-        ${pathInfo}
-        ${pathInfo ? '<hr class="my-2">' : ''}
-        <div><strong>Connections:</strong> ${node.connections}</div>
-        <div><strong>Packets:</strong> ${node.packet_count}</div>
-        <div><strong>Avg SNR:</strong> ${node.avg_snr ? node.avg_snr + ' dB' : 'N/A'}</div>
-        <div><strong>Last Seen:</strong><br>
-        <small>${new Date(node.last_seen * 1000).toLocaleString()}</small></div>
-    `;
-
-    document.getElementById('hoverDetails').innerHTML = content;
+    setHoverDetails(
+        el('div', null, el('strong', null, node.name)),
+        el('div', { className: 'text-muted' }, `!${nodeIdHex}`),
+        el('hr', { className: 'my-2' }),
+        pathInfoNode,
+        pathInfoNode ? el('hr', { className: 'my-2' }) : null,
+        el('div', null, el('strong', null, 'Connections:'), textNode(` ${node.connections}`)),
+        el('div', null, el('strong', null, 'Packets:'), textNode(` ${node.packet_count}`)),
+        el('div', null, el('strong', null, 'Avg SNR:'), textNode(` ${node.avg_snr ? `${node.avg_snr} dB` : 'N/A'}`)),
+        el('div', null, el('strong', null, 'Last Seen:'), el('br'), el('small', null, new Date(node.last_seen * 1000).toLocaleString()))
+    );
 }
 
 function showLinkHoverDetails(link) {
     const sourceNode = currentGraph.nodes.find(n => n.id === link.source.id || n.id === link.source);
     const targetNode = currentGraph.nodes.find(n => n.id === link.target.id || n.id === link.target);
 
-    const content = `
-        <div><strong>Link</strong></div>
-        <div class="text-muted">${sourceNode ? sourceNode.name : link.source} ↔ ${targetNode ? targetNode.name : link.target}</div>
-        <hr class="my-2">
-        <div><strong>Type:</strong> ${link.type === 'direct' ? 'Direct RF' : 'Multi-hop'}</div>
-        <div><strong>Avg SNR:</strong> ${link.avg_snr} dB</div>
-        <div><strong>Packets:</strong> ${link.packet_count || link.path_count || 0}</div>
-        ${link.hop_count ? `<div><strong>Hops:</strong> ${link.hop_count}</div>` : ''}
-        <div><strong>Last Seen:</strong><br>
-        <small>${new Date(link.last_seen * 1000).toLocaleString()}</small></div>
-    `;
-
-    document.getElementById('hoverDetails').innerHTML = content;
+    setHoverDetails(
+        el('div', null, el('strong', null, 'Link')),
+        el('div', { className: 'text-muted' }, `${sourceNode ? sourceNode.name : link.source} ↔ ${targetNode ? targetNode.name : link.target}`),
+        el('hr', { className: 'my-2' }),
+        el('div', null, el('strong', null, 'Type:'), textNode(` ${link.type === 'direct' ? 'Direct RF' : 'Multi-hop'}`)),
+        el('div', null, el('strong', null, 'Avg SNR:'), textNode(` ${link.avg_snr} dB`)),
+        el('div', null, el('strong', null, 'Packets:'), textNode(` ${link.packet_count || link.path_count || 0}`)),
+        link.hop_count ? el('div', null, el('strong', null, 'Hops:'), textNode(` ${link.hop_count}`)) : null,
+        el('div', null, el('strong', null, 'Last Seen:'), el('br'), el('small', null, new Date(link.last_seen * 1000).toLocaleString()))
+    );
 }
 
 function clearHoverDetails() {
-    document.getElementById('hoverDetails').innerHTML = '<small class="text-muted">Hover over nodes or links for details</small>';
+    setHoverDetails(el('small', { className: 'text-muted' }, 'Hover over nodes or links for details'));
 }
 
 function getNodeName(nodeRef) {
@@ -1620,12 +1614,11 @@ function showError(message) {
 }
 
 function updateStats(stats) {
-    const statsContent = `
-        <div><strong>Links:</strong> ${stats.links_found}</div>
-        <div><strong>Packets:</strong> ${stats.packets_with_rf_hops}</div>
-        <div><strong>RF Hops:</strong> ${stats.total_rf_hops}</div>
-    `;
-    document.getElementById('graphStats').innerHTML = statsContent;
+    setChildren(document.getElementById('graphStats'),
+        el('div', null, el('strong', null, 'Links:'), textNode(` ${stats.links_found}`)),
+        el('div', null, el('strong', null, 'Packets:'), textNode(` ${stats.packets_with_rf_hops}`)),
+        el('div', null, el('strong', null, 'RF Hops:'), textNode(` ${stats.total_rf_hops}`))
+    );
 }
 
 // Handle window resize
@@ -1894,7 +1887,7 @@ async function loadPrimaryChannels() {
         if (data.channels) {
             const select = document.getElementById('primary_channel');
             const allOption = select.querySelector('option[value=""]');
-            select.innerHTML = '';
+            select.replaceChildren();
             select.appendChild(allOption);
             data.channels.forEach((ch) => {
                 const option = document.createElement('option');

@@ -207,6 +207,8 @@
     <!-- Timezone Toggle -->
     <script src="{{ url_for('static', filename='js/timezone-toggle.js') }}"></script>
 
+    <script src="{{ url_for('static', filename='js/dom.js') }}"></script>
+
     <!-- Node tooltip functionality -->
     <script>
         // Cache for node information to avoid repeated API calls
@@ -335,7 +337,7 @@
 
             if (nodeInfo.error) {
                 tooltip.setContent({
-                    '.tooltip-inner': buildTooltipContent(nodeInfo, true).outerHTML
+                    '.tooltip-inner': buildTooltipContent(nodeInfo, true)
                 });
                 return;
             }
@@ -345,7 +347,7 @@
             const content = buildTooltipContent(node);
 
             tooltip.setContent({
-                '.tooltip-inner': content.outerHTML
+                '.tooltip-inner': content
             });
         }
 

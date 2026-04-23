@@ -272,15 +272,7 @@ class URLFilterManager {
      * Create a URL with filters for linking to filtered views
      */
     createFilteredURL(baseUrl, filters) {
-        const url = new URL(baseUrl, window.location.origin);
-
-        Object.entries(filters).forEach(([key, value]) => {
-            if (value && value.toString().trim()) {
-                url.searchParams.set(key, value);
-            }
-        });
-
-        return url.toString();
+        return safePath(baseUrl, filters);
     }
 }
 

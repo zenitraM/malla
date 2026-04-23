@@ -642,8 +642,10 @@ function initializeInterface() {
             if (data.channels) {
                 const select = document.getElementById('channelFilter');
                 const allOption = select.querySelector('option[value=""]');
-                select.innerHTML = '';
-                select.appendChild(allOption);
+                select.replaceChildren();
+                if (allOption) {
+                    select.appendChild(allOption);
+                }
                 data.channels.forEach((ch) => {
                     const option = document.createElement('option');
                     option.value = ch;
@@ -710,7 +712,7 @@ function initMap() {
             }
 
             return new L.DivIcon({
-                html: '<div><span>' + childCount + '</span></div>',
+                html: el('div', null, el('span', null, String(childCount))),
                 className: 'marker-cluster ' + className,
                 iconSize: new L.Point(40, 40)
             });
@@ -909,11 +911,10 @@ function addNodeMarker(node) {
 
     const markerIcon = L.divIcon({
         className: 'custom-node-marker',
-        html: `
-            <div class="node-marker-container" style="background-color: ${roleColor};">
-                <div class="node-marker-label">${displayText}</div>
-            </div>
-        `,
+        html: el('div', {
+            className: 'node-marker-container',
+            style: { backgroundColor: roleColor }
+        }, el('div', { className: 'node-marker-label' }, displayText)),
         iconSize: [40, 40],
         iconAnchor: [20, 20]
     });
@@ -940,24 +941,55 @@ function createNodePopupContent(node) {
     const ageClass = getAgeClass(ageHours);
     const roleColor = getRoleColor(node.role);
 
-    return `
-        <div class="node-marker-info">
-            <div class="node-marker-title">${node.display_name}</div>
-            <div><strong>ID:</strong> !${nodeIdHex}</div>
-            ${node.short_name ? `<div><strong>Short Name:</strong> ${node.short_name}</div>` : ''}
-            ${node.role ? `<div><strong>Role:</strong> <span class="badge" style="background-color: ${roleColor};">${node.role}</span></div>` : ''}
-            <div><strong>Location:</strong> ${node.latitude.toFixed(6)}, ${node.longitude.toFixed(6)}</div>
-            ${node.altitude ? `<div><strong>Altitude:</strong> ${node.altitude}m</div>` : ''}
-            ${node.hw_model ? `<div><strong>Hardware:</strong> ${node.hw_model}</div>` : ''}
-            <div><strong>Age:</strong> <span class="age-indicator ${ageClass}">${formatAge(ageHours)}</span></div>
+    const button = el('button', { className: 'btn btn-sm btn-primary', type: 'button' }, 'View Details');
+    button.addEventListener('click', () => viewNodeDetails(node.node_id));
 
-            <div class="mt-2">
-                <button class="btn btn-sm btn-primary" onclick="viewNodeDetails(${node.node_id})">
-                    View Details
-                </button>
-            </div>
-        </div>
-    `;
+    return el('div', { className: 'node-marker-info' },
+        el('div', { className: 'node-marker-title' }, node.display_name),
+        el('div', null, el('strong', null, 'ID:'), textNode(` !${nodeIdHex}`)),
+        node.short_name ? el('div', null, el('strong', null, 'Short Name:'), textNode(` ${node.short_name}`)) : null,
+        node.role ? el('div', null,
+            el('strong', null, 'Role:'),
+            textNode(' '),
+            el('span', { className: 'badge', style: { backgroundColor: roleColor } }, node.role)
+        ) : null,
+        el('div', null, el('strong', null, 'Location:'), textNode(` ${node.latitude.toFixed(6)}, ${node.longitude.toFixed(6)}`)),
+        node.altitude ? el('div', null, el('strong', null, 'Altitude:'), textNode(` ${node.altitude}m`)) : null,
+        node.hw_model ? el('div', null, el('strong', null, 'Hardware:'), textNode(` ${node.hw_model}`)) : null,
+        el('div', null,
+            el('strong', null, 'Age:'),
+            textNode(' '),
+            el('span', { className: `age-indicator ${ageClass}` }, formatAge(ageHours))
+        ),
+        el('div', { className: 'mt-2' }, button)
+    );
+}
+
+function buildNodeListItem(node, selectHandler) {
+    const nodeIdHex = node.node_id.toString(16).padStart(8, '0');
+    const ageHours = (Date.now() / 1000 - node.timestamp) / 3600;
+    const ageClass = getAgeClass(ageHours);
+    const roleColor = getRoleColor(node.role);
+    const item = el('div', { className: 'node-list-item' });
+    item.dataset.nodeId = String(node.node_id);
+    item.addEventListener('click', () => selectHandler(node.node_id));
+
+    item.append(
+        el('div', null,
+            el('strong', null, node.display_name),
+            node.role ? textNode(' ') : null,
+            node.role ? el('span', {
+                className: 'badge badge-sm',
+                style: { backgroundColor: roleColor, fontSize: '0.6em' }
+            }, formatRole(node.role)) : null
+        ),
+        el('small', { className: 'text-muted' }, `!${nodeIdHex}`),
+        el('br'),
+        el('span', { className: `age-indicator ${ageClass}` }, formatAge(ageHours)),
+        node.hw_model ? el('small', { className: 'text-secondary ms-2' }, node.hw_model) : null
+    );
+
+    return item;
 }
 
 // Unified node search and display
@@ -1002,28 +1034,17 @@ function displayNodeList(nodes, isSearchResults = false) {
 
     if (nodes.length === 0) {
         const message = isSearchResults ? 'No nodes found' : 'No nodes available';
-        container.innerHTML = `<div class="text-center text-muted py-4"><small>${message}</small></div>`;
+        setChildren(container,
+            el('div', { className: 'text-center text-muted py-4' }, el('small', null, message))
+        );
         return;
     }
 
     // Sort nodes by name
     const sortedNodes = [...nodes].sort((a, b) => a.display_name.localeCompare(b.display_name));
 
-    container.innerHTML = sortedNodes.map(node => {
-        const nodeIdHex = node.node_id.toString(16).padStart(8, '0');
-        const ageHours = (Date.now() / 1000 - node.timestamp) / 3600;
-        const ageClass = getAgeClass(ageHours);
-        const roleColor = getRoleColor(node.role);
-
-        return `
-            <div class="node-list-item" onclick="selectNodeFromList(${node.node_id})">
-                <div><strong>${node.display_name}</strong> ${node.role ? `<span class="badge badge-sm" style="background-color: ${roleColor}; font-size: 0.6em;">${formatRole(node.role)}</span>` : ''}</div>
-                <small class="text-muted">!${nodeIdHex}</small><br>
-                <span class="age-indicator ${ageClass}">${formatAge(ageHours)}</span>
-                ${node.hw_model ? `<small class="text-secondary ms-2">${node.hw_model}</small>` : ''}
-            </div>
-        `;
-    }).join('');
+    container.replaceChildren();
+    sortedNodes.forEach((node) => container.appendChild(buildNodeListItem(node, selectNodeFromList)));
 
     // Update selection highlighting
     updateNodeListSelection();
@@ -1072,63 +1093,34 @@ function showSelectedNodeDetails(node) {
     const ageClass = getAgeClass(ageHours);
     const roleColor = getRoleColor(node.role);
 
-    const content = `
-        <div class="row">
-            <div class="col-12">
-                <h6>${node.display_name}</h6>
-                <p class="text-muted">Node ID: !${nodeIdHex}</p>
-                ${node.short_name ? `<p class="text-muted">Short: ${node.short_name}</p>` : ''}
-            </div>
-        </div>
-        <div class="row">
-            <div class="col-6">
-                <strong>Location:</strong><br>
-                <small>${node.latitude.toFixed(6)}, ${node.longitude.toFixed(6)}</small>
-            </div>
-            <div class="col-6">
-                <strong>Age:</strong><br>
-                <span class="age-indicator ${ageClass}">${formatAge(ageHours)}</span>
-            </div>
-        </div>
-        ${node.role ? `
-        <div class="row mt-2">
-            <div class="col-6">
-                <strong>Role:</strong><br>
-                <span class="badge" style="background-color: ${roleColor};">${node.role}</span>
-            </div>
-            ${node.altitude ? `
-            <div class="col-6">
-                <strong>Altitude:</strong><br>
-                <span class="text-info">${node.altitude}m</span>
-            </div>
-            ` : ''}
-        </div>
-        ` : node.altitude ? `
-        <div class="row mt-2">
-            <div class="col-6">
-                <strong>Altitude:</strong><br>
-                <span class="text-info">${node.altitude}m</span>
-            </div>
-        </div>
-        ` : ''}
-        ${node.hw_model ? `
-        <div class="row mt-2">
-            <div class="col-12">
-                <strong>Hardware:</strong><br>
-                <span class="text-secondary">${node.hw_model}</span>
-            </div>
-        </div>
-        ` : ''}
-        <div class="row mt-2">
-            <div class="col-12">
-                <a href="/node/${node.node_id}" class="btn btn-primary btn-sm">
-                    <i class="bi bi-router"></i> View Node Details
-                </a>
-            </div>
-        </div>
-    `;
+    const detailsButton = buttonLink({
+        href: safePath(`/node/${encodeURIComponent(String(node.node_id))}`),
+        className: 'btn btn-primary btn-sm',
+        iconClass: 'bi bi-router',
+        text: 'View Node Details'
+    });
 
-    document.getElementById('selectedDetailsContent').innerHTML = content;
+    setChildren(document.getElementById('selectedDetailsContent'),
+        el('div', { className: 'row' },
+            el('div', { className: 'col-12' },
+                el('h6', null, node.display_name),
+                el('p', { className: 'text-muted' }, `Node ID: !${nodeIdHex}`),
+                node.short_name ? el('p', { className: 'text-muted' }, `Short: ${node.short_name}`) : null
+            )
+        ),
+        el('div', { className: 'row' },
+            el('div', { className: 'col-6' }, el('strong', null, 'Location:'), el('br'), el('small', null, `${node.latitude.toFixed(6)}, ${node.longitude.toFixed(6)}`)),
+            el('div', { className: 'col-6' }, el('strong', null, 'Age:'), el('br'), el('span', { className: `age-indicator ${ageClass}` }, formatAge(ageHours)))
+        ),
+        node.role || node.altitude ? el('div', { className: 'row mt-2' },
+            node.role ? el('div', { className: 'col-6' }, el('strong', null, 'Role:'), el('br'), el('span', { className: 'badge', style: { backgroundColor: roleColor } }, node.role)) : null,
+            node.altitude ? el('div', { className: 'col-6' }, el('strong', null, 'Altitude:'), el('br'), el('span', { className: 'text-info' }, `${node.altitude}m`)) : null
+        ) : null,
+        node.hw_model ? el('div', { className: 'row mt-2' },
+            el('div', { className: 'col-12' }, el('strong', null, 'Hardware:'), el('br'), el('span', { className: 'text-secondary' }, node.hw_model))
+        ) : null,
+        el('div', { className: 'row mt-2' }, el('div', { className: 'col-12' }, detailsButton))
+    );
     document.getElementById('selectedDetails').style.display = 'block';
 }
 
@@ -1164,7 +1156,7 @@ function clearNodeSelection() {
 
 // Clear search results
 function clearSearchResults() {
-    document.getElementById('searchResults').innerHTML = '';
+    document.getElementById('searchResults').replaceChildren();
     searchResults = [];
 }
 
@@ -1176,28 +1168,17 @@ function updateNodeList() {
     nodeCount.textContent = nodeData.length;
 
     if (nodeData.length === 0) {
-        container.innerHTML = '<div class="text-center text-muted py-4"><small>No nodes found</small></div>';
+        setChildren(container,
+            el('div', { className: 'text-center text-muted py-4' }, el('small', null, 'No nodes found'))
+        );
         return;
     }
 
     // Sort nodes by name
     const sortedNodes = [...nodeData].sort((a, b) => a.display_name.localeCompare(b.display_name));
 
-    container.innerHTML = sortedNodes.map(node => {
-        const nodeIdHex = node.node_id.toString(16).padStart(8, '0');
-        const ageHours = (Date.now() / 1000 - node.timestamp) / 3600;
-        const ageClass = getAgeClass(ageHours);
-        const roleColor = getRoleColor(node.role);
-
-        return `
-            <div class="node-list-item" onclick="selectNodeFromList(${node.node_id})">
-                <div><strong>${node.display_name}</strong> ${node.role ? `<span class="badge badge-sm" style="background-color: ${roleColor}; font-size: 0.6em;">${formatRole(node.role)}</span>` : ''}</div>
-                <small class="text-muted">!${nodeIdHex}</small><br>
-                <span class="age-indicator ${ageClass}">${formatAge(ageHours)}</span>
-                ${node.hw_model ? `<small class="text-secondary ms-2">${node.hw_model}</small>` : ''}
-            </div>
-        `;
-    }).join('');
+    container.replaceChildren();
+    sortedNodes.forEach((node) => container.appendChild(buildNodeListItem(node, selectNodeFromList)));
 }
 
 // Select node from list
@@ -1212,7 +1193,7 @@ function selectNodeFromList(nodeId) {
 // Update node list selection
 function updateNodeListSelection() {
     document.querySelectorAll('.node-list-item').forEach(item => {
-        const nodeId = parseInt(item.getAttribute('onclick').match(/\d+/)[0]);
+        const nodeId = parseInt(item.dataset.nodeId || '', 10);
         item.classList.toggle('selected', nodeId === selectedNodeId);
     });
 }
@@ -1383,12 +1364,12 @@ function toggleTracerouteLinks() {
     if (showTracerouteLinks) {
         drawTracerouteLinks();
         if (btn) {
-            btn.innerHTML = '<i class="bi bi-link-45deg"></i> Hide Traceroute Links';
+            setChildren(btn, icon('bi bi-link-45deg'), textNode(' Hide Traceroute Links'));
             btn.className = 'btn btn-sm btn-outline-info';
         }
     } else {
         if (btn) {
-            btn.innerHTML = '<i class="bi bi-link-45deg-off"></i> Show Traceroute Links';
+            setChildren(btn, icon('bi bi-link-45deg-off'), textNode(' Show Traceroute Links'));
             btn.className = 'btn btn-sm btn-outline-secondary';
         }
     }
@@ -1411,12 +1392,12 @@ function togglePacketLinks() {
     if (showPacketLinks) {
         drawPacketLinks();
         if (btn) {
-            btn.innerHTML = '<i class="bi bi-envelope-open"></i> Show Packet Links';
+            setChildren(btn, icon('bi bi-envelope-open'), textNode(' Show Packet Links'));
             btn.className = 'btn btn-sm btn-outline-secondary';
         }
     } else {
         if (btn) {
-            btn.innerHTML = '<i class="bi bi-envelope-open"></i> Show Packet Links';
+            setChildren(btn, icon('bi bi-envelope-open'), textNode(' Show Packet Links'));
             btn.className = 'btn btn-sm btn-outline-secondary';
         }
     }
@@ -1598,28 +1579,27 @@ function createLinkPopupContent(link) {
                          fromNode.latitude && fromNode.longitude &&
                          toNode.latitude && toNode.longitude;
 
-    return `
-        <div class="traceroute-link-info">
-            <div class="fw-bold mb-2">${link.link_type === 'packet' ? 'Direct Packet Link' : 'Traceroute RF Hop'}</div>
-            <div><strong>From:</strong> ${fromName}</div>
-            <div><strong>To:</strong> ${toName}</div>
-            <div><strong>Success Rate:</strong> <span class="${qualityClass}">${link.success_rate.toFixed(1)}%</span></div>
-            <div><strong>Attempts:</strong> ${link.total_hops_seen}</div>
-            <div><strong>Last Seen:</strong> ${formattedTime}</div>
-            ${link.avg_snr ? `<div><strong>Avg SNR:</strong> ${link.avg_snr.toFixed(1)} dB</div>` : ''}
-            ${link.avg_rssi ? `<div><strong>Avg RSSI:</strong> ${link.avg_rssi.toFixed(0)} dBm</div>` : ''}
-            <div class="mt-2 d-flex gap-1">
-                <button class="btn btn-sm btn-primary" onclick="showTracerouteHistory(${link.from_node_id}, ${link.to_node_id})">
-                    View History
-                </button>
-                ${hasLocations ? `
-                <button class="btn btn-sm btn-success" onclick="showLineOfSight(${link.from_node_id}, ${link.to_node_id})">
-                    <i class="bi bi-bezier"></i> Line of Sight
-                </button>
-                ` : ''}
-            </div>
-        </div>
-    `;
+    const historyButton = el('button', { className: 'btn btn-sm btn-primary', type: 'button' }, 'View History');
+    historyButton.addEventListener('click', () => showTracerouteHistory(link.from_node_id, link.to_node_id));
+
+    const losButton = hasLocations
+        ? el('button', { className: 'btn btn-sm btn-success', type: 'button' }, icon('bi bi-bezier'), textNode(' Line of Sight'))
+        : null;
+    if (losButton) {
+        losButton.addEventListener('click', () => showLineOfSight(link.from_node_id, link.to_node_id));
+    }
+
+    return el('div', { className: 'traceroute-link-info' },
+        el('div', { className: 'fw-bold mb-2' }, link.link_type === 'packet' ? 'Direct Packet Link' : 'Traceroute RF Hop'),
+        el('div', null, el('strong', null, 'From:'), textNode(` ${fromName}`)),
+        el('div', null, el('strong', null, 'To:'), textNode(` ${toName}`)),
+        el('div', null, el('strong', null, 'Success Rate:'), textNode(' '), el('span', { className: qualityClass }, `${link.success_rate.toFixed(1)}%`)),
+        el('div', null, el('strong', null, 'Attempts:'), textNode(` ${link.total_hops_seen}`)),
+        el('div', null, el('strong', null, 'Last Seen:'), textNode(` ${formattedTime}`)),
+        link.avg_snr ? el('div', null, el('strong', null, 'Avg SNR:'), textNode(` ${link.avg_snr.toFixed(1)} dB`)) : null,
+        link.avg_rssi ? el('div', null, el('strong', null, 'Avg RSSI:'), textNode(` ${link.avg_rssi.toFixed(0)} dBm`)) : null,
+        el('div', { className: 'mt-2 d-flex gap-1' }, historyButton, losButton)
+    );
 }
 
 // Show detailed traceroute history between two nodes

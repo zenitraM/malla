@@ -756,6 +756,76 @@ document.addEventListener('DOMContentLoaded', function() {
     loadLocationHistoryMap();
 });
 
+function buildPopupLine(label, value, options = {}) {
+    const line = el(options.tagName || 'div');
+    if (label) {
+        line.appendChild(el('strong', `${label}:`));
+        line.appendChild(textNode(' '));
+    }
+    appendChildren(line, value);
+    return line;
+}
+
+function buildCurrentLocationPopup(currentLocation) {
+    const popup = el('div');
+    appendChildren(
+        popup,
+        el('strong', currentLocation.node_name),
+        el('br'),
+        el('strong', 'Current Location'),
+        el('br'),
+        buildPopupLine('Coordinates', `${currentLocation.latitude.toFixed(6)}, ${currentLocation.longitude.toFixed(6)}`),
+    );
+
+    if (currentLocation.altitude) {
+        popup.appendChild(buildPopupLine('Altitude', `${currentLocation.altitude}m`));
+    }
+
+    appendChildren(
+        popup,
+        buildPopupLine('Updated', currentLocation.timestamp_relative),
+        el('small', [el('strong', 'Recorded:'), ' ', currentLocation.timestamp])
+    );
+
+    return popup;
+}
+
+function buildLocationHistoryPopup(locationNumber, formattedTime, location) {
+    const popup = el('div');
+    appendChildren(
+        popup,
+        el('strong', `Location #${locationNumber}`),
+        el('br'),
+        el('small', { className: 'text-muted' }, formattedTime),
+        el('br'),
+        buildPopupLine('Coordinates', `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}`)
+    );
+
+    if (location.altitude) {
+        popup.appendChild(buildPopupLine('Altitude', `${location.altitude}m`));
+    }
+
+    return popup;
+}
+
+function showLocationHistoryError(mapContainer, message) {
+    setChildren(
+        mapContainer,
+        el('div', { className: 'd-flex align-items-center justify-content-center h-100' },
+            el('div', { className: 'text-center text-danger' },
+                icon('bi bi-exclamation-triangle'),
+                el('div', { className: 'mt-2' }, 'Error loading location history'),
+                el('div', { className: 'small' }, message)
+            )
+        )
+    );
+
+    const iconEl = mapContainer.querySelector('i');
+    if (iconEl) {
+        iconEl.style.fontSize = '2rem';
+    }
+}
+
 function loadCurrentLocationMap() {
     const currentLocationContainer = document.getElementById('current-location-map');
     if (!currentLocationContainer) {
@@ -792,18 +862,7 @@ function loadCurrentLocationMap() {
     // Add marker for current location
     const marker = L.marker([currentLocation.latitude, currentLocation.longitude]).addTo(currentMap);
 
-    // Create popup content
-    const popupContent = `
-        <div>
-            <strong>${currentLocation.node_name}</strong><br>
-            <strong>Current Location</strong><br>
-            <strong>Coordinates:</strong> ${currentLocation.latitude.toFixed(6)}, ${currentLocation.longitude.toFixed(6)}<br>
-            ${currentLocation.altitude ? `<strong>Altitude:</strong> ${currentLocation.altitude}m<br>` : ''}
-            <strong>Updated:</strong> ${currentLocation.timestamp_relative}<br>
-            <small><strong>Recorded:</strong> ${currentLocation.timestamp}</small>
-        </div>
-    `;
-    marker.bindPopup(popupContent).openPopup();
+    marker.bindPopup(buildCurrentLocationPopup(currentLocation)).openPopup();
 }
 
 async function loadLocationHistoryMap() {
@@ -831,7 +890,7 @@ async function loadLocationHistoryMap() {
         cardContainer.style.display = 'block';
 
         // Clear loading content
-        mapContainer.innerHTML = '';
+        mapContainer.replaceChildren();
 
         // Initialize map centered on the most recent location
         const mostRecentLocation = data.location_history[0];
@@ -897,15 +956,13 @@ async function loadLocationHistoryMap() {
                 ? formatTimestamp(location.timestamp)
                 : location.timestamp_str;
 
-            const popupContent = `
-                <div>
-                    <strong>Location #${data.location_history.length - index}</strong><br>
-                    <small class="text-muted">${formattedTime}</small><br>
-                    <strong>Coordinates:</strong> ${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}<br>
-                    ${location.altitude ? `<strong>Altitude:</strong> ${location.altitude}m<br>` : ''}
-                </div>
-            `;
-            marker.bindPopup(popupContent);
+            marker.bindPopup(
+                buildLocationHistoryPopup(
+                    data.location_history.length - index,
+                    formattedTime,
+                    location
+                )
+            );
 
             // Add to path coordinates (in chronological order for path)
             pathCoords.unshift([location.latitude, location.longitude]);
@@ -933,16 +990,7 @@ async function loadLocationHistoryMap() {
     } catch (error) {
         console.error('Error loading location history:', error);
 
-        // Show error in map container
-        mapContainer.innerHTML = `
-            <div class="d-flex align-items-center justify-content-center h-100">
-                <div class="text-center text-danger">
-                    <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
-                    <div class="mt-2">Error loading location history</div>
-                    <div class="small">${error.message}</div>
-                </div>
-            </div>
-        `;
+        showLocationHistoryError(mapContainer, error.message);
 
         // Still show the card even on error so users can see what went wrong
         cardContainer.style.display = 'block';

@@ -223,7 +223,7 @@ class NodePicker {
             return;
         }
 
-        const html = this.nodes.map(node => {
+        const items = this.nodes.map(node => {
             const longName = node.long_name || null;
             const shortName = node.short_name || null;
             let displayName = longName || shortName || 'Unnamed';
@@ -245,25 +245,37 @@ class NodePicker {
                 details.push('Popular Node');
             }
 
-            // Escape HTML attributes for Firefox compatibility
-            const escapedDisplayName = this.escapeHtml(displayName);
-            const escapedShortName = this.escapeHtml(shortName || '');
-            const escapedNodeId = this.escapeHtml(node.node_id.toString());
+            const item = document.createElement('div');
+            item.className = 'node-picker-item';
+            item.dataset.nodeId = node.node_id.toString();
+            item.dataset.displayName = displayName;
+            item.dataset.shortName = shortName || '';
 
-            return `
-                <div class="node-picker-item" data-node-id="${escapedNodeId}" data-display-name="${escapedDisplayName}" data-short-name="${escapedShortName}">
-                    <div class="node-picker-item-name">${escapedDisplayName}</div>
-                    <div class="node-picker-item-id">${hexId}</div>
-                    ${details.length > 0 ? `<div class="node-picker-item-details">${details.join(' • ')}</div>` : ''}
-                </div>
-            `;
-        }).join('');
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'node-picker-item-name';
+            nameDiv.textContent = displayName;
+            item.appendChild(nameDiv);
 
-        this.resultsContainer.innerHTML = html;
+            const idDiv = document.createElement('div');
+            idDiv.className = 'node-picker-item-id';
+            idDiv.textContent = hexId;
+            item.appendChild(idDiv);
+
+            if (details.length > 0) {
+                const detailsDiv = document.createElement('div');
+                detailsDiv.className = 'node-picker-item-details';
+                detailsDiv.textContent = details.join(' • ');
+                item.appendChild(detailsDiv);
+            }
+
+            return item;
+        });
+
+        this.resultsContainer.replaceChildren(...items);
 
         // Add click listeners to items - Firefox-compatible approach
-        const items = this.resultsContainer.querySelectorAll('.node-picker-item');
-        items.forEach(item => {
+        const renderedItems = this.resultsContainer.querySelectorAll('.node-picker-item');
+        renderedItems.forEach(item => {
             item.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -278,13 +290,6 @@ class NodePicker {
 
         this.currentFocus = -1;
     }
-
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
     selectNode(nodeId, displayName = null) {
         // Find the node data if displayName not provided
         if (!displayName) {
@@ -345,7 +350,7 @@ class NodePicker {
     showLoading() {
         this.loadingElement.style.display = 'block';
         this.noResultsElement.style.display = 'none';
-        this.resultsContainer.innerHTML = '';
+        this.resultsContainer.replaceChildren();
     }
 
     hideLoading() {
@@ -355,7 +360,7 @@ class NodePicker {
     showNoResults() {
         this.noResultsElement.style.display = 'block';
         this.loadingElement.style.display = 'none';
-        this.resultsContainer.innerHTML = '';
+        this.resultsContainer.replaceChildren();
     }
 
     hideNoResults() {
@@ -620,7 +625,7 @@ class GatewayPicker {
             return;
         }
 
-        const html = this.gateways.map(gateway => {
+        const items = this.gateways.map(gateway => {
             // Handle both string gateways and gateway objects
             let gatewayId, displayName, details = [];
 
@@ -648,24 +653,36 @@ class GatewayPicker {
                 }
             }
 
-            // Escape HTML attributes for Firefox compatibility
-            const escapedGatewayId = this.escapeHtml(gatewayId);
-            const escapedDisplayName = this.escapeHtml(displayName);
+            const item = document.createElement('div');
+            item.className = 'gateway-picker-item';
+            item.dataset.gatewayId = gatewayId;
+            item.dataset.displayName = displayName;
 
-            return `
-                <div class="gateway-picker-item" data-gateway-id="${escapedGatewayId}" data-display-name="${escapedDisplayName}">
-                    <div class="gateway-picker-item-name">${escapedDisplayName}</div>
-                    <div class="gateway-picker-item-id">${escapedGatewayId}</div>
-                    ${details.length > 0 ? `<div class="gateway-picker-item-details">${details.join(' • ')}</div>` : ''}
-                </div>
-            `;
-        }).join('');
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'gateway-picker-item-name';
+            nameDiv.textContent = displayName;
+            item.appendChild(nameDiv);
 
-        this.resultsContainer.innerHTML = html;
+            const idDiv = document.createElement('div');
+            idDiv.className = 'gateway-picker-item-id';
+            idDiv.textContent = gatewayId;
+            item.appendChild(idDiv);
+
+            if (details.length > 0) {
+                const detailsDiv = document.createElement('div');
+                detailsDiv.className = 'gateway-picker-item-details';
+                detailsDiv.textContent = details.join(' • ');
+                item.appendChild(detailsDiv);
+            }
+
+            return item;
+        });
+
+        this.resultsContainer.replaceChildren(...items);
 
         // Add click listeners to items - Firefox-compatible approach
-        const items = this.resultsContainer.querySelectorAll('.gateway-picker-item');
-        items.forEach(item => {
+        const renderedItems = this.resultsContainer.querySelectorAll('.gateway-picker-item');
+        renderedItems.forEach(item => {
             item.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -680,13 +697,6 @@ class GatewayPicker {
 
         this.currentFocus = -1;
     }
-
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
     selectGateway(gatewayId, displayName = null) {
         // Convert Meshtastic hex-style ID (e.g., !abcd1234) to decimal node ID for consistency
         let storedId = gatewayId;
@@ -742,7 +752,7 @@ class GatewayPicker {
     showLoading() {
         this.loadingElement.style.display = 'block';
         this.noResultsElement.style.display = 'none';
-        this.resultsContainer.innerHTML = '';
+        this.resultsContainer.replaceChildren();
     }
 
     hideLoading() {
@@ -752,7 +762,7 @@ class GatewayPicker {
     showNoResults() {
         this.noResultsElement.style.display = 'block';
         this.loadingElement.style.display = 'none';
-        this.resultsContainer.innerHTML = '';
+        this.resultsContainer.replaceChildren();
     }
 
     hideNoResults() {

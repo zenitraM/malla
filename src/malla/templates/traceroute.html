@@ -213,17 +213,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 sortable: true,
                 render: (value, row) => {
                     if (row.from_node_id) {
-                        // Use the short name from API response
                         const shortName = row.from_node_short || `${row.from_node_id.toString(16).padStart(8, '0')}`.slice(-4);
-                        return `<a href="/node/${row.from_node_id}" class="text-decoration-none node-link"
-                                   data-node-id="${row.from_node_id}" data-bs-toggle="tooltip"
-                                   data-bs-placement="top" data-bs-html="true"
-                                   data-bs-title="Loading..." title="View node details">
-                                    ${shortName}
-                                </a>`;
-                    } else {
-                        return value || 'Unknown';
+                        return nodeLink(row.from_node_id, shortName);
                     }
+                    return textNode(value || 'Unknown');
                 }
             },
             {
@@ -232,17 +225,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 sortable: true,
                 render: (value, row) => {
                     if (row.to_node_id && row.to_node_id !== 4294967295) {
-                        // Use the short name from API response
                         const shortName = row.to_node_short || row.to_node_id.toString(16).padStart(8, '0').slice(-4);
-                        return `<a href="/node/${row.to_node_id}" class="text-decoration-none node-link"
-                                   data-node-id="${row.to_node_id}" data-bs-toggle="tooltip"
-                                   data-bs-placement="top" data-bs-html="true"
-                                   data-bs-title="Loading..." title="View node details">
-                                    ${shortName}
-                                </a>`;
-                    } else {
-                        return value || 'Broadcast';
+                        return nodeLink(row.to_node_id, shortName);
                     }
+                    return textNode(value || 'Broadcast');
                 }
             },
                         {
@@ -250,30 +236,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 title: 'Route',
                 sortable: false,
                 render: (value, row) => {
-                    // Build route display client-side from structured data
                     if (row.route_nodes && row.route_names &&
                         Array.isArray(row.route_nodes) && Array.isArray(row.route_names) &&
                         row.route_nodes.length > 0 && row.route_names.length > 0) {
-
-                        // Create clickable links for each node in the route
                         const routeParts = row.route_names.map((nodeName, index) => {
                             const nodeId = row.route_nodes[index];
                             if (nodeId) {
-                                return `<a href="/node/${nodeId}" class="text-decoration-none node-link"
-                                           data-node-id="${nodeId}" data-bs-toggle="tooltip"
-                                           data-bs-placement="top" data-bs-html="true"
-                                           data-bs-title="Loading..." title="View node details">
-                                            ${nodeName}
-                                        </a>`;
+                                return nodeLink(nodeId, nodeName);
                             }
-                            return nodeName;
+                            return textNode(nodeName);
                         });
 
-                        return routeParts.join(' → ');
+                        return joinNodes(routeParts, ' -> '.replace('->', '→'));
                     }
 
-                    // Fallback for no route data
-                    return `<span class="text-muted">No route data</span>`;
+                    return el('span', { className: 'text-muted' }, 'No route data');
                 }
             },
             {
@@ -282,43 +259,30 @@ document.addEventListener('DOMContentLoaded', function() {
                 sortable: true,
                 render: (value, row) => {
                     if (row.is_grouped) {
-                        // For grouped packets, show gateway count
                         const count = row.gateway_count;
                         if (count > 1) {
-                            return `<span class="badge bg-info" title="Multiple gateways: ${row.gateway_list}">
-                                                ${count} gateways
-                                            </span>`;
+                            return el('span', {
+                                className: 'badge bg-info',
+                                title: `Multiple gateways: ${row.gateway_list}`
+                            }, `${count} gateways`);
                         } else if (count === 1) {
-                            return `<span class="badge bg-info">1 gateway</span>`;
+                            return badge('1 gateway', 'bg-info');
                         } else {
-                            return `<span class="text-muted">N/A</span>`;
+                            return el('span', { className: 'text-muted' }, 'N/A');
                         }
                     } else {
-                        // For individual packets, show gateway short name with link
                         const gatewayName = row.gateway_name;
                         const gatewayNodeId = row.gateway_node_id;
 
                         if (value && value.startsWith('!') && gatewayNodeId) {
-                            // Use last 4 hex digits as short name
                             const shortName = value.substring(value.length - 4).toUpperCase();
-                            return `<a href="/node/${gatewayNodeId}" class="text-decoration-none node-link"
-                                       data-node-id="${gatewayNodeId}" data-bs-toggle="tooltip"
-                                       data-bs-placement="top" data-bs-html="true"
-                                       data-bs-title="Loading..." title="View node details">
-                                        ${shortName}
-                                    </a>`;
+                            return nodeLink(gatewayNodeId, shortName);
                         } else if (gatewayName && gatewayNodeId) {
-                            // Extract short name from gateway name if available
                             const parenMatch = gatewayName.match(/\(([^)]+)\)$/);
                             const shortName = parenMatch ? parenMatch[1] : gatewayName.substring(0, 4).toUpperCase();
-                            return `<a href="/node/${gatewayNodeId}" class="text-decoration-none node-link"
-                                       data-node-id="${gatewayNodeId}" data-bs-toggle="tooltip"
-                                       data-bs-placement="top" data-bs-html="true"
-                                       data-bs-title="Loading..." title="View node details">
-                                        ${shortName}
-                                    </a>`;
+                            return nodeLink(gatewayNodeId, shortName);
                         }
-                        return value || 'N/A';
+                        return textNode(value || 'N/A');
                     }
                 }
             },
@@ -328,16 +292,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 sortable: true,
                 render: (value, row) => {
                     if (row.is_grouped) {
-                        return value && value !== 'N/A' ?
-                            `<span>${value}</span>` :
-                            `<span class="text-muted">N/A</span>`;
+                        return value && value !== 'N/A'
+                            ? el('span', null, value)
+                            : el('span', { className: 'text-muted' }, 'N/A');
                     } else if (value !== null && value !== '' && value !== 'N/A') {
                         const rssiValue = parseFloat(value);
                         const colorClass = getRssiColorClass(rssiValue);
                         const formattedValue = rssiValue.toFixed(1);
-                        return `<span class="${colorClass}">${formattedValue} dBm</span>`;
+                        return el('span', { className: colorClass }, `${formattedValue} dBm`);
                     }
-                    return '<span class="text-muted">N/A</span>';
+                    return el('span', { className: 'text-muted' }, 'N/A');
                 }
             },
             {
@@ -346,16 +310,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 sortable: true,
                 render: (value, row) => {
                     if (row.is_grouped) {
-                        return value && value !== 'N/A' ?
-                            `<span>${value}</span>` :
-                            `<span class="text-muted">N/A</span>`;
+                        return value && value !== 'N/A'
+                            ? el('span', null, value)
+                            : el('span', { className: 'text-muted' }, 'N/A');
                     } else if (value !== null && value !== '' && value !== 'N/A') {
                         const snrValue = parseFloat(value);
                         const colorClass = getSnrColorClass(snrValue);
                         const formattedValue = snrValue.toFixed(2);
-                        return `<span class="${colorClass}">${formattedValue} dB</span>`;
+                        return el('span', { className: colorClass }, `${formattedValue} dB`);
                     }
-                    return '<span class="text-muted">N/A</span>';
+                    return el('span', { className: 'text-muted' }, 'N/A');
                 }
             },
             {
@@ -364,20 +328,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 sortable: true,
                 render: (value, row) => {
                     if (row.is_grouped) {
-                        return value && value !== 'N/A' ?
-                            `<span>${value}</span>` :
-                            `<span class="text-muted">N/A</span>`;
+                        return value && value !== 'N/A'
+                            ? el('span', null, value)
+                            : el('span', { className: 'text-muted' }, 'N/A');
                     } else if (value !== null && value !== '') {
                         const hops = parseInt(value);
                         if (hops === 0) {
-                            return `<span class="badge bg-success">Direct</span>`;
+                            return badge('Direct', 'bg-success');
                         } else if (hops <= 2) {
-                            return `<span class="badge bg-info">${hops}</span>`;
+                            return badge(String(hops), 'bg-info');
                         } else {
-                            return `<span class="badge bg-warning">${hops}</span>`;
+                            return badge(String(hops), 'bg-warning');
                         }
                     }
-                    return `<span class="text-muted">N/A</span>`;
+                    return el('span', { className: 'text-muted' }, 'N/A');
                 }
             },
             {
@@ -385,7 +349,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 title: 'Actions',
                 sortable: false,
                 render: (value, row) => {
-                    // Create filtered URLs using the URL manager
                     const hopsUrl = urlManager.createFilteredURL('/traceroute-hops', {
                         from_node: row.from_node_id,
                         to_node: row.to_node_id
@@ -395,21 +358,26 @@ document.addEventListener('DOMContentLoaded', function() {
                         to_node: row.to_node_id
                     });
 
-                    return `
-                        <div class="btn-group" role="group">
-                            <a href="/packet/${value}"
-                               class="btn btn-sm btn-outline-info" title="View packet details">
-                                <i class="bi bi-info-circle"></i>
-                            </a>
-                            <a href="${hopsUrl}"
-                               class="btn btn-sm btn-outline-secondary" title="Analyze hops between these nodes">
-                                <i class="bi bi-diagram-3"></i>
-                            </a>
-                            <a href="${packetsUrl}"
-                               class="btn btn-sm btn-outline-primary" title="View packets between these nodes">
-                                <i class="bi bi-arrow-left-right"></i>
-                            </a>
-                        </div>`;
+                    return el('div', { className: 'btn-group', role: 'group' },
+                        buttonLink({
+                            href: safePath(`/packet/${encodeURIComponent(String(value))}`),
+                            className: 'btn btn-sm btn-outline-info',
+                            title: 'View packet details',
+                            iconClass: 'bi bi-info-circle'
+                        }),
+                        buttonLink({
+                            href: hopsUrl,
+                            className: 'btn btn-sm btn-outline-secondary',
+                            title: 'Analyze hops between these nodes',
+                            iconClass: 'bi bi-diagram-3'
+                        }),
+                        buttonLink({
+                            href: packetsUrl,
+                            className: 'btn btn-sm btn-outline-primary',
+                            title: 'View packets between these nodes',
+                            iconClass: 'bi bi-arrow-left-right'
+                        })
+                    );
                 }
             }
         ]

@@ -783,16 +783,12 @@ function populateTopNodesTable(topNodes) {
     const tbody = document.querySelector('#topNodesTable tbody');
     if (!tbody) return;
 
-    tbody.innerHTML = '';
+    tbody.replaceChildren();
 
     topNodes.slice(0, 10).forEach(node => {
+        const nodeName = node.display_name || `!${node.node_id.toString(16).padStart(8, '0')}`;
         const row = document.createElement('tr');
 
-        // Node name with link
-        const nodeName = node.display_name || `!${node.node_id.toString(16).padStart(8, '0')}`;
-        const nodeLink = `/node/${node.node_id}`;
-
-        // Signal quality indicator
         let signalClass = 'text-muted';
         let signalText = 'N/A';
         if (node.avg_rssi && node.avg_rssi !== 0) {
@@ -811,11 +807,16 @@ function populateTopNodesTable(topNodes) {
             }
         }
 
-        row.innerHTML = `
-            <td><a href="${nodeLink}" class="text-decoration-none">${nodeName}</a></td>
-            <td><span class="badge bg-primary">${node.packet_count || 0}</span></td>
-            <td><span class="${signalClass}">${signalText}</span></td>
-        `;
+        row.append(
+            el('td', null,
+                el('a', {
+                    href: safePath(`/node/${encodeURIComponent(String(node.node_id))}`),
+                    className: 'text-decoration-none'
+                }, nodeName)
+            ),
+            el('td', null, badge(String(node.packet_count || 0), 'bg-primary')),
+            el('td', null, el('span', { className: signalClass }, signalText))
+        );
 
         tbody.appendChild(row);
     });
