@@ -51,9 +51,9 @@ def _prune_relay_candidate_cache(now: float) -> None:
 
     overflow = len(_relay_candidate_cache) - RELAY_CANDIDATE_CACHE_MAX_ENTRIES
     if overflow > 0:
-        oldest_keys = sorted(
-            _relay_candidate_cache.items(), key=lambda item: item[1][0]
-        )[:overflow]
+        oldest_keys = sorted(_relay_candidate_cache.items(), key=lambda item: item[1][0])[
+            :overflow
+        ]
         for key, _ in oldest_keys:
             _relay_candidate_cache.pop(key, None)
 
@@ -2074,9 +2074,7 @@ class NodeRepository:
             if not missing_pairs:
                 return result
 
-            missing_gateway_ids = sorted(
-                {gateway_id for gateway_id, _ in missing_pairs}
-            )
+            missing_gateway_ids = sorted({gateway_id for gateway_id, _ in missing_pairs})
             missing_last_bytes = sorted({last_byte for _, last_byte in missing_pairs})
 
             # Convert gateway IDs to hex format
@@ -2120,9 +2118,7 @@ class NodeRepository:
             # Process part 1 results (direct receptions by gateways)
             gateway_hex_to_id = {
                 hex_id: gw_id
-                for gw_id, hex_id in zip(
-                    missing_gateway_ids, gateway_hex_ids, strict=True
-                )
+                for gw_id, hex_id in zip(missing_gateway_ids, gateway_hex_ids, strict=True)
             }
             for row in part1_results:
                 gateway_hex = row["gateway_id"]
@@ -2332,10 +2328,7 @@ class NodeRepository:
                 else {}
             )
 
-            for (
-                gateway_id,
-                last_byte,
-            ), candidate_ids in limited_candidates_by_pair.items():
+            for (gateway_id, last_byte), candidate_ids in limited_candidates_by_pair.items():
                 candidates = []
                 for candidate_id in candidate_ids:
                     hex_id = f"!{candidate_id:08x}"
