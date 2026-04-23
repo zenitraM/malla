@@ -56,8 +56,11 @@ class TestOnMessageNodeInfo:
             mac_address=None,
             primary_channel="Bulgaria",
         )
-        assert mock_log_packet_to_database.call_args.args[3] is True
-        assert mock_log_packet_to_database.call_args.args[5] is None
+        _, _, _, processed_successfully, _, parsing_error = (
+            mock_log_packet_to_database.call_args.args
+        )
+        assert processed_successfully is True
+        assert parsing_error is None
 
     @patch("src.malla.mqtt_capture.log_packet_to_database")
     @patch("src.malla.mqtt_capture.get_node_display_name", return_value="Gabriela")
@@ -74,5 +77,8 @@ class TestOnMessageNodeInfo:
 
         mock_update_node_cache.assert_called_once()
         assert mock_update_node_cache.call_args.kwargs["hw_model"] == "UNKNOWN_999"
-        assert mock_log_packet_to_database.call_args.args[3] is True
-        assert mock_log_packet_to_database.call_args.args[5] is None
+        _, _, _, processed_successfully, _, parsing_error = (
+            mock_log_packet_to_database.call_args.args
+        )
+        assert processed_successfully is True
+        assert parsing_error is None
