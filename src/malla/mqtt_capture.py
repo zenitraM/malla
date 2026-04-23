@@ -723,7 +723,13 @@ def get_gateway_display_name(gateway_hex_id: str) -> str:
 def get_enum_name(
     enum_descriptor: Any, enum_value: int, unknown_prefix: str = "UNKNOWN"
 ) -> str:
-    """Return an enum name, falling back to a stable placeholder for unknown values."""
+    """Return a protobuf enum name for ``enum_value``.
+
+    Args:
+        enum_descriptor: Protobuf enum descriptor exposing ``values_by_number``.
+        enum_value: Numeric enum value to resolve.
+        unknown_prefix: Prefix used when the enum value is not present locally.
+    """
     if descriptor_value := enum_descriptor.values_by_number.get(enum_value):
         return descriptor_value.name
     return f"{unknown_prefix}_{enum_value}"

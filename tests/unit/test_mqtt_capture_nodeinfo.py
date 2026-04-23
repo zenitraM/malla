@@ -31,6 +31,24 @@ def build_nodeinfo_message(hw_model: int) -> SimpleNamespace:
     )
 
 
+def assert_logged_success(mock_log_packet_to_database) -> None:
+    """Assert the packet was logged as a successful parse."""
+    (
+        logged_topic,
+        logged_service_envelope,
+        logged_mesh_packet,
+        processed_successfully,
+        raw_service_envelope_data,
+        parsing_error,
+    ) = mock_log_packet_to_database.call_args.args
+    assert logged_topic == "msh/Bulgaria/2/e/Bulgaria/!a2e96b40"
+    assert logged_service_envelope is not None
+    assert logged_mesh_packet is not None
+    assert raw_service_envelope_data is not None
+    assert processed_successfully is True
+    assert parsing_error is None
+
+
 class TestOnMessageNodeInfo:
     @patch("src.malla.mqtt_capture.log_packet_to_database")
     @patch("src.malla.mqtt_capture.get_node_display_name", return_value="Gabriela")
@@ -56,22 +74,7 @@ class TestOnMessageNodeInfo:
             mac_address=None,
             primary_channel="Bulgaria",
         )
-        (
-            logged_topic,
-            logged_service_envelope,
-            logged_mesh_packet,
-            processed_successfully,
-            raw_service_envelope_data,
-            parsing_error,
-        ) = (
-            mock_log_packet_to_database.call_args.args
-        )
-        assert logged_topic == "msh/Bulgaria/2/e/Bulgaria/!a2e96b40"
-        assert logged_service_envelope is not None
-        assert logged_mesh_packet is not None
-        assert raw_service_envelope_data is not None
-        assert processed_successfully is True
-        assert parsing_error is None
+        assert_logged_success(mock_log_packet_to_database)
 
     @patch("src.malla.mqtt_capture.log_packet_to_database")
     @patch("src.malla.mqtt_capture.get_node_display_name", return_value="Gabriela")
@@ -88,19 +91,4 @@ class TestOnMessageNodeInfo:
 
         mock_update_node_cache.assert_called_once()
         assert mock_update_node_cache.call_args.kwargs["hw_model"] == "UNKNOWN_999"
-        (
-            logged_topic,
-            logged_service_envelope,
-            logged_mesh_packet,
-            processed_successfully,
-            raw_service_envelope_data,
-            parsing_error,
-        ) = (
-            mock_log_packet_to_database.call_args.args
-        )
-        assert logged_topic == "msh/Bulgaria/2/e/Bulgaria/!a2e96b40"
-        assert logged_service_envelope is not None
-        assert logged_mesh_packet is not None
-        assert raw_service_envelope_data is not None
-        assert processed_successfully is True
-        assert parsing_error is None
+        assert_logged_success(mock_log_packet_to_database)
