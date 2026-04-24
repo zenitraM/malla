@@ -720,6 +720,24 @@ def get_gateway_display_name(gateway_hex_id: str) -> str:
     return gateway_hex_id
 
 
+def get_enum_name(
+    enum_descriptor: Any, enum_value: int, unknown_prefix: str = "UNKNOWN"
+) -> str:
+    """Return a protobuf enum name for ``enum_value``.
+
+    Args:
+        enum_descriptor: Protobuf enum descriptor exposing ``values_by_number``.
+        enum_value: Numeric enum value to resolve.
+        unknown_prefix: Prefix used when the enum value is not present locally.
+
+    Returns:
+        The enum name if it exists locally, otherwise ``{unknown_prefix}_{enum_value}``.
+    """
+    if descriptor_value := enum_descriptor.values_by_number.get(enum_value):
+        return descriptor_value.name
+    return f"{unknown_prefix}_{enum_value}"
+
+
 def log_packet_to_database(
     topic: str,
     service_envelope: Any | None,
@@ -739,7 +757,11 @@ def log_packet_to_database(
         if mesh_packet and hasattr(mesh_packet, "decoded")
         else None
     )
-    portnum_name = portnums_pb2.PortNum.Name(portnum) if portnum is not None else None
+    portnum_name = (
+        get_enum_name(portnums_pb2.PortNum.DESCRIPTOR, portnum)
+        if portnum is not None
+        else None
+    )
     gateway_id = (
         getattr(service_envelope, "gateway_id", None) if service_envelope else None
     )
@@ -1188,12 +1210,14 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
             short_name = user.short_name
 
             hw_model_enum = user.hw_model
-            hw_model_str = mesh_pb2.HardwareModel.Name(hw_model_enum).replace(
-                "UNSET", "Unknown"
-            )
+            hw_model_str = get_enum_name(
+                mesh_pb2.HardwareModel.DESCRIPTOR, hw_model_enum
+            ).replace("UNSET", "Unknown")
 
             role_enum = user.role
-            role_str = config_pb2.Config.DeviceConfig.Role.Name(role_enum)
+            role_str = get_enum_name(
+                config_pb2.Config.DeviceConfig.Role.DESCRIPTOR, role_enum
+            )
 
             # Update node cache with received nodeinfo
             mac_address = (
@@ -1285,7 +1309,9 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
             processed_successfully = True
 
         else:
-            port_name = portnums_pb2.PortNum.Name(mesh_packet.decoded.portnum)
+            port_name = get_enum_name(
+                portnums_pb2.PortNum.DESCRIPTOR, mesh_packet.decoded.portnum
+            )
             from_node_display = get_node_display_name(from_node_id_numeric)
             via_mqtt_str = (
                 " (via MQTT)" if getattr(mesh_packet, "via_mqtt", False) else ""
@@ -1400,7 +1426,9 @@ def main() -> None:
     load_node_cache()
 
     # Initialize MQTT Client
-    mqtt_client = mqtt.Client(CallbackAPIVersion.VERSION2, client_id=MQTT_CLIENT_ID or "")
+    mqtt_client = mqtt.Client(
+        CallbackAPIVersion.VERSION2, client_id=MQTT_CLIENT_ID or ""
+    )
 
     if MQTT_CLIENT_ID:
         logging.info(f"Using configured MQTT client ID: {MQTT_CLIENT_ID}")
