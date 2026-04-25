@@ -33,7 +33,7 @@
 
     function el(tagName, attrs, ...children) {
         const element = document.createElement(tagName);
-        const options = attrs && !Array.isArray(attrs) && !(attrs instanceof Node) ? attrs : null;
+        const options = attrs && typeof attrs === 'object' && !Array.isArray(attrs) && !(attrs instanceof Node) ? attrs : null;
         const childItems = options ? children : [attrs, ...children];
 
         if (options) {
