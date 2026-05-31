@@ -84,7 +84,7 @@ def main():
             "timeout": 30,
             "keepalive": 2,
             "preload_app": True,
-            "access_log_format": '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s',
+            "access_log_format": '%({REMOTE_ADDR}e)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s',
             "accesslog": "-",  # Log to stdout
             "errorlog": "-",  # Log to stderr
             "loglevel": "info",
