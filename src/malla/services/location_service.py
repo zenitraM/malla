@@ -14,12 +14,31 @@ logger = logging.getLogger(__name__)
 
 _PACKET_LINKS_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _PACKET_LINKS_CACHE_TTL_SECONDS = 60
+_PACKET_LINKS_CACHE_MAX_ENTRIES = 32
 
 
 def _cache_key_from_filters(filters: dict[str, Any] | None) -> str:
     if not filters:
         return ""
     return repr(sorted(filters.items()))
+
+
+def _prune_packet_links_cache(now: float) -> None:
+    expired_keys = [
+        key
+        for key, (cached_at, _) in _PACKET_LINKS_CACHE.items()
+        if now - cached_at > _PACKET_LINKS_CACHE_TTL_SECONDS
+    ]
+    for key in expired_keys:
+        _PACKET_LINKS_CACHE.pop(key, None)
+
+    overflow = len(_PACKET_LINKS_CACHE) - _PACKET_LINKS_CACHE_MAX_ENTRIES
+    if overflow > 0:
+        oldest_keys = sorted(_PACKET_LINKS_CACHE.items(), key=lambda item: item[1][0])[
+            :overflow
+        ]
+        for key, _ in oldest_keys:
+            _PACKET_LINKS_CACHE.pop(key, None)
 
 
 class LocationService:
@@ -871,10 +890,11 @@ class LocationService:
 
         cache_key = _cache_key_from_filters(filters)
         now = time.time()
+        _prune_packet_links_cache(now)
         cached = _PACKET_LINKS_CACHE.get(cache_key)
         if cached and now - cached[0] < _PACKET_LINKS_CACHE_TTL_SECONDS:
             logger.debug("Returning cached packet links for filters: %s", filters)
-            return cached[1]
+            return [link.copy() for link in cached[1]]
 
         logger.info(
             "Getting packet-based RF links for map visualisation with filters: %s",
@@ -1034,7 +1054,7 @@ class LocationService:
             logger.info("Generated %d packet-based RF links", len(link_map))
             result = list(link_map.values())
             _PACKET_LINKS_CACHE[cache_key] = (time.time(), result)
-            return result
+            return [link.copy() for link in result]
 
         except Exception as e:
             logger.error("Error getting packet links: %s", e)

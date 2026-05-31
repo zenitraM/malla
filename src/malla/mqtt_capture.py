@@ -367,9 +367,6 @@ def init_database() -> None:
         )
     """)
 
-    cursor.execute("PRAGMA table_info(node_info)")
-    node_info_columns = {row[1] for row in cursor.fetchall()}
-
     ensure_startup_schema(cursor, drop_legacy_indexes=True)
 
     # Backfill primary_channel only when there are actually missing values.

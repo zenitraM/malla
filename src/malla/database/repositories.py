@@ -1274,16 +1274,6 @@ class NodeRepository:
             )
             node_info_row = cursor.fetchone()
 
-            if (
-                node_info_row is None
-                and node_stats_row
-                and "node_id" in node_stats_row.keys()
-            ):
-                node_info_row = node_stats_row
-
-            if not node_stats_row or "total_packets" not in node_stats_row.keys():
-                node_stats_row = None
-
             if not node_stats_row or node_stats_row["total_packets"] == 0:
                 # Check if node exists in node_info but has no packets
                 if not node_info_row:
@@ -1739,7 +1729,7 @@ class NodeRepository:
                 )
 
             # Get received gateways information (gateways that have received packets from this node)
-            gateways_query = f"""
+            gateways_query = """
             WITH top_gateways AS (
                 SELECT
                     p.gateway_id,

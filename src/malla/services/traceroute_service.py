@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 _NETWORK_GRAPH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _NETWORK_GRAPH_CACHE_TTL_SECONDS = 60
+_NETWORK_GRAPH_CACHE_MAX_ENTRIES = 32
 
 
 def _network_graph_cache_key(
@@ -47,6 +48,37 @@ def _network_graph_cache_key(
             sorted((filters or {}).items()),
         )
     )
+
+
+def _copy_network_graph_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **payload,
+        "nodes": [node.copy() for node in payload.get("nodes", [])],
+        "links": [link.copy() for link in payload.get("links", [])],
+        "indirect_connections": [
+            connection.copy() for connection in payload.get("indirect_connections", [])
+        ],
+        "stats": payload.get("stats", {}).copy(),
+        "metadata": payload.get("metadata", {}).copy(),
+    }
+
+
+def _prune_network_graph_cache(now: float) -> None:
+    expired_keys = [
+        key
+        for key, (cached_at, _) in _NETWORK_GRAPH_CACHE.items()
+        if now - cached_at > _NETWORK_GRAPH_CACHE_TTL_SECONDS
+    ]
+    for key in expired_keys:
+        _NETWORK_GRAPH_CACHE.pop(key, None)
+
+    overflow = len(_NETWORK_GRAPH_CACHE) - _NETWORK_GRAPH_CACHE_MAX_ENTRIES
+    if overflow > 0:
+        oldest_keys = sorted(_NETWORK_GRAPH_CACHE.items(), key=lambda item: item[1][0])[
+            :overflow
+        ]
+        for key, _ in oldest_keys:
+            _NETWORK_GRAPH_CACHE.pop(key, None)
 
 
 class TracerouteService:
@@ -1006,6 +1038,7 @@ class TracerouteService:
             filters=filters,
         )
         now = time.time()
+        _prune_network_graph_cache(now)
         cached = _NETWORK_GRAPH_CACHE.get(cache_key)
         if cached and now - cached[0] < _NETWORK_GRAPH_CACHE_TTL_SECONDS:
             logger.debug(
@@ -1013,7 +1046,7 @@ class TracerouteService:
                 hours,
                 filters,
             )
-            return cached[1]
+            return _copy_network_graph_payload(cached[1])
 
         try:
             # Build filters for traceroute data
@@ -1290,7 +1323,7 @@ class TracerouteService:
                 },
             }
             _NETWORK_GRAPH_CACHE[cache_key] = (time.time(), result)
-            return result
+            return _copy_network_graph_payload(result)
 
         except Exception as e:
             logger.error(f"Error building network graph data: {e}")
