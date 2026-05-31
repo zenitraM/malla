@@ -177,7 +177,7 @@ def load_config(config_path: str | os.PathLike | None = None) -> AppConfig:  # n
     config = AppConfig(**data)  # type: ignore[arg-type]
     config._config_path = yaml_path if yaml_path.is_file() else None
 
-    logger.debug("Loaded application configuration")
+    logger.debug("Loaded application configuration: %s", config)
     return config
 
 

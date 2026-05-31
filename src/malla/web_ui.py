@@ -140,10 +140,6 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
             app.wsgi_app,
             x_proto=1,
         )
-        logger.info(
-            "Trusted proxy middleware applied for header %s",
-            cfg.trusted_proxy_client_ip_header,
-        )
 
     # Mirror a few frequently-used values to top-level keys for backwards
     # compatibility with the existing code base. Over time we should migrate
