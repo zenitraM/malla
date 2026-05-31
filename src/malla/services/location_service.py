@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 _PACKET_LINKS_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _PACKET_LINKS_CACHE_TTL_SECONDS = 60
-_PACKET_LINKS_CACHE_MAX_ENTRIES = 32
+_PACKET_LINKS_CACHE_MAX_ENTRIES = 64
 
 
 def _cache_key_from_filters(filters: dict[str, Any] | None) -> str:
