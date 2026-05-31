@@ -62,8 +62,18 @@ class TestProxyFixMiddleware:
 
             os.unlink(db_path)
 
+    def test_proxy_fix_uses_default_proxy_count(self):
+        app, db_path = self._make_app(trusted_proxies="10.0.0.0/8")
+        try:
+            assert app.wsgi_app.x_for == 1
+            assert app.wsgi_app.x_proto == 1
+        finally:
+            import os
+
+            os.unlink(db_path)
+
     def test_proxy_fix_respects_x_forwarded_for(self):
-        app, db_path = self._make_app(trusted_proxies="127.0.0.1")
+        app, db_path = self._make_app(trusted_proxies="10.0.0.0/8")
         try:
 
             @app.route("/__test_ip")
@@ -87,7 +97,7 @@ class TestProxyFixMiddleware:
             os.unlink(db_path)
 
     def test_proxy_fix_respects_x_forwarded_proto(self):
-        app, db_path = self._make_app(trusted_proxies="127.0.0.1")
+        app, db_path = self._make_app(trusted_proxies="10.0.0.0/8")
         try:
 
             @app.route("/__test_scheme")
