@@ -96,12 +96,20 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
 
         _override_config(cfg)
 
-    # Apply ProxyFix if trusted_proxies is configured
-    if cfg.trusted_proxies:
+    # Apply ProxyFix if behind a reverse proxy
+    if cfg.reverse_proxy_xff_count:
         from werkzeug.middleware.proxy_fix import ProxyFix
 
-        app.wsgi_app = ProxyFix(app.wsgi_app)
-        logger.info("ProxyFix middleware applied")
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=cfg.reverse_proxy_xff_count,
+            x_proto=cfg.reverse_proxy_xff_count,
+        )
+        logger.info(
+            "ProxyFix middleware applied (x_for=%d, x_proto=%d)",
+            cfg.reverse_proxy_xff_count,
+            cfg.reverse_proxy_xff_count,
+        )
 
     # Persist config on Flask instance for later use
     app.config["APP_CONFIG"] = cfg
