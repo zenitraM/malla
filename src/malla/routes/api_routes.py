@@ -2171,7 +2171,9 @@ def api_chat_relay_filters():
     """Resolve narrow relay candidates for exact gateway/last-byte chat pairs."""
     try:
         parsed_pairs: list[tuple[int, int]] = []
-        for raw_pair in request.args.getlist("pair")[:CHAT_RELAY_CANDIDATE_LOOKUP_LIMIT]:
+        for raw_pair in request.args.getlist("pair")[
+            :CHAT_RELAY_CANDIDATE_LOOKUP_LIMIT
+        ]:
             gateway_part, separator, relay_part = raw_pair.partition(":")
             if not separator:
                 continue

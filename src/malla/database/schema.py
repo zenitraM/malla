@@ -106,12 +106,16 @@ LEGACY_INDEX_NAMES: tuple[str, ...] = (
 
 
 def _get_existing_tables(cursor: sqlite3.Cursor) -> set[str]:
-    cursor.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name IS NOT NULL")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IS NOT NULL"
+    )
     return {row[0] for row in cursor.fetchall()}
 
 
 def _get_existing_indexes(cursor: sqlite3.Cursor) -> set[str]:
-    cursor.execute("SELECT name FROM sqlite_master WHERE type = 'index' AND name IS NOT NULL")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name IS NOT NULL"
+    )
     return {row[0] for row in cursor.fetchall()}
 
 

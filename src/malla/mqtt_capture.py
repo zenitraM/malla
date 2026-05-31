@@ -1378,10 +1378,15 @@ def main() -> None:
     logging.info("Initializing database...")
     startup_step_start = time.time()
     init_database()
-    logging.info("Database initialization step finished in %.3fs", time.time() - startup_step_start)
+    logging.info(
+        "Database initialization step finished in %.3fs",
+        time.time() - startup_step_start,
+    )
     startup_step_start = time.time()
     load_node_cache()
-    logging.info("Node cache load step finished in %.3fs", time.time() - startup_step_start)
+    logging.info(
+        "Node cache load step finished in %.3fs", time.time() - startup_step_start
+    )
 
     # Initialize MQTT Client
     mqtt_client = mqtt.Client(
