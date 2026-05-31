@@ -210,9 +210,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Load observed packet channels for select
-    loadPrimaryChannels();
-
     async function loadPrimaryChannels() {
         try {
             const response = await fetch('/api/meshtastic/packet-channels');
@@ -238,6 +235,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function initializePageWithFilters() {
         // Load packet types first
         await loadPacketTypes();
+        await loadPrimaryChannels();
 
         // Small delay to ensure DOM is updated
         await new Promise(resolve => setTimeout(resolve, 100));
