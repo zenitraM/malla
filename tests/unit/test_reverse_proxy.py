@@ -4,7 +4,9 @@ Unit tests for reverse_proxy_xff_count configuration and ProxyFix middleware.
 
 import tempfile
 
-from malla.config import AppConfig
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+from src.malla.config import AppConfig
 from src.malla.web_ui import create_app
 
 
@@ -20,13 +22,12 @@ class TestReverseProxyConfig:
         assert cfg.reverse_proxy_xff_count == 2
 
     def test_env_override(self, monkeypatch):
-        from malla.config import _clear_config_cache, load_config
+        from src.malla.config import _clear_config_cache, load_config
 
         _clear_config_cache()
         monkeypatch.setenv("MALLA_REVERSE_PROXY_XFF_COUNT", "1")
         cfg = load_config(config_path=None)
         assert cfg.reverse_proxy_xff_count == 1
-        _clear_config_cache()
 
 
 class TestProxyFixMiddleware:
@@ -45,7 +46,7 @@ class TestProxyFixMiddleware:
     def test_no_proxy_fix_when_not_configured(self):
         app, db_path = self._make_app(xff_count=None)
         try:
-            assert not hasattr(app.wsgi_app, "x_for")
+            assert not isinstance(app.wsgi_app, ProxyFix)
         finally:
             import os
 
@@ -54,8 +55,6 @@ class TestProxyFixMiddleware:
     def test_proxy_fix_applied_when_configured(self):
         app, db_path = self._make_app(xff_count=1)
         try:
-            from werkzeug.middleware.proxy_fix import ProxyFix
-
             assert isinstance(app.wsgi_app, ProxyFix)
         finally:
             import os
@@ -65,6 +64,7 @@ class TestProxyFixMiddleware:
     def test_proxy_fix_uses_configured_count(self):
         app, db_path = self._make_app(xff_count=3)
         try:
+            assert isinstance(app.wsgi_app, ProxyFix)
             assert app.wsgi_app.x_for == 3
             assert app.wsgi_app.x_proto == 3
         finally:

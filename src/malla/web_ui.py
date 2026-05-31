@@ -97,7 +97,7 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
         _override_config(cfg)
 
     # Apply ProxyFix if behind a reverse proxy
-    if cfg.reverse_proxy_xff_count:
+    if cfg.reverse_proxy_xff_count is not None:
         from werkzeug.middleware.proxy_fix import ProxyFix
 
         app.wsgi_app = ProxyFix(
