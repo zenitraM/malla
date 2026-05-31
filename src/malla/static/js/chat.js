@@ -726,7 +726,7 @@
 
     async function loadChannels() {
         try {
-            var resp = await fetch('/api/meshtastic/channels');
+            var resp = await fetch('/api/meshtastic/packet-channels');
             if (!resp.ok) return;
             var data = await resp.json();
             (data.channels || []).forEach(function (ch) {

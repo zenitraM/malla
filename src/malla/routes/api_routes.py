@@ -1917,6 +1917,7 @@ def api_traceroute_data():
                 "route_names": route_names,  # Node names/displays in the route
                 "gateway": gateway_display,
                 "gateway_sort_value": gateway_sort_value,
+                "channel": tr.get("channel_id") or "Unknown",
                 "rssi": rssi_display,
                 "snr": snr_display,
                 "hops": hops_display,
@@ -1963,6 +1964,18 @@ def api_channels():
         return jsonify({"channels": channels})
     except Exception as e:
         logger.error(f"Error in API channels: {e}")
+        return jsonify({"error": str(e), "channels": []}), 500
+
+
+@api_bp.route("/meshtastic/packet-channels")
+def api_packet_channels():
+    """API endpoint for distinct observed packet channel IDs."""
+    logger.info("API packet channels endpoint accessed")
+    try:
+        channels = NodeRepository.get_unique_packet_channels()
+        return jsonify({"channels": channels})
+    except Exception as e:
+        logger.error(f"Error in API packet channels: {e}")
         return jsonify({"error": str(e), "channels": []}), 500
 
 

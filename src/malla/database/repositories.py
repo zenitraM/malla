@@ -3001,6 +3001,22 @@ class NodeRepository:
             logger.error(f"Error getting unique primary channels: {e}")
             return []
 
+    @staticmethod
+    def get_unique_packet_channels() -> list[str]:
+        """Return list of distinct observed packet channel IDs."""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT DISTINCT channel_id FROM packet_history WHERE channel_id IS NOT NULL AND channel_id != '' ORDER BY channel_id"
+            )
+            rows = cursor.fetchall()
+            conn.close()
+            return [row[0] for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting unique packet channels: {e}")
+            return []
+
 
 class TracerouteRepository:
     """Repository for traceroute operations."""
@@ -3174,7 +3190,7 @@ class TracerouteRepository:
                 query = f"""
                     SELECT
                         id, timestamp, from_node_id, to_node_id, gateway_id,
-                        hop_start, hop_limit, rssi, snr, payload_length, raw_payload,
+                        channel_id, hop_start, hop_limit, rssi, snr, payload_length, raw_payload,
                         processed_successfully, mesh_packet_id,
                         datetime(timestamp, 'unixepoch') as timestamp_str
                     FROM packet_history
@@ -3254,6 +3270,7 @@ class TracerouteRepository:
                         "timestamp_str": base_packet["timestamp_str"],
                         "from_node_id": base_packet["from_node_id"],
                         "to_node_id": base_packet["to_node_id"],
+                        "channel_id": base_packet.get("channel_id"),
                         "mesh_packet_id": base_packet["mesh_packet_id"],
                         "gateway_count": len(unique_gateways),
                         "gateway_list": ",".join(unique_gateways),
@@ -3493,7 +3510,7 @@ class TracerouteRepository:
                 query = f"""
                     SELECT
                         id, timestamp, from_node_id, to_node_id, gateway_id,
-                        hop_start, hop_limit, rssi, snr, payload_length, raw_payload,
+                        channel_id, hop_start, hop_limit, rssi, snr, payload_length, raw_payload,
                         processed_successfully, mesh_packet_id,
                         datetime(timestamp, 'unixepoch') as timestamp_str,
                         (hop_start - hop_limit) AS hop_count
