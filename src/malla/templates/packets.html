@@ -112,7 +112,7 @@
                 </div>
             </div>
             <div class="col-12">
-                <label for="primary_channel" class="form-label">Primary Channel</label>
+                <label for="primary_channel" class="form-label">Channel</label>
                 <select class="form-select form-select-sm" id="primary_channel" name="primary_channel">
                     <option value="">All Channels</option>
                     <!-- Options will be loaded dynamically -->
@@ -210,12 +210,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Load primary channels for select
+    // Load observed packet channels for select
     loadPrimaryChannels();
 
     async function loadPrimaryChannels() {
         try {
-            const response = await fetch('/api/meshtastic/channels');
+            const response = await fetch('/api/meshtastic/packet-channels');
             const data = await response.json();
             if (data.channels) {
                 const select = document.getElementById('primary_channel');

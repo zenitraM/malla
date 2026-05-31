@@ -192,6 +192,54 @@ class TestTracerouteEndpoints:
         data = response.get_json()
         assert isinstance(data, dict)
 
+
+class TestChannelsEndpoint:
+    """Test channel option endpoints."""
+
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_primary_channels_endpoint_returns_node_info_channels(self, client):
+        """Primary channel endpoint should reflect node_info.primary_channel values."""
+        response = client.get("/api/meshtastic/channels")
+        assert response.status_code == 200
+
+        data = response.get_json()
+        assert "channels" in data
+        assert "LongFast" in data["channels"]
+
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_packet_channels_endpoint_returns_observed_packet_channels(self, client):
+        """Packet channel endpoint should reflect distinct packet_history.channel_id values."""
+        response = client.get("/api/meshtastic/packet-channels")
+        assert response.status_code == 200
+
+        data = response.get_json()
+        assert "channels" in data
+        assert "LongFast" in data["channels"]
+
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_packets_data_filters_by_observed_packet_channel(self, client):
+        """Packets data filter should match packet_history.channel_id values."""
+        response = client.get("/api/packets/data?primary_channel=LongFast&limit=25")
+        assert response.status_code == 200
+
+        data = response.get_json()
+        for packet in data["data"]:
+            assert packet.get("channel") == "LongFast"
+
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_traceroute_data_filters_by_observed_packet_channel(self, client):
+        """Traceroute data filter should match traceroute packet channel_id values."""
+        response = client.get("/api/traceroute/data?primary_channel=LongFast&limit=25")
+        assert response.status_code == 200
+
+        data = response.get_json()
+        for packet in data["data"]:
+            assert packet.get("channel") == "LongFast"
+
     @pytest.mark.integration
     @pytest.mark.api
     def test_traceroute_related_nodes_endpoint(self, client):

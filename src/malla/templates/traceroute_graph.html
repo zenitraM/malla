@@ -104,7 +104,7 @@
                     </div>
                 </div>
                 <div class="mb-3">
-                    <label for="primary_channel" class="form-label">Primary Channel</label>
+                    <label for="primary_channel" class="form-label">Channel</label>
                     <select class="form-select form-select-sm" id="primary_channel" name="primary_channel">
                         <option value="">All Channels</option>
                         <!-- Options will be loaded dynamically -->
@@ -1882,7 +1882,7 @@ function applyHopFilter() {
 
 async function loadPrimaryChannels() {
     try {
-        const response = await fetch('/api/meshtastic/channels');
+        const response = await fetch('/api/meshtastic/packet-channels');
         const data = await response.json();
         if (data.channels) {
             const select = document.getElementById('primary_channel');
