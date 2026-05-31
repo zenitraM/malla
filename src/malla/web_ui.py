@@ -40,6 +40,28 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class TrustedProxyClientIPMiddleware:
+    """Rewrite REMOTE_ADDR from a trusted proxy-provided header."""
+
+    def __init__(self, app, trusted_proxy_ips: str, client_ip_header: str):  # noqa: ANN001
+        self.app = app
+        self.trusted_proxy_ips = {
+            ip.strip() for ip in trusted_proxy_ips.split(",") if ip.strip()
+        }
+        self.client_ip_header = f"HTTP_{client_ip_header.upper().replace('-', '_')}"
+
+    def __call__(self, environ, start_response):  # noqa: ANN001
+        remote_addr = environ.get("REMOTE_ADDR")
+        forwarded_ip = environ.get(self.client_ip_header)
+
+        if remote_addr in self.trusted_proxy_ips and forwarded_ip:
+            # Preserve the original peer IP for troubleshooting.
+            environ["trusted_proxy.orig_remote_addr"] = remote_addr
+            environ["REMOTE_ADDR"] = forwarded_ip.split(",", 1)[0].strip()
+
+        return self.app(environ, start_response)
+
+
 def make_json_safe(obj):
     """
     Recursively convert an object to be JSON-serializable by handling bytes objects.
@@ -106,18 +128,17 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
         setup_telemetry(app, cfg.otlp_endpoint)
 
     # Apply ProxyFix after other WSGI middleware so they see rewritten values.
-    if cfg.reverse_proxy_xff_count is not None:
+    if cfg.trusted_proxy_ips:
         from werkzeug.middleware.proxy_fix import ProxyFix
 
+        app.wsgi_app = TrustedProxyClientIPMiddleware(
+            app.wsgi_app,
+            cfg.trusted_proxy_ips,
+            cfg.trusted_proxy_client_ip_header,
+        )
         app.wsgi_app = ProxyFix(
             app.wsgi_app,
-            x_for=cfg.reverse_proxy_xff_count,
-            x_proto=cfg.reverse_proxy_xff_count,
-        )
-        logger.info(
-            "ProxyFix middleware applied (x_for=%d, x_proto=%d)",
-            cfg.reverse_proxy_xff_count,
-            cfg.reverse_proxy_xff_count,
+            x_proto=1,
         )
 
     # Mirror a few frequently-used values to top-level keys for backwards

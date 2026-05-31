@@ -22,6 +22,34 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _build_gunicorn_config(cfg):
+    worker_class = "gthread" if cfg.gunicorn_threads > 1 else "sync"
+
+    gunicorn_config = {
+        "bind": f"{cfg.host}:{cfg.port}",
+        "workers": cfg.gunicorn_workers,
+        "threads": cfg.gunicorn_threads,
+        "worker_class": worker_class,
+        "worker_connections": 1000,
+        "max_requests": 1000,
+        "max_requests_jitter": 50,
+        "timeout": 30,
+        "keepalive": 2,
+        "preload_app": True,
+        "access_log_format": '%({REMOTE_ADDR}e)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s',
+        "accesslog": "-",
+        "errorlog": "-",
+        "loglevel": "info",
+        "capture_output": True,
+        "enable_stdio_inheritance": True,
+    }
+
+    if cfg.trusted_proxy_ips:
+        gunicorn_config["forwarded_allow_ips"] = cfg.trusted_proxy_ips
+
+    return gunicorn_config
+
+
 def create_wsgi_app():
     """Create and return the WSGI application."""
     logger.info("Creating WSGI application for Gunicorn")
@@ -69,28 +97,7 @@ def main():
         print("=" * 60)
         print()
 
-        # Determine worker class based on threads
-        worker_class = "gthread" if cfg.gunicorn_threads > 1 else "sync"
-
-        # Configure Gunicorn
-        gunicorn_config = {
-            "bind": f"{cfg.host}:{cfg.port}",
-            "workers": cfg.gunicorn_workers,
-            "threads": cfg.gunicorn_threads,
-            "worker_class": worker_class,
-            "worker_connections": 1000,
-            "max_requests": 1000,
-            "max_requests_jitter": 50,
-            "timeout": 30,
-            "keepalive": 2,
-            "preload_app": True,
-            "access_log_format": '%({REMOTE_ADDR}e)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s',
-            "accesslog": "-",  # Log to stdout
-            "errorlog": "-",  # Log to stderr
-            "loglevel": "info",
-            "capture_output": True,
-            "enable_stdio_inheritance": True,
-        }
+        gunicorn_config = _build_gunicorn_config(cfg)
 
         # Create Gunicorn application
         class MallaWSGIApplication(WSGIApplication):
