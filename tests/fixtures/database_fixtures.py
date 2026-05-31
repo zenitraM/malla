@@ -151,6 +151,9 @@ class DatabaseFixtures:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_mesh_packet_id ON packet_history(mesh_packet_id)"
         )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_packet_history_channel_id ON packet_history(channel_id) WHERE channel_id IS NOT NULL AND channel_id != ''"
+        )
 
     def create_sample_nodes(self) -> list[dict[str, Any]]:
         """Create test node data with variety of node types."""

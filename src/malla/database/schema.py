@@ -88,6 +88,11 @@ INDEX_SPECS: tuple[tuple[str, str, str], ...] = (
         "CREATE INDEX IF NOT EXISTS idx_packet_mesh_id ON packet_history(mesh_packet_id)",
     ),
     (
+        "idx_packet_history_channel_id",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_channel_id ON packet_history(channel_id) WHERE channel_id IS NOT NULL AND channel_id != ''",
+    ),
+    (
         "idx_node_hex_id",
         "node_info",
         "CREATE INDEX IF NOT EXISTS idx_node_hex_id ON node_info(hex_id)",
