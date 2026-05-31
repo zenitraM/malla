@@ -51,6 +51,11 @@ class AppConfig:
     # Number of hours after which to delete old data (0 = never delete)
     data_retention_hours: int = 0
 
+    # Reverse proxy settings
+    # Comma-separated list of trusted proxy CIDRs (e.g. "10.0.0.0/8,172.16.0.0/12")
+    # When set, X-Forwarded-* headers from these proxies are respected.
+    trusted_proxies: str | None = None
+
     # OpenTelemetry settings
     otlp_endpoint: str | None = None
 
