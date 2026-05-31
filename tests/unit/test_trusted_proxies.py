@@ -4,8 +4,6 @@ Unit tests for trusted_proxies configuration and ProxyFix middleware.
 
 import tempfile
 
-import pytest
-
 from malla.config import AppConfig
 from src.malla.web_ui import create_app
 
