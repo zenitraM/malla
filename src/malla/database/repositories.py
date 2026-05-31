@@ -1733,13 +1733,13 @@ class NodeRepository:
             WITH top_gateways AS (
                 SELECT
                     p.gateway_id,
-                    COUNT(*) as direct_packet_count
-                FROM packet_history p INDEXED BY idx_packet_history_direct_from_gateway
+                    SUM(CASE WHEN p.hop_start = p.hop_limit THEN 1 ELSE 0 END) as direct_packet_count,
+                    COUNT(*) as packet_count
+                FROM packet_history p INDEXED BY idx_packet_history_from_time_desc
                 WHERE p.from_node_id = ?
                   AND p.gateway_id IS NOT NULL
-                  AND p.hop_start = p.hop_limit
                 GROUP BY p.gateway_id
-                ORDER BY direct_packet_count DESC
+                ORDER BY direct_packet_count DESC, packet_count DESC
                 LIMIT 15
             )
             SELECT
@@ -3043,6 +3043,9 @@ class TracerouteRepository:
                     timestamp,
                     from_node_id,
                     to_node_id,
+                    gateway_id,
+                    hop_start,
+                    hop_limit,
                     raw_payload
                 FROM packet_history
                 {where_clause}
