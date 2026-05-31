@@ -27,6 +27,59 @@ from ..utils.traceroute_utils import parse_traceroute_payload
 
 logger = logging.getLogger(__name__)
 
+_NETWORK_GRAPH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_NETWORK_GRAPH_CACHE_TTL_SECONDS = 60
+_NETWORK_GRAPH_CACHE_MAX_ENTRIES = 32
+
+
+def _network_graph_cache_key(
+    hours: int,
+    min_snr: float,
+    include_indirect: bool,
+    limit_packets: int,
+    filters: dict[str, Any] | None,
+) -> str:
+    return repr(
+        (
+            hours,
+            min_snr,
+            include_indirect,
+            limit_packets,
+            sorted((filters or {}).items()),
+        )
+    )
+
+
+def _copy_network_graph_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **payload,
+        "nodes": [node.copy() for node in payload.get("nodes", [])],
+        "links": [link.copy() for link in payload.get("links", [])],
+        "indirect_connections": [
+            connection.copy() for connection in payload.get("indirect_connections", [])
+        ],
+        "stats": payload.get("stats", {}).copy(),
+        "metadata": payload.get("metadata", {}).copy(),
+    }
+
+
+def _prune_network_graph_cache(now: float) -> None:
+    expired_keys = [
+        key
+        for key, (cached_at, _) in _NETWORK_GRAPH_CACHE.items()
+        if now - cached_at > _NETWORK_GRAPH_CACHE_TTL_SECONDS
+    ]
+    for key in expired_keys:
+        _NETWORK_GRAPH_CACHE.pop(key, None)
+
+    overflow = len(_NETWORK_GRAPH_CACHE) - _NETWORK_GRAPH_CACHE_MAX_ENTRIES
+    if overflow > 0:
+        oldest_keys = sorted(_NETWORK_GRAPH_CACHE.items(), key=lambda item: item[1][0])[
+            :overflow
+        ]
+        for key, _ in oldest_keys:
+            _NETWORK_GRAPH_CACHE.pop(key, None)
+
 
 class TracerouteService:
     """Service for traceroute analysis and management."""
@@ -977,6 +1030,24 @@ class TracerouteService:
             f"Building network graph data for {hours} hours (min_snr={min_snr}dB)"
         )
 
+        cache_key = _network_graph_cache_key(
+            hours=hours,
+            min_snr=min_snr,
+            include_indirect=include_indirect,
+            limit_packets=limit_packets,
+            filters=filters,
+        )
+        now = time.time()
+        _prune_network_graph_cache(now)
+        cached = _NETWORK_GRAPH_CACHE.get(cache_key)
+        if cached and now - cached[0] < _NETWORK_GRAPH_CACHE_TTL_SECONDS:
+            logger.debug(
+                "Returning cached network graph data for %sh filters=%s",
+                hours,
+                filters,
+            )
+            return _copy_network_graph_payload(cached[1])
+
         try:
             # Build filters for traceroute data
             if filters is None:
@@ -997,10 +1068,9 @@ class TracerouteService:
             filters["processed_successfully_only"] = True
 
             # Get traceroute data
-            result = TracerouteRepository.get_traceroute_packets(
+            packets = TracerouteRepository.get_traceroute_packets_for_graph(
                 limit=limit_packets,
                 filters=filters,
-                group_packets=False,  # Disable grouping to avoid payload corruption
             )
 
             # Track nodes and links
@@ -1010,7 +1080,7 @@ class TracerouteService:
 
             # Statistics
             stats = {
-                "packets_analyzed": len(result["packets"]),
+                "packets_analyzed": len(packets),
                 "packets_with_rf_hops": 0,
                 "total_rf_hops": 0,
                 "links_found": 0,
@@ -1019,14 +1089,14 @@ class TracerouteService:
             }
 
             # Process each traceroute packet
-            for tr_data in result["packets"]:
+            for tr_data in packets:
                 if not tr_data["raw_payload"]:
                     continue
 
                 try:
                     # Create TraceroutePacket object for analysis
                     tr_packet = TraceroutePacket(
-                        packet_data=tr_data, resolve_names=True
+                        packet_data=tr_data, resolve_names=False
                     )
 
                     # Get RF hops (actual radio transmissions)
@@ -1137,11 +1207,16 @@ class TracerouteService:
                     )
                     continue
 
+            node_ids = list(nodes.keys())
+            node_names = get_bulk_node_names(node_ids) if node_ids else {}
+
+            for node_id, node_data in nodes.items():
+                node_data["name"] = node_names.get(node_id, node_data["name"])
+
             # Get location data for all nodes in the graph
             # Import here to avoid circular dependencies
             from ..database.repositories import LocationRepository
 
-            node_ids = list(nodes.keys())
             logger.info(f"Fetching location data for {len(node_ids)} nodes")
 
             try:
@@ -1241,7 +1316,7 @@ class TracerouteService:
 
                 processed_nodes.append(node_info)
 
-            return {
+            result = {
                 "nodes": processed_nodes,
                 "links": processed_links,
                 "indirect_connections": processed_indirect,
@@ -1252,6 +1327,8 @@ class TracerouteService:
                     "include_indirect": include_indirect,
                 },
             }
+            _NETWORK_GRAPH_CACHE[cache_key] = (time.time(), result)
+            return _copy_network_graph_payload(result)
 
         except Exception as e:
             logger.error(f"Error building network graph data: {e}")

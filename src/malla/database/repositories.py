@@ -24,20 +24,6 @@ logger = logging.getLogger(__name__)
 RELAY_CANDIDATE_CACHE_TTL_SECONDS = 1800
 RELAY_CANDIDATE_CACHE_MAX_ENTRIES = 4096
 _relay_candidate_cache: dict[tuple[int, int], tuple[float, list[dict[str, Any]]]] = {}
-_relay_candidate_indexes_ready: set[str] = set()
-
-
-def _get_db_identity(cursor) -> str:
-    try:
-        cursor.execute("PRAGMA database_list")
-        row = cursor.fetchone()
-        if row and len(row) >= 3:
-            return f"db:{row[2] or ':memory:'}"
-    except Exception:
-        pass
-
-    connection = getattr(cursor, "connection", None)
-    return f"connection:{id(connection) if connection is not None else id(cursor)}"
 
 
 def _prune_relay_candidate_cache(now: float) -> None:
@@ -51,9 +37,9 @@ def _prune_relay_candidate_cache(now: float) -> None:
 
     overflow = len(_relay_candidate_cache) - RELAY_CANDIDATE_CACHE_MAX_ENTRIES
     if overflow > 0:
-        oldest_keys = sorted(_relay_candidate_cache.items(), key=lambda item: item[1][0])[
-            :overflow
-        ]
+        oldest_keys = sorted(
+            _relay_candidate_cache.items(), key=lambda item: item[1][0]
+        )[:overflow]
         for key, _ in oldest_keys:
             _relay_candidate_cache.pop(key, None)
 
@@ -84,34 +70,6 @@ def _store_relay_candidates(
         now,
         [candidate.copy() for candidate in candidates],
     )
-
-
-def _ensure_relay_candidate_indexes(cursor) -> None:
-    cache_key = _get_db_identity(cursor)
-    if cache_key in _relay_candidate_indexes_ready:
-        return
-
-    cursor.execute(
-        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_gateway_from
-           ON packet_history(gateway_id, from_node_id)
-           WHERE hop_start = hop_limit AND from_node_id IS NOT NULL"""
-    )
-    cursor.execute(
-        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_gateway_lastbyte
-           ON packet_history(gateway_id, (from_node_id & 255))
-           WHERE hop_start = hop_limit AND from_node_id IS NOT NULL"""
-    )
-    cursor.execute(
-        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_from_gateway
-           ON packet_history(from_node_id, gateway_id)
-           WHERE hop_start = hop_limit AND gateway_id IS NOT NULL"""
-    )
-    cursor.execute(
-        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_from_gateway_suffix
-           ON packet_history(from_node_id, lower(substr(gateway_id, -2)))
-           WHERE hop_start = hop_limit AND gateway_id IS NOT NULL"""
-    )
-    _relay_candidate_indexes_ready.add(cache_key)
 
 
 class DashboardRepository:
@@ -1278,40 +1236,46 @@ class NodeRepository:
             if node_id <= 0:
                 return None
 
-            # Get basic node information from packet_history with node_info join
-            query = """
-            SELECT
-                p.from_node_id as node_id,
-                COALESCE(n.long_name, n.short_name, 'Node ' || p.from_node_id) as node_name,
-                n.long_name,
-                n.short_name,
-                n.hw_model,
-                n.role,
-                n.primary_channel,
-                COUNT(*) as total_packets,
-                MAX(p.timestamp) as last_seen,
-                MIN(p.timestamp) as first_seen,
-                COUNT(DISTINCT p.to_node_id) as unique_destinations,
-                COUNT(DISTINCT p.gateway_id) as unique_gateways,
-                AVG(CASE WHEN (p.hop_start IS NULL OR p.hop_limit IS NULL OR (p.hop_start - p.hop_limit) = 0)
-                     THEN CAST(p.rssi AS FLOAT) END) as avg_rssi,
-                AVG(CASE WHEN (p.hop_start IS NULL OR p.hop_limit IS NULL OR (p.hop_start - p.hop_limit) = 0)
-                     THEN CAST(p.snr AS FLOAT) END) as avg_snr,
-                AVG(CASE WHEN p.hop_start IS NOT NULL AND p.hop_limit IS NOT NULL
-                    THEN (p.hop_start - p.hop_limit) ELSE NULL END) as avg_hops
-            FROM packet_history p
-            LEFT JOIN node_info n ON p.from_node_id = n.node_id
-            WHERE p.from_node_id = ?
-            GROUP BY p.from_node_id, n.long_name, n.short_name, n.hw_model, n.role, n.primary_channel
-            """
+            # Aggregate only packet_history here so SQLite can use the sender-focused index.
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) as total_packets,
+                    MAX(timestamp) as last_seen,
+                    MIN(timestamp) as first_seen,
+                    COUNT(DISTINCT to_node_id) as unique_destinations,
+                    COUNT(DISTINCT gateway_id) as unique_gateways,
+                    AVG(CASE WHEN hop_start IS NULL OR hop_limit IS NULL OR hop_start = hop_limit
+                         THEN CAST(rssi AS FLOAT) END) as avg_rssi,
+                    AVG(CASE WHEN hop_start IS NULL OR hop_limit IS NULL OR hop_start = hop_limit
+                         THEN CAST(snr AS FLOAT) END) as avg_snr,
+                    AVG(CASE WHEN hop_start IS NOT NULL AND hop_limit IS NOT NULL
+                        THEN (hop_start - hop_limit) ELSE NULL END) as avg_hops
+                FROM packet_history
+                WHERE from_node_id = ?
+                """,
+                (node_id,),
+            )
+            node_stats_row = cursor.fetchone()
 
-            cursor.execute(query, (node_id,))
-            node_row = cursor.fetchone()
+            cursor.execute(
+                """
+                SELECT
+                    node_id,
+                    long_name,
+                    short_name,
+                    hw_model,
+                    role,
+                    primary_channel
+                FROM node_info
+                WHERE node_id = ?
+                """,
+                (node_id,),
+            )
+            node_info_row = cursor.fetchone()
 
-            if not node_row:
+            if not node_stats_row or node_stats_row["total_packets"] == 0:
                 # Check if node exists in node_info but has no packets
-                cursor.execute("SELECT * FROM node_info WHERE node_id = ?", (node_id,))
-                node_info_row = cursor.fetchone()
                 if not node_info_row:
                     conn.close()
                     return None
@@ -1348,41 +1312,43 @@ class NodeRepository:
                 }
 
             # Convert Unix timestamps to UTC datetimes to avoid local timezone drift
-            last_seen = datetime.fromtimestamp(node_row["last_seen"], UTC)
-            first_seen = datetime.fromtimestamp(node_row["first_seen"], UTC)
+            last_seen = datetime.fromtimestamp(node_stats_row["last_seen"], UTC)
+            first_seen = datetime.fromtimestamp(node_stats_row["first_seen"], UTC)
 
             # Use proper hex formatting for node name
             proper_node_name = (
-                node_row["long_name"] or node_row["short_name"] or f"!{node_id:08x}"
+                (node_info_row["long_name"] if node_info_row else None)
+                or (node_info_row["short_name"] if node_info_row else None)
+                or f"!{node_id:08x}"
             )
 
             node_info = {
-                "node_id": node_row["node_id"],
+                "node_id": node_id,
                 "hex_id": f"!{node_id:08x}",
                 "node_name": proper_node_name,
-                "long_name": node_row["long_name"],
-                "short_name": node_row["short_name"],
-                "hw_model": node_row["hw_model"],
-                "role": node_row["role"],
-                "primary_channel": node_row["primary_channel"]
-                if "primary_channel" in node_row.keys()
+                "long_name": node_info_row["long_name"] if node_info_row else None,
+                "short_name": node_info_row["short_name"] if node_info_row else None,
+                "hw_model": node_info_row["hw_model"] if node_info_row else None,
+                "role": node_info_row["role"] if node_info_row else None,
+                "primary_channel": node_info_row["primary_channel"]
+                if node_info_row and "primary_channel" in node_info_row.keys()
                 else None,
-                "total_packets": node_row["total_packets"],
+                "total_packets": node_stats_row["total_packets"],
                 "last_seen": last_seen.strftime("%Y-%m-%d %H:%M:%S UTC"),
                 "last_seen_timestamp": last_seen.timestamp(),  # Raw Unix timestamp for client-side formatting
                 "first_seen": first_seen.strftime("%Y-%m-%d %H:%M:%S UTC"),
                 "first_seen_timestamp": first_seen.timestamp(),  # Raw Unix timestamp for client-side formatting
                 "last_seen_relative": format_time_ago(last_seen),
-                "unique_destinations": node_row["unique_destinations"],
-                "unique_gateways": node_row["unique_gateways"],
-                "avg_rssi": round(node_row["avg_rssi"], 1)
-                if node_row["avg_rssi"]
+                "unique_destinations": node_stats_row["unique_destinations"],
+                "unique_gateways": node_stats_row["unique_gateways"],
+                "avg_rssi": round(node_stats_row["avg_rssi"], 1)
+                if node_stats_row["avg_rssi"]
                 else None,
-                "avg_snr": round(node_row["avg_snr"], 1)
-                if node_row["avg_snr"]
+                "avg_snr": round(node_stats_row["avg_snr"], 1)
+                if node_stats_row["avg_snr"]
                 else None,
-                "avg_hops": round(node_row["avg_hops"], 1)
-                if node_row["avg_hops"]
+                "avg_hops": round(node_stats_row["avg_hops"], 1)
+                if node_stats_row["avg_hops"]
                 else None,
             }
 
@@ -1764,6 +1730,18 @@ class NodeRepository:
 
             # Get received gateways information (gateways that have received packets from this node)
             gateways_query = """
+            WITH top_gateways AS (
+                SELECT
+                    p.gateway_id,
+                    SUM(CASE WHEN p.hop_start = p.hop_limit THEN 1 ELSE 0 END) as direct_packet_count,
+                    COUNT(*) as packet_count
+                FROM packet_history p INDEXED BY idx_packet_history_from_time_desc
+                WHERE p.from_node_id = ?
+                  AND p.gateway_id IS NOT NULL
+                GROUP BY p.gateway_id
+                ORDER BY direct_packet_count DESC, packet_count DESC
+                LIMIT 15
+            )
             SELECT
                 p.gateway_id,
                 COUNT(*) as packet_count,
@@ -1776,20 +1754,20 @@ class NodeRepository:
                     THEN (p.hop_start - p.hop_limit) ELSE NULL END) as max_hops,
                 AVG(CASE WHEN p.hop_start IS NOT NULL AND p.hop_limit IS NOT NULL
                     THEN (p.hop_start - p.hop_limit) ELSE NULL END) as avg_hops,
-                -- Get RSSI/SNR for direct connections (hops = 0) separately
-                AVG(CASE WHEN (p.hop_start - p.hop_limit) = 0
+                AVG(CASE WHEN p.hop_start = p.hop_limit
                     THEN CAST(p.rssi AS FLOAT) ELSE NULL END) as direct_rssi,
-                AVG(CASE WHEN (p.hop_start - p.hop_limit) = 0
+                AVG(CASE WHEN p.hop_start = p.hop_limit
                     THEN CAST(p.snr AS FLOAT) ELSE NULL END) as direct_snr,
-                COUNT(CASE WHEN (p.hop_start - p.hop_limit) = 0 THEN 1 END) as direct_packet_count
-            FROM packet_history p
-            WHERE p.from_node_id = ? AND p.gateway_id IS NOT NULL
+                MAX(tg.direct_packet_count) as direct_packet_count
+            FROM top_gateways tg
+            JOIN packet_history p INDEXED BY idx_packet_history_from_time_desc
+              ON p.gateway_id = tg.gateway_id
+            WHERE p.from_node_id = ?
             GROUP BY p.gateway_id
-            ORDER BY (direct_packet_count > 0) DESC, packet_count DESC
-            LIMIT 15
+            ORDER BY direct_packet_count DESC, packet_count DESC
             """
 
-            cursor.execute(gateways_query, (node_id,))
+            cursor.execute(gateways_query, (node_id, node_id))
             try:
                 gateways_raw = cursor.fetchall()
             except StopIteration:
@@ -2048,8 +2026,6 @@ class NodeRepository:
             if not gateway_node_ids or not relay_last_bytes:
                 return {}
 
-            _ensure_relay_candidate_indexes(cursor)
-
             now = time.time()
             _prune_relay_candidate_cache(now)
 
@@ -2074,7 +2050,9 @@ class NodeRepository:
             if not missing_pairs:
                 return result
 
-            missing_gateway_ids = sorted({gateway_id for gateway_id, _ in missing_pairs})
+            missing_gateway_ids = sorted(
+                {gateway_id for gateway_id, _ in missing_pairs}
+            )
             missing_last_bytes = sorted({last_byte for _, last_byte in missing_pairs})
 
             # Convert gateway IDs to hex format
@@ -2118,7 +2096,9 @@ class NodeRepository:
             # Process part 1 results (direct receptions by gateways)
             gateway_hex_to_id = {
                 hex_id: gw_id
-                for gw_id, hex_id in zip(missing_gateway_ids, gateway_hex_ids, strict=True)
+                for gw_id, hex_id in zip(
+                    missing_gateway_ids, gateway_hex_ids, strict=True
+                )
             }
             for row in part1_results:
                 gateway_hex = row["gateway_id"]
@@ -2217,8 +2197,6 @@ class NodeRepository:
             unique_pairs = sorted(set(relay_pairs))
             if not unique_pairs:
                 return {}
-
-            _ensure_relay_candidate_indexes(cursor)
 
             now = time.time()
             _prune_relay_candidate_cache(now)
@@ -2328,7 +2306,10 @@ class NodeRepository:
                 else {}
             )
 
-            for (gateway_id, last_byte), candidate_ids in limited_candidates_by_pair.items():
+            for (
+                gateway_id,
+                last_byte,
+            ), candidate_ids in limited_candidates_by_pair.items():
                 candidates = []
                 for candidate_id in candidate_ids:
                     hex_id = f"!{candidate_id:08x}"
@@ -2609,7 +2590,7 @@ class NodeRepository:
                   AND p.from_node_id != ?
                   AND p.hop_start IS NOT NULL
                   AND p.hop_limit IS NOT NULL
-                  AND (p.hop_start - p.hop_limit) = 0
+                  AND p.hop_start = p.hop_limit
                 GROUP BY p.from_node_id, ni.long_name, ni.short_name
                 ORDER BY packet_count DESC
             """
@@ -2631,7 +2612,7 @@ class NodeRepository:
                   AND p.from_node_id != ?
                   AND p.hop_start IS NOT NULL
                   AND p.hop_limit IS NOT NULL
-                  AND (p.hop_start - p.hop_limit) = 0
+                  AND p.hop_start = p.hop_limit
                 ORDER BY p.timestamp
             """
 
@@ -2747,7 +2728,7 @@ class NodeRepository:
                       AND p.from_node_id != ?
                       AND p.hop_start IS NOT NULL
                       AND p.hop_limit IS NOT NULL
-                      AND (p.hop_start - p.hop_limit) = 0
+                      AND p.hop_start = p.hop_limit
                     GROUP BY p.from_node_id, ni.long_name, ni.short_name
                     ORDER BY packet_count DESC
                     LIMIT ?
@@ -2767,15 +2748,43 @@ class NodeRepository:
                       AND p.from_node_id != ?
                       AND p.hop_start IS NOT NULL
                       AND p.hop_limit IS NOT NULL
-                      AND (p.hop_start - p.hop_limit) = 0
+                      AND p.hop_start = p.hop_limit
                     ORDER BY p.timestamp
                 """
 
                 cursor.execute(stats_query, (gateway_hex_id, node_id, limit))
                 stats_rows = cursor.fetchall()
 
-                cursor.execute(packets_query, (gateway_hex_id, node_id))
-                packet_rows = cursor.fetchall()
+                selected_node_ids = [
+                    stats_row["from_node_id"]
+                    for stats_row in stats_rows
+                    if stats_row["from_node_id"] is not None
+                ]
+
+                if selected_node_ids:
+                    placeholders = ",".join(["?"] * len(selected_node_ids))
+                    packets_query = f"""
+                        SELECT
+                            p.id AS packet_id,
+                            p.timestamp,
+                            p.from_node_id,
+                            p.rssi,
+                            p.snr
+                        FROM packet_history p
+                        WHERE p.gateway_id = ?
+                          AND p.from_node_id IS NOT NULL
+                          AND p.from_node_id != ?
+                          AND p.hop_start IS NOT NULL
+                          AND p.hop_limit IS NOT NULL
+                          AND p.hop_start = p.hop_limit
+                          AND p.from_node_id IN ({placeholders})
+                        ORDER BY p.timestamp
+                    """
+                    cursor.execute(
+                        packets_query,
+                        (gateway_hex_id, node_id, *selected_node_ids),
+                    )
+                    packet_rows = cursor.fetchall()
 
                 # Build result with both stats and packet data for received direction
                 for stats_row in stats_rows:
@@ -2850,7 +2859,7 @@ class NodeRepository:
                       AND p.gateway_id != ?
                       AND p.hop_start IS NOT NULL
                       AND p.hop_limit IS NOT NULL
-                      AND (p.hop_start - p.hop_limit) = 0
+                      AND p.hop_start = p.hop_limit
                     GROUP BY p.gateway_id
                     ORDER BY packet_count DESC
                     LIMIT ?
@@ -2870,7 +2879,7 @@ class NodeRepository:
                       AND p.gateway_id != ?
                       AND p.hop_start IS NOT NULL
                       AND p.hop_limit IS NOT NULL
-                      AND (p.hop_start - p.hop_limit) = 0
+                      AND p.hop_start = p.hop_limit
                     ORDER BY p.timestamp
                 """
 
@@ -2995,6 +3004,62 @@ class NodeRepository:
 
 class TracerouteRepository:
     """Repository for traceroute operations."""
+
+    @staticmethod
+    def get_traceroute_packets_for_graph(
+        limit: int = 5000,
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get minimal traceroute packet fields for network graph extraction."""
+        if filters is None:
+            filters = {}
+
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            where_conditions = ["portnum_name = 'TRACEROUTE_APP'"]
+            params: list[Any] = []
+
+            if filters.get("start_time"):
+                where_conditions.append("timestamp >= ?")
+                params.append(filters["start_time"])
+
+            if filters.get("end_time"):
+                where_conditions.append("timestamp <= ?")
+                params.append(filters["end_time"])
+
+            if filters.get("gateway_id"):
+                where_conditions.append("gateway_id = ?")
+                params.append(filters["gateway_id"])
+
+            if filters.get("processed_successfully_only"):
+                where_conditions.append("processed_successfully = 1")
+
+            where_clause = "WHERE " + " AND ".join(where_conditions)
+            query = f"""
+                SELECT
+                    id,
+                    timestamp,
+                    from_node_id,
+                    to_node_id,
+                    gateway_id,
+                    hop_start,
+                    hop_limit,
+                    raw_payload
+                FROM packet_history
+                {where_clause}
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """
+
+            cursor.execute(query, [*params, limit])
+            rows = [dict(row) for row in cursor.fetchall()]
+            conn.close()
+            return rows
+        except Exception as e:
+            logger.error(f"Error getting traceroute packets for graph: {e}")
+            raise
 
     @staticmethod
     def get_traceroute_packets(
@@ -3608,6 +3673,22 @@ class LocationRepository:
                     node_ids_clause = f"AND from_node_id IN ({placeholders})"
                     node_ids_params = node_ids_int
 
+            extra_conditions: list[str] = []
+            extra_params: list[Any] = []
+            if filters.get("start_time"):
+                extra_conditions.append("timestamp >= ?")
+                extra_params.append(filters["start_time"])
+            if filters.get("end_time"):
+                extra_conditions.append("timestamp <= ?")
+                extra_params.append(filters["end_time"])
+            if filters.get("gateway_id"):
+                extra_conditions.append("gateway_id = ?")
+                extra_params.append(filters["gateway_id"])
+
+            extra_where = ""
+            if extra_conditions:
+                extra_where = "AND " + " AND ".join(extra_conditions)
+
             # Optimized query using window function instead of correlated subquery
             query = f"""
                 WITH max_timestamps AS (
@@ -3619,6 +3700,7 @@ class LocationRepository:
                     AND raw_payload IS NOT NULL
                     AND from_node_id IS NOT NULL
                     {node_ids_clause}
+                    {extra_where}
                     GROUP BY from_node_id
                 )
                 SELECT
@@ -3640,18 +3722,8 @@ class LocationRepository:
                 ORDER BY ph.timestamp DESC
             """
 
-            # Ensure we have optimal indexes for this query
-            try:
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_packet_history_position_lookup
-                    ON packet_history(portnum, from_node_id, timestamp DESC)
-                    WHERE portnum = 3 AND raw_payload IS NOT NULL
-                """)
-            except Exception as e:
-                logger.debug(f"Index creation skipped or failed: {e}")
-
             query_start = time.time()
-            cursor.execute(query, node_ids_params)
+            cursor.execute(query, [*node_ids_params, *extra_params])
             raw_rows = cursor.fetchall()
             timing_breakdown["sql_query"] = time.time() - query_start
 

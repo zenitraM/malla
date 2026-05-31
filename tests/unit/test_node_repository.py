@@ -55,12 +55,6 @@ class TestNodeRepository:
         # Mock the location query
         mock_cursor.fetchone.side_effect = [
             {
-                "node_id": 1128074276,
-                "node_name": "Test Gateway Alpha",
-                "long_name": "Test Gateway Alpha",
-                "short_name": "TGA",
-                "hw_model": "TBEAM",
-                "role": "ROUTER",
                 "total_packets": 50,
                 "last_seen": 1640995200.0,
                 "first_seen": 1640908800.0,
@@ -69,6 +63,14 @@ class TestNodeRepository:
                 "avg_rssi": -75.5,
                 "avg_snr": 8.2,
                 "avg_hops": 1.5,
+            },
+            {
+                "node_id": 1128074276,
+                "long_name": "Test Gateway Alpha",
+                "short_name": "TGA",
+                "hw_model": "TBEAM",
+                "role": "ROUTER",
+                "primary_channel": "LongFast",
             },
             None,  # location query
         ]

@@ -56,6 +56,8 @@ from paho.mqtt.enums import CallbackAPIVersion
 # ---------------------------------------------------------------------------
 from malla.config import get_config  # Import here to avoid circular import issues
 
+from .database.schema import ensure_startup_schema
+
 # Load the singleton configuration once at module import time.  This ensures the
 # capture tool honours the same YAML + optional environment override mechanism
 # as the web-UI and the rest of the application stack.
@@ -275,6 +277,7 @@ def try_decrypt_mesh_packet(
 # --- Database Functions ---
 def init_database() -> None:
     """Initialize SQLite database with required tables."""
+    init_start = time.time()
     conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -313,15 +316,14 @@ def init_database() -> None:
         )
     """)
 
+    cursor.execute("PRAGMA table_info(packet_history)")
+    packet_history_columns = {row[1] for row in cursor.fetchall()}
+
     # Add mesh_packet_id column if it doesn't exist (for existing databases)
-    try:
+    if "mesh_packet_id" not in packet_history_columns:
         cursor.execute("ALTER TABLE packet_history ADD COLUMN mesh_packet_id INTEGER")
         logging.info("Added mesh_packet_id column to packet_history table")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" in str(e).lower():
-            logging.debug("mesh_packet_id column already exists")
-        else:
-            logging.warning(f"Could not add mesh_packet_id column: {e}")
+        packet_history_columns.add("mesh_packet_id")
 
     # Add new MeshPacket fields if they don't exist (for existing databases)
     new_columns = [
@@ -341,16 +343,12 @@ def init_database() -> None:
     ]
 
     for column_name, column_type in new_columns:
-        try:
+        if column_name not in packet_history_columns:
             cursor.execute(
                 f"ALTER TABLE packet_history ADD COLUMN {column_name} {column_type}"
             )
             logging.info(f"Added {column_name} column to packet_history table")
-        except sqlite3.OperationalError as e:
-            if "duplicate column name" in str(e).lower():
-                logging.debug(f"{column_name} column already exists")
-            else:
-                logging.warning(f"Could not add {column_name} column: {e}")
+            packet_history_columns.add(column_name)
 
     # Table for node information cache
     cursor.execute("""
@@ -369,100 +367,53 @@ def init_database() -> None:
         )
     """)
 
-    # Composite indexes for /api/nodes aggregation queries (96% faster than single-column indexes)
-    # These covering indexes allow SQLite to perform aggregations using only the index
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_packet_history_stats ON packet_history(timestamp, from_node_id)"
-    )
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_packet_history_gateway_stats ON packet_history(timestamp, gateway_id)"
-    )
+    ensure_startup_schema(cursor, drop_legacy_indexes=True)
 
-    # Additional proven performance indexes (20-40% improvements, cache-aware benchmarked)
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_packet_history_portnum_time ON packet_history(timestamp, portnum_name)"
-    )
-    cursor.execute(
-        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_hops
-           ON packet_history(timestamp, from_node_id, gateway_id, hop_start, hop_limit)
-           WHERE hop_start = hop_limit"""
-    )
-    cursor.execute(
-        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_gateway_from
-           ON packet_history(gateway_id, from_node_id)
-           WHERE hop_start = hop_limit AND from_node_id IS NOT NULL"""
-    )
-    cursor.execute(
-        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_gateway_lastbyte
-           ON packet_history(gateway_id, (from_node_id & 255))
-           WHERE hop_start = hop_limit AND from_node_id IS NOT NULL"""
-    )
-    cursor.execute(
-        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_from_gateway
-           ON packet_history(from_node_id, gateway_id)
-           WHERE hop_start = hop_limit AND gateway_id IS NOT NULL"""
-    )
-    cursor.execute(
-        """CREATE INDEX IF NOT EXISTS idx_packet_history_direct_from_gateway_suffix
-           ON packet_history(from_node_id, lower(substr(gateway_id, -2)))
-           WHERE hop_start = hop_limit AND gateway_id IS NOT NULL"""
-    )
-    cursor.execute(
-        """CREATE INDEX IF NOT EXISTS idx_packet_history_relay_time
-           ON packet_history(timestamp, relay_node)
-           WHERE relay_node IS NOT NULL AND relay_node != 0"""
-    )
-
-    # Keep mesh_packet_id index (used for packet lookups)
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_packet_mesh_id ON packet_history(mesh_packet_id)"
-    )
-
-    # Drop old redundant indexes (composite indexes above can serve the same queries via leftmost prefix)
-    cursor.execute("DROP INDEX IF EXISTS idx_packet_timestamp")
-    cursor.execute("DROP INDEX IF EXISTS idx_packet_from_node")
-
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_node_hex_id ON node_info(hex_id)")
-
-    # Ensure primary_channel column exists for legacy databases
-    try:
-        cursor.execute("ALTER TABLE node_info ADD COLUMN primary_channel TEXT")
-        logging.info("Added primary_channel column to node_info table")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" in str(e).lower():
-            logging.debug("primary_channel column already exists")
-        else:
-            logging.warning(f"Could not add primary_channel column: {e}")
-
-    # Index for faster channel filtering
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_node_primary_channel ON node_info(primary_channel)"
-    )
-
-    # Backfill primary_channel using last NODEINFO packets if missing
+    # Backfill primary_channel only when there are actually missing values.
     try:
         cursor.execute(
-            """
-            UPDATE node_info
-            SET primary_channel = (
-                SELECT ph.channel_id
-                FROM packet_history ph
-                WHERE ph.from_node_id = node_info.node_id
-                  AND ph.portnum_name = 'NODEINFO_APP'
-                  AND ph.channel_id IS NOT NULL AND ph.channel_id != ''
-                ORDER BY ph.timestamp DESC
-                LIMIT 1
-            )
-            WHERE (primary_channel IS NULL OR primary_channel = '')
-        """
+            "SELECT COUNT(*) FROM node_info WHERE primary_channel IS NULL OR primary_channel = ''"
         )
-        logging.info("Backfilled primary_channel values in node_info table")
+        missing_primary_channel_count = cursor.fetchone()[0]
+        if missing_primary_channel_count > 0:
+            cursor.execute(
+                """
+                UPDATE node_info
+                SET primary_channel = (
+                    SELECT ph.channel_id
+                    FROM packet_history ph
+                    WHERE ph.from_node_id = node_info.node_id
+                      AND ph.portnum_name = 'NODEINFO_APP'
+                      AND ph.channel_id IS NOT NULL AND ph.channel_id != ''
+                    ORDER BY ph.timestamp DESC
+                    LIMIT 1
+                )
+                WHERE (primary_channel IS NULL OR primary_channel = '')
+                  AND EXISTS (
+                    SELECT 1
+                    FROM packet_history ph
+                    WHERE ph.from_node_id = node_info.node_id
+                      AND ph.portnum_name = 'NODEINFO_APP'
+                      AND ph.channel_id IS NOT NULL AND ph.channel_id != ''
+                  )
+            """
+            )
+            logging.info(
+                "Backfilled primary_channel values for %s nodes",
+                cursor.rowcount,
+            )
+        else:
+            logging.debug("primary_channel backfill not needed")
     except Exception as e:
         logging.warning(f"Could not backfill primary_channel column: {e}")
 
     conn.commit()
     conn.close()
-    logging.info(f"Database initialized: {DATABASE_FILE}")
+    logging.info(
+        "Database initialized: %s (%.3fs)",
+        DATABASE_FILE,
+        time.time() - init_start,
+    )
 
 
 def load_node_cache() -> None:
@@ -1422,8 +1373,17 @@ def main() -> None:
 
     # Initialize database and load node cache
     logging.info("Initializing database...")
+    startup_step_start = time.time()
     init_database()
+    logging.info(
+        "Database initialization step finished in %.3fs",
+        time.time() - startup_step_start,
+    )
+    startup_step_start = time.time()
     load_node_cache()
+    logging.info(
+        "Node cache load step finished in %.3fs", time.time() - startup_step_start
+    )
 
     # Initialize MQTT Client
     mqtt_client = mqtt.Client(

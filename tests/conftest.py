@@ -57,11 +57,11 @@ class TestFlaskApp:
             debug=False,
         )
 
-        # Create the real Flask app with injected config
-        self.app = create_app(self._cfg)
-
         # Set up test data
         self._setup_test_data()
+
+        # Create the real Flask app with injected config
+        self.app = create_app(self._cfg)
 
         # Add test-specific API routes
         self._setup_test_routes()
@@ -255,13 +255,13 @@ def test_client():
     cfg = AppConfig(database_file=temp_db.name)
 
     try:
-        # Create the app with injected config
-        app = create_app(cfg)
-        app.config["TESTING"] = True
-
         # Set up test data
         db_fixtures = DatabaseFixtures()
         db_fixtures.create_test_database(temp_db.name)
+
+        # Create the app with injected config
+        app = create_app(cfg)
+        app.config["TESTING"] = True
 
         with app.test_client() as client:
             yield client
@@ -308,13 +308,13 @@ def app():
     cfg = AppConfig(database_file=temp_db.name)
 
     try:
-        # Create the app with injected config
-        app = create_app(cfg)
-        app.config["TESTING"] = True
-
         # Set up test data
         db_fixtures = DatabaseFixtures()
         db_fixtures.create_test_database(temp_db.name)
+
+        # Create the app with injected config
+        app = create_app(cfg)
+        app.config["TESTING"] = True
 
         yield app
     finally:

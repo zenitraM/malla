@@ -12,6 +12,34 @@ from ..database.repositories import LocationRepository
 
 logger = logging.getLogger(__name__)
 
+_PACKET_LINKS_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_PACKET_LINKS_CACHE_TTL_SECONDS = 60
+_PACKET_LINKS_CACHE_MAX_ENTRIES = 64
+
+
+def _cache_key_from_filters(filters: dict[str, Any] | None) -> str:
+    if not filters:
+        return ""
+    return repr(sorted(filters.items()))
+
+
+def _prune_packet_links_cache(now: float) -> None:
+    expired_keys = [
+        key
+        for key, (cached_at, _) in _PACKET_LINKS_CACHE.items()
+        if now - cached_at > _PACKET_LINKS_CACHE_TTL_SECONDS
+    ]
+    for key in expired_keys:
+        _PACKET_LINKS_CACHE.pop(key, None)
+
+    overflow = len(_PACKET_LINKS_CACHE) - _PACKET_LINKS_CACHE_MAX_ENTRIES
+    if overflow > 0:
+        oldest_keys = sorted(_PACKET_LINKS_CACHE.items(), key=lambda item: item[1][0])[
+            :overflow
+        ]
+        for key, _ in oldest_keys:
+            _PACKET_LINKS_CACHE.pop(key, None)
+
 
 class LocationService:
     """Service for location-related operations and calculations."""
@@ -860,6 +888,14 @@ class LocationService:
         if filters is None:
             filters = {}
 
+        cache_key = _cache_key_from_filters(filters)
+        now = time.time()
+        _prune_packet_links_cache(now)
+        cached = _PACKET_LINKS_CACHE.get(cache_key)
+        if cached and now - cached[0] < _PACKET_LINKS_CACHE_TTL_SECONDS:
+            logger.debug("Returning cached packet links for filters: %s", filters)
+            return [link.copy() for link in cached[1]]
+
         logger.info(
             "Getting packet-based RF links for map visualisation with filters: %s",
             filters,
@@ -880,8 +916,6 @@ class LocationService:
             where_clauses: list[str] = [
                 "from_node_id IS NOT NULL",
                 "gateway_id IS NOT NULL",
-                "hop_start IS NOT NULL",
-                "hop_limit IS NOT NULL",
                 "hop_start = hop_limit",  # 0-hop packets only (index-friendly)
             ]
             params: list[Any] = []
@@ -914,8 +948,8 @@ class LocationService:
                     from_node_id,
                     gateway_id,
                     COUNT(*)               AS packet_count,
-                    AVG(CAST(rssi AS FLOAT)) AS avg_rssi,
-                    AVG(CAST(snr  AS FLOAT)) AS avg_snr,
+                    AVG(rssi) AS avg_rssi,
+                    AVG(snr) AS avg_snr,
                     MAX(timestamp)         AS last_seen
                 FROM packet_history
                 {where_sql}
@@ -1018,7 +1052,9 @@ class LocationService:
                     link_map[key] = link_payload
 
             logger.info("Generated %d packet-based RF links", len(link_map))
-            return list(link_map.values())
+            result = list(link_map.values())
+            _PACKET_LINKS_CACHE[cache_key] = (time.time(), result)
+            return [link.copy() for link in result]
 
         except Exception as e:
             logger.error("Error getting packet links: %s", e)
