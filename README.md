@@ -293,6 +293,7 @@ The following keys are recognised:
 | `host`          | str    | `"0.0.0.0"`                              | Interface to bind the web server to.          | `MALLA_HOST` |
 | `port`          | int    | `5008`                                   | TCP port for the web server.                  | `MALLA_PORT` |
 | `debug`         | bool   | `false`                                  | Run Flask in debug mode (unsafe for prod!).   | `MALLA_DEBUG` |
+| `log_level`     | str    | `"INFO"`                                 | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL). | `MALLA_LOG_LEVEL` |
 | `mqtt_broker_address` | str | `"127.0.0.1"`                      | MQTT broker hostname or IP address.           | `MALLA_MQTT_BROKER_ADDRESS` |
 | `mqtt_port`     | int    | `1883`                                   | MQTT broker port.                              | `MALLA_MQTT_PORT` |
 | `mqtt_username` | str    | `""`                                     | MQTT broker username (optional).               | `MALLA_MQTT_USERNAME` |
@@ -302,6 +303,8 @@ The following keys are recognised:
 | `mqtt_client_id`    | str | `""`                                     | MQTT client ID. Leave empty for a randomly generated ID (recommended). | `MALLA_MQTT_CLIENT_ID` |
 | `default_channel_key` | str | `"1PG7OiApB1nwvP+rz05pAQ=="`         | Default channel key(s) for decryption (base64). Supports comma-separated list of keys - each will be tried in order until successful. | `MALLA_DEFAULT_CHANNEL_KEY` |
 | `data_retention_hours` | int | `0`                                     | Number of hours after which to delete old data (0 = never delete). Automatically cleans up packet_history and node_info records older than specified hours. | `MALLA_DATA_RETENTION_HOURS` |
+| `reverse_proxy_xff_count` | int | `null`                              | Number of trusted reverse proxy layers. When set, applies ProxyFix so `request.remote_addr` reflects the real client IP. | `MALLA_REVERSE_PROXY_XFF_COUNT` |
+| `otlp_endpoint` | str    | `null`                              | OpenTelemetry endpoint for sending traces (e.g. `http://localhost:4317`). | `MALLA_OTLP_ENDPOINT` |
 | `gunicorn_workers` | int | `null` | Number of Gunicorn worker processes. `null` means auto-detect based on CPU cores. | `MALLA_GUNICORN_WORKERS` |
 | `gunicorn_threads` | int | `1` | Number of threads per Gunicorn worker. Increase this for better concurrency, especially on I/O bound tasks. | `MALLA_GUNICORN_THREADS` |
 
