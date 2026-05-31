@@ -53,10 +53,15 @@ class AppConfig:
 
     # Reverse proxy settings
     # Comma-separated IPs of trusted reverse proxies. When set, ProxyFix trusts
-    # one X-Forwarded-* hop, and Gunicorn is configured to accept forwarded
+    # one trusted proto hop, and Gunicorn is configured to accept forwarded
     # headers only from these exact proxy IPs.
     # Corresponding env var: MALLA_TRUSTED_PROXY_IPS
     trusted_proxy_ips: str | None = None
+
+    # Header carrying the original client IP from a trusted reverse proxy.
+    # Common values are X-Forwarded-For, X-Real-IP, or CF-Connecting-IP.
+    # Corresponding env var: MALLA_TRUSTED_PROXY_CLIENT_IP_HEADER
+    trusted_proxy_client_ip_header: str = "X-Forwarded-For"
 
     # OpenTelemetry settings
     otlp_endpoint: str | None = None
