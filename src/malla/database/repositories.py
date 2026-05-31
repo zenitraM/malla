@@ -2140,7 +2140,7 @@ class NodeRepository:
                     candidates_limited[gw_id][last_byte] = limited_list
                     all_candidate_ids.update(limited_list)
 
-            # Get node names and short names for all candidates in bulk
+            # Get node names, short names, and roles for all candidates in bulk
             candidate_names = (
                 NodeRepository.get_bulk_node_names(list(all_candidate_ids))
                 if all_candidate_ids
@@ -2149,6 +2149,12 @@ class NodeRepository:
 
             candidate_short_names = (
                 get_bulk_node_short_names(list(all_candidate_ids))
+                if all_candidate_ids
+                else {}
+            )
+
+            candidate_roles = (
+                NodeRepository.get_bulk_node_roles(list(all_candidate_ids))
                 if all_candidate_ids
                 else {}
             )
@@ -2169,8 +2175,12 @@ class NodeRepository:
                                 "hex_id": hex_id,
                                 "short_name": short_name,
                                 "last_byte": f"{cand_node_id & 0xFF:02x}",
+                                "is_client_mute": candidate_roles.get(cand_node_id) == "CLIENT_MUTE",
                             }
                         )
+                    # Sort: non-CLIENT_MUTE nodes first (better relay candidates),
+                    # CLIENT_MUTE nodes last (fallback only)
+                    candidates.sort(key=lambda c: (c["is_client_mute"], c["node_id"]))
                     result[gw_id][last_byte] = candidates
                     _store_relay_candidates(gw_id, last_byte, candidates, now)
 
@@ -2305,6 +2315,11 @@ class NodeRepository:
                 if all_candidate_ids
                 else {}
             )
+            candidate_roles = (
+                NodeRepository.get_bulk_node_roles(list(all_candidate_ids))
+                if all_candidate_ids
+                else {}
+            )
 
             for (
                 gateway_id,
@@ -2322,8 +2337,12 @@ class NodeRepository:
                                 candidate_id, hex_id[-4:]
                             ),
                             "last_byte": f"{candidate_id & 0xFF:02x}",
+                            "is_client_mute": candidate_roles.get(candidate_id) == "CLIENT_MUTE",
                         }
                     )
+                # Sort: non-CLIENT_MUTE nodes first (better relay candidates),
+                # CLIENT_MUTE nodes last (fallback only)
+                candidates.sort(key=lambda c: (c["is_client_mute"], c["node_id"]))
                 result[gateway_id][last_byte] = candidates
                 _store_relay_candidates(gateway_id, last_byte, candidates, now)
 
@@ -2514,6 +2533,47 @@ class NodeRepository:
 
         except Exception as e:
             logger.error(f"Error getting bulk node names: {e}")
+            raise
+
+    @staticmethod
+    def get_bulk_node_roles(node_ids: list[int]) -> dict[int, str | None]:
+        """Get node roles in bulk for efficiency.
+
+        Args:
+            node_ids: List of node IDs to look up.
+
+        Returns:
+            Dictionary mapping node_id to role string (or None if unknown).
+        """
+        if not node_ids:
+            return {}
+
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            placeholders = ",".join(["?"] * len(node_ids))
+            query = f"""
+                SELECT node_id, role
+                FROM node_info
+                WHERE node_id IN ({placeholders})
+            """
+
+            cursor.execute(query, node_ids)
+            rows = cursor.fetchall()
+
+            result: dict[int, str | None] = {row["node_id"]: row["role"] for row in rows}
+
+            # Fill in None for nodes not found in the database
+            for node_id in node_ids:
+                if node_id not in result:
+                    result[node_id] = None
+
+            conn.close()
+            return result
+
+        except Exception as e:
+            logger.error(f"Error getting bulk node roles: {e}")
             raise
 
     @staticmethod
