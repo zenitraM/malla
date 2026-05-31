@@ -226,6 +226,7 @@ class TestChannelsEndpoint:
         assert response.status_code == 200
 
         data = response.get_json()
+        assert data["data"]
         for packet in data["data"]:
             assert packet.get("channel") == "LongFast"
 
@@ -237,6 +238,7 @@ class TestChannelsEndpoint:
         assert response.status_code == 200
 
         data = response.get_json()
+        assert data["data"]
         for packet in data["data"]:
             assert packet.get("channel") == "LongFast"
 
