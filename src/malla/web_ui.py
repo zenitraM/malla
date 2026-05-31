@@ -106,18 +106,16 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
         setup_telemetry(app, cfg.otlp_endpoint)
 
     # Apply ProxyFix after other WSGI middleware so they see rewritten values.
-    if cfg.reverse_proxy_xff_count is not None:
+    if cfg.trusted_proxy_ips:
         from werkzeug.middleware.proxy_fix import ProxyFix
 
         app.wsgi_app = ProxyFix(
             app.wsgi_app,
-            x_for=cfg.reverse_proxy_xff_count,
-            x_proto=cfg.reverse_proxy_xff_count,
+            x_for=1,
+            x_proto=1,
         )
         logger.info(
-            "ProxyFix middleware applied (x_for=%d, x_proto=%d)",
-            cfg.reverse_proxy_xff_count,
-            cfg.reverse_proxy_xff_count,
+            "ProxyFix middleware applied for trusted proxy configuration"
         )
 
     # Mirror a few frequently-used values to top-level keys for backwards

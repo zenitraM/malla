@@ -52,12 +52,11 @@ class AppConfig:
     data_retention_hours: int = 0
 
     # Reverse proxy settings
-    # Number of trusted reverse proxy layers in X-Forwarded-* headers.
-    # Set to 1 when behind a single reverse proxy (common case), 2 behind two,
-    # etc. When set, ProxyFix middleware is applied so that request.remote_addr
-    # reflects the real client IP from X-Forwarded-For.
-    # Corresponding env var: MALLA_REVERSE_PROXY_XFF_COUNT
-    reverse_proxy_xff_count: int | None = None
+    # Comma-separated IPs of trusted reverse proxies. When set, ProxyFix trusts
+    # one X-Forwarded-* hop, and Gunicorn is configured to accept forwarded
+    # headers only from these exact proxy IPs.
+    # Corresponding env var: MALLA_TRUSTED_PROXY_IPS
+    trusted_proxy_ips: str | None = None
 
     # OpenTelemetry settings
     otlp_endpoint: str | None = None

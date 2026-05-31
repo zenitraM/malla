@@ -303,12 +303,18 @@ The following keys are recognised:
 | `mqtt_client_id`    | str | `""`                                     | MQTT client ID. Leave empty for a randomly generated ID (recommended). | `MALLA_MQTT_CLIENT_ID` |
 | `default_channel_key` | str | `"1PG7OiApB1nwvP+rz05pAQ=="`         | Default channel key(s) for decryption (base64). Supports comma-separated list of keys - each will be tried in order until successful. | `MALLA_DEFAULT_CHANNEL_KEY` |
 | `data_retention_hours` | int | `0`                                     | Number of hours after which to delete old data (0 = never delete). Automatically cleans up packet_history and node_info records older than specified hours. | `MALLA_DATA_RETENTION_HOURS` |
-| `reverse_proxy_xff_count` | int | `null`                              | Number of trusted reverse proxy layers. When set, applies ProxyFix so `request.remote_addr` reflects the real client IP. | `MALLA_REVERSE_PROXY_XFF_COUNT` |
+| `trusted_proxy_ips` | str | `null`                              | Comma-separated IPs of trusted reverse proxies. Enables ProxyFix with one trusted hop. When running via Gunicorn, these same IPs are passed to `forwarded_allow_ips` so only those peers can forward headers. | `MALLA_TRUSTED_PROXY_IPS` |
 | `otlp_endpoint` | str    | `null`                              | OpenTelemetry endpoint for sending traces (e.g. `http://localhost:4317`). | `MALLA_OTLP_ENDPOINT` |
 | `gunicorn_workers` | int | `null` | Number of Gunicorn worker processes. `null` means auto-detect based on CPU cores. | `MALLA_GUNICORN_WORKERS` |
 | `gunicorn_threads` | int | `1` | Number of threads per Gunicorn worker. Increase this for better concurrency, especially on I/O bound tasks. | `MALLA_GUNICORN_THREADS` |
 
 Environment variables **always override** values coming from YAML file.
+
+When `trusted_proxy_ips` is set, Malla always enables `ProxyFix` with a single
+trusted forwarded hop. If you run via `malla-web-gunicorn`, the same exact IPs
+are also passed to Gunicorn's `forwarded_allow_ips` so forwarded headers are
+only accepted from those proxy peers. When not using Gunicorn, only `ProxyFix`
+is configured; no additional server-level proxy trust is opened.
 
 ### Data Cleanup
 
