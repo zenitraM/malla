@@ -96,7 +96,16 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
 
         _override_config(cfg)
 
-    # Apply ProxyFix if behind a reverse proxy
+    # Persist config on Flask instance for later use
+    app.config["APP_CONFIG"] = cfg
+
+    # Setup OpenTelemetry if endpoint is configured
+    if cfg.otlp_endpoint:
+        from .telemetry import setup_telemetry
+
+        setup_telemetry(app, cfg.otlp_endpoint)
+
+    # Apply ProxyFix after other WSGI middleware so they see rewritten values.
     if cfg.reverse_proxy_xff_count is not None:
         from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -110,15 +119,6 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
             cfg.reverse_proxy_xff_count,
             cfg.reverse_proxy_xff_count,
         )
-
-    # Persist config on Flask instance for later use
-    app.config["APP_CONFIG"] = cfg
-
-    # Setup OpenTelemetry if endpoint is configured
-    if cfg.otlp_endpoint:
-        from .telemetry import setup_telemetry
-
-        setup_telemetry(app, cfg.otlp_endpoint)
 
     # Mirror a few frequently-used values to top-level keys for backwards
     # compatibility with the existing code base. Over time we should migrate
