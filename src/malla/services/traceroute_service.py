@@ -1207,11 +1207,16 @@ class TracerouteService:
                     )
                     continue
 
+            node_ids = list(nodes.keys())
+            node_names = get_bulk_node_names(node_ids) if node_ids else {}
+
+            for node_id, node_data in nodes.items():
+                node_data["name"] = node_names.get(node_id, node_data["name"])
+
             # Get location data for all nodes in the graph
             # Import here to avoid circular dependencies
             from ..database.repositories import LocationRepository
 
-            node_ids = list(nodes.keys())
             logger.info(f"Fetching location data for {len(node_ids)} nodes")
 
             try:
