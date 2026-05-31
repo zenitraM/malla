@@ -1964,7 +1964,7 @@ def api_channels():
         return jsonify({"channels": channels})
     except Exception as e:
         logger.error(f"Error in API channels: {e}")
-        return jsonify({"error": str(e), "channels": []}), 500
+        return jsonify({"error": "Failed to retrieve channels", "channels": []}), 500
 
 
 @api_bp.route("/meshtastic/packet-channels")

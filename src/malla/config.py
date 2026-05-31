@@ -51,6 +51,14 @@ class AppConfig:
     # Number of hours after which to delete old data (0 = never delete)
     data_retention_hours: int = 0
 
+    # Reverse proxy settings
+    # Number of trusted reverse proxy layers in X-Forwarded-* headers.
+    # Set to 1 when behind a single reverse proxy (common case), 2 behind two,
+    # etc. When set, ProxyFix middleware is applied so that request.remote_addr
+    # reflects the real client IP from X-Forwarded-For.
+    # Corresponding env var: MALLA_REVERSE_PROXY_XFF_COUNT
+    reverse_proxy_xff_count: int | None = None
+
     # OpenTelemetry settings
     otlp_endpoint: str | None = None
 
@@ -90,12 +98,13 @@ _ENV_PREFIX = "MALLA_"  # Prefix for environment variable overrides
 
 
 def _resolve_type(t: Any) -> Any:  # noqa: ANN001
-    """Resolve **t** which may be a string forward-reference into a real type."""
+    """Resolve **t** which may be a string forward-reference or Optional into a real type."""
 
     if isinstance(t, str):
-        # Basic builtin types are fine to eval() in this restricted context.
+        # Strip Optional[X] / X | None suffix to get the base type
+        base = t.replace(" | None", "").strip()
         builtins_map = {"bool": bool, "int": int, "float": float, "str": str}
-        return builtins_map.get(t, str)
+        return builtins_map.get(base, str)
     return t
 
 
