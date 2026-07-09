@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Auto-generated version file
+src/malla/_version.py
+
 # C extensions
 *.so
 

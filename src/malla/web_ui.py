@@ -15,6 +15,8 @@ from pathlib import Path
 
 from flask import Flask
 
+from . import get_version
+
 # Import application configuration loader
 from .config import AppConfig, get_config
 
@@ -256,6 +258,7 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
             "APP_NAME": cfg.name,
             "APP_CONFIG": cfg,
             "DATABASE_FILE": cfg.database_file,
+            "APP_VERSION": get_version(),
         }
 
     # Initialize database
@@ -280,7 +283,7 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
         return {
             "status": "healthy",
             "service": "meshtastic-mesh-health-ui",
-            "version": "2.0.0",
+            "version": get_version(),
         }
 
     # Add application info
@@ -289,7 +292,7 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
         """Application information endpoint."""
         return {
             "name": "Meshtastic Mesh Health Web UI",
-            "version": "2.0.0",
+            "version": get_version(),
             "description": "Web interface for monitoring Meshtastic mesh network health",
             "database_file": app.config["DATABASE_FILE"],
             "components": {
