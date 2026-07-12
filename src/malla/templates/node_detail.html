@@ -228,6 +228,45 @@
                 </div>
             </div>
 
+            <!-- Telemetry History -->
+            <div class="card mb-4" id="telemetry-card" data-node-id="{{ node.node_id }}">
+                <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <h5 class="mb-0"><i class="bi bi-thermometer-half"></i> Telemetry History</h5>
+                    <div class="d-flex flex-wrap gap-2">
+                        <div class="btn-group btn-group-sm" role="group" id="telemetry-range" aria-label="Telemetry time range">
+                            <button type="button" class="btn btn-outline-primary" data-range="1d">1D</button>
+                            <button type="button" class="btn btn-outline-primary active" data-range="7d">7D</button>
+                            <button type="button" class="btn btn-outline-primary" data-range="30d">30D</button>
+                            <button type="button" class="btn btn-outline-primary" data-range="all">All</button>
+                        </div>
+                        <div class="btn-group btn-group-sm" role="group" id="telemetry-zoom" aria-label="Telemetry zoom">
+                            <button type="button" class="btn btn-outline-secondary" data-zoom="in" title="Zoom in"><i class="bi bi-zoom-in"></i></button>
+                            <button type="button" class="btn btn-outline-secondary" data-zoom="out" title="Zoom out"><i class="bi bi-zoom-out"></i></button>
+                            <button type="button" class="btn btn-outline-secondary" data-zoom="reset" title="Reset zoom"><i class="bi bi-arrow-counterclockwise"></i></button>
+                            <button type="button" class="btn btn-outline-secondary" data-zero title="Start axes at zero"><b>0</b></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="telemetry-loading" class="text-center text-muted" style="display: none; min-height: 240px; align-items: center; justify-content: center; gap: .5rem;">
+                        <div class="spinner-border spinner-border-sm" role="status"></div> Loading telemetry…
+                    </div>
+                    <div id="telemetry-empty" class="text-center text-muted" style="display: none; min-height: 240px; align-items: center; justify-content: center;">
+                        No telemetry reported by this node.
+                    </div>
+                    <div id="telemetry-offline" class="alert alert-warning py-1 px-2 small mb-2" style="display: none;"></div>
+                    <div id="telemetry-hint" class="text-muted small mb-2" style="display: none;">
+                        <i class="bi bi-search"></i> Drag to select a time range, double-click to zoom in, or use the buttons. Hover a legend item to focus a metric.
+                    </div>
+                    <div id="telemetry-charts" class="row g-4"></div>
+                </div>
+            </div>
+            <style>
+                .tele-stats { line-height: 1.9; }
+                .tele-stat { white-space: nowrap; }
+                .tele-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+            </style>
+
             <!-- Location Information -->
             {% if location %}
             <div class="card mb-4">
@@ -727,6 +766,12 @@
 <!-- Relay Node Analysis Component -->
 <script src="{{ url_for('static', filename='js/relay_node_analysis.js') }}"></script>
 
+<!-- Chart.js zoom plugin (drag / double-click / button zoom on telemetry charts) -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+
+<!-- Telemetry History Charts -->
+<script src="{{ url_for('static', filename='js/node_telemetry.js') }}?v={{ ASSET_VERSION }}"></script>
+
 <!-- Location data for JavaScript -->
 {% if location %}
 <script id="location-data" type="application/json">
@@ -1009,6 +1054,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (nodeId && window.DirectReceptionsChart) {
         directReceptionsChart = new DirectReceptionsChart(nodeId);
         directReceptionsChart.initialize();
+    }
+
+    if (nodeId && window.NodeTelemetryChart) {
+        new NodeTelemetryChart(nodeId).initialize();
     }
 
     // Format all timestamps based on current timezone preference

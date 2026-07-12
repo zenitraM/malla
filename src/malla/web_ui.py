@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 from flask import Flask
@@ -38,6 +39,9 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+# Static-asset cache-busting token; changes each process start (i.e. each deploy).
+_ASSET_VERSION = str(int(time.time()))
 
 
 class TrustedProxyClientIPMiddleware:
@@ -256,6 +260,10 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
             "APP_NAME": cfg.name,
             "APP_CONFIG": cfg,
             "DATABASE_FILE": cfg.database_file,
+            # Cache-busting token for static assets: changes each time the app
+            # starts (i.e. on every deploy/restart), so browsers reliably pick
+            # up updated JS/CSS instead of serving a stale cached copy.
+            "ASSET_VERSION": _ASSET_VERSION,
         }
 
     # Initialize database

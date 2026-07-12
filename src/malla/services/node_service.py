@@ -3,6 +3,7 @@ Node service for business logic related to node operations
 """
 
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -88,6 +89,44 @@ class NodeService:
         history = LocationService.get_node_location_history(node_id_int, limit=limit)
 
         return {"node_id": node_id_int, "location_history": history}
+
+    # Supported telemetry chart ranges -> window length in seconds (0 = all).
+    TELEMETRY_RANGES = {"1d": 86400, "7d": 604800, "30d": 2592000, "all": 0}
+
+    @staticmethod
+    def get_node_telemetry_history(
+        node_id,
+        range_key: str = "7d",
+        start: float | None = None,
+        end: float | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get telemetry (device / environment) history for a node's charts.
+
+        Args:
+            node_id: Node ID in various formats
+            range_key: One of "1d", "7d", "30d", "all" (defaults to "7d")
+            start, end: Explicit unix-second window. When both are given they
+                take precedence over ``range_key`` — used by the charts to load
+                full-resolution data for a zoomed-in time range.
+
+        Returns:
+            Dictionary with node_id, the window, per-metric series and count
+        """
+        node_id_int = convert_node_id(node_id)
+
+        if start is not None and end is not None:
+            result = NodeRepository.get_node_telemetry_history(
+                node_id_int, start_time=start, end_time=end
+            )
+            return {"node_id": node_id_int, "start": start, "end": end, **result}
+
+        seconds = NodeService.TELEMETRY_RANGES.get(range_key, 604800)
+        start_time = (time.time() - seconds) if seconds else None
+        result = NodeRepository.get_node_telemetry_history(
+            node_id_int, start_time=start_time
+        )
+        return {"node_id": node_id_int, "range": range_key, **result}
 
     @staticmethod
     def get_node_neighbors(node_id, max_distance: float = 10.0) -> dict[str, Any]:

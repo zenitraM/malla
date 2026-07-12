@@ -10,16 +10,154 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from meshtastic import mesh_pb2
+from meshtastic import mesh_pb2, telemetry_pb2
 from meshtastic.protobuf import mqtt_pb2
 
 from ..config import get_config
 from ..utils.decryption import try_decrypt_mesh_packet
 from ..utils.formatting import format_time_ago
-from ..utils.node_utils import get_bulk_node_short_names
+from ..utils.node_utils import convert_node_id, get_bulk_node_short_names
 from .connection import get_db_connection
 
 logger = logging.getLogger(__name__)
+
+# Telemetry metrics charted on the node detail page. Each entry maps a
+# TELEMETRY_APP protobuf sub-message + field to display metadata. Chart grouping
+# and axis assignment are a frontend concern; here each metric is just tagged
+# with a unit and a coarse ``group`` so related metrics can be plotted together.
+# Only fields the node actually reports are returned. Values are read as-is,
+# matching the packet-detail view (no scaling).
+_TELEMETRY_METRICS: tuple[tuple[str, str, str, str], ...] = (
+    # (sub_message, field, unit, group)
+    ("environment_metrics", "temperature", "°C", "environment"),
+    ("environment_metrics", "relative_humidity", "%", "environment"),
+    ("environment_metrics", "barometric_pressure", "hPa", "pressure"),
+    ("environment_metrics", "gas_resistance", "MΩ", "air_quality"),
+    ("environment_metrics", "iaq", "", "air_quality"),
+    ("environment_metrics", "lux", "lx", "light"),
+    ("device_metrics", "battery_level", "%", "power"),
+    ("device_metrics", "voltage", "V", "power"),
+    ("device_metrics", "channel_utilization", "%", "channel"),
+    ("device_metrics", "air_util_tx", "%", "channel"),
+)
+
+# Gaps longer than this (seconds) break the line and the smoothing window, so a
+# node that was offline for a while does not get a trend drawn across the void.
+# Matches GAP_LIMIT in node_telemetry.js.
+_AGGREGATE_GAP = 86400
+
+# Half-width of the faded band, in standard deviations around the mean. ~1.5σ
+# covers the bulk of the spread without the band ballooning out to rare extremes.
+_BAND_SIGMA = 1.5
+
+
+def _aggregate_run(
+    points: list[list[Any]], n_buckets: int
+) -> tuple[list[list[Any]], list[list[Any]]]:
+    """Aggregate one *continuous* run (no gap > ``_AGGREGATE_GAP``) into
+    ``n_buckets`` buckets: a smoothed mean line plus a ``mean ± k·σ`` band.
+
+    The line is the windowed mean and the band is that same window's mean plus
+    or minus ``_BAND_SIGMA`` standard deviations, so the line sits exactly in the
+    centre of the band and the band shows the *typical* spread — it is not blown
+    out by the occasional extreme the way a raw min/max envelope is.
+    """
+    n = len(points)
+    n_buckets = max(1, min(n_buckets, n))
+    step = n / n_buckets
+    ts_list: list[float] = []
+    counts: list[int] = []
+    sums: list[float] = []
+    sumsqs: list[float] = []
+    bucket_min: list[float] = []
+    bucket_max: list[float] = []
+    for i in range(n_buckets):
+        lo = int(i * step)
+        hi = int((i + 1) * step) if i < n_buckets - 1 else n
+        if hi <= lo:
+            continue
+        segment = points[lo:hi]
+        values = [p[1] for p in segment]
+        ts_list.append(segment[len(segment) // 2][0])
+        counts.append(len(values))
+        sums.append(sum(values))
+        sumsqs.append(sum(v * v for v in values))
+        bucket_min.append(min(values))
+        bucket_max.append(max(values))
+
+    # Mean and standard deviation over a small centred window of buckets (the run
+    # is continuous, so the window never spans a real gap). Pooling the raw sums
+    # captures both within- and between-bucket variation, so cyclic swings widen
+    # the band while one-off spikes barely move it. The band is clamped to the
+    # window's real min/max so it never claims a value that was never observed.
+    m = len(ts_list)
+    half = 2
+    avg_line: list[list[Any]] = []
+    band: list[list[Any]] = []
+    for i in range(m):
+        lo2 = max(0, i - half)
+        hi2 = min(m, i + half + 1)
+        total_n = sum(counts[lo2:hi2])
+        total_s = sum(sums[lo2:hi2])
+        total_q = sum(sumsqs[lo2:hi2])
+        mean = total_s / total_n
+        var = total_q / total_n - mean * mean
+        std = var**0.5 if var > 0 else 0.0
+        lower = max(mean - _BAND_SIGMA * std, min(bucket_min[lo2:hi2]))
+        upper = min(mean + _BAND_SIGMA * std, max(bucket_max[lo2:hi2]))
+        avg_line.append([ts_list[i], round(mean, 3)])
+        band.append([ts_list[i], round(lower, 3), round(upper, 3)])
+    return avg_line, band
+
+
+def _aggregate(
+    points: list[list[Any]], max_points: int
+) -> tuple[list[list[Any]], list[list[Any]]]:
+    """Aggregate ``[ts, value]`` points into ~``max_points`` time buckets.
+
+    Returns ``(avg_line, band)`` where ``avg_line`` is ``[ts, average]`` per
+    bucket and ``band`` is ``[ts, lower, upper]`` (mean ± ``_BAND_SIGMA`` σ) per
+    bucket. Charts draw the average as a smooth line centred in the faded band,
+    so wide-range views show the typical spread without turning the line into
+    noise.
+
+    Real gaps in the raw data (no readings for longer than ``_AGGREGATE_GAP``)
+    split the points into continuous runs; each run is aggregated on its own so a
+    bucket never straddles an outage, and the runs are joined by ``[ts, None]`` /
+    ``[ts, None, None]`` break entries that tell the chart to lift the pen. This
+    is done from the raw timestamps, not the spacing between bucket centres —
+    over a long span every bucket is naturally many hours wide, and that width
+    must not be mistaken for a gap.
+    """
+    n = len(points)
+    # Far fewer buckets than the raw cap so each bucket averages many points:
+    # the average line stays smooth (noise averages out) while the band keeps the
+    # typical spread.
+    n_buckets = max(1, min(max_points, 150))
+
+    # Split into continuous runs wherever the raw data was interrupted.
+    runs: list[tuple[int, int]] = []
+    start = 0
+    for i in range(1, n):
+        if points[i][0] - points[i - 1][0] > _AGGREGATE_GAP:
+            runs.append((start, i))
+            start = i
+    runs.append((start, n))
+
+    avg_line: list[list[Any]] = []
+    band: list[list[Any]] = []
+    for idx, (rs, re) in enumerate(runs):
+        run = points[rs:re]
+        # Buckets per run in proportion to its share of the points.
+        run_buckets = max(1, round(n_buckets * len(run) / n))
+        run_avg, run_band = _aggregate_run(run, run_buckets)
+        if idx > 0:
+            gap_mid = (points[rs - 1][0] + points[rs][0]) / 2
+            avg_line.append([gap_mid, None])
+            band.append([gap_mid, None, None])
+        avg_line.extend(run_avg)
+        band.extend(run_band)
+    return avg_line, band
 
 RELAY_CANDIDATE_CACHE_TTL_SECONDS = 1800
 RELAY_CANDIDATE_CACHE_MAX_ENTRIES = 4096
@@ -72,6 +210,14 @@ def _store_relay_candidates(
     )
 
 
+# Dashboard stats are recomputed from an all-time COUNT(*) plus 24h aggregates
+# over packet_history. The landing page ("/") and /api/stats hit this on every
+# view, so a short TTL cache keeps the common case O(1) while the numbers stay
+# fresh to within a few seconds. Keyed by gateway_id (None => site-wide).
+DASHBOARD_STATS_CACHE_TTL_SECONDS = 30
+_dashboard_stats_cache: dict[str | None, tuple[float, dict[str, Any]]] = {}
+
+
 class DashboardRepository:
     """Repository for dashboard statistics."""
 
@@ -79,6 +225,13 @@ class DashboardRepository:
     def get_stats(gateway_id: str | None = None) -> dict[str, Any]:
         """Get overview statistics for the dashboard using optimized single query."""
         logger.info(f"Getting dashboard stats with gateway_id={gateway_id}")
+
+        now = time.time()
+        cached = _dashboard_stats_cache.get(gateway_id)
+        if cached is not None:
+            cached_at, cached_stats = cached
+            if now - cached_at <= DASHBOARD_STATS_CACHE_TTL_SECONDS:
+                return dict(cached_stats)
 
         try:
             conn = get_db_connection()
@@ -122,11 +275,18 @@ class DashboardRepository:
 
             stats_row = cursor.fetchone()
 
-            # Get total packet count (all time) separately
-            cursor.execute(
-                f"SELECT COUNT(*) as total FROM packet_history WHERE 1=1{gateway_filter}",
-                gateway_params,
-            )
+            # Get total packet count (all time) separately. Avoid a vestigial
+            # "WHERE 1=1" when there is no gateway filter: with a bare COUNT(*)
+            # and no WHERE clause SQLite uses its OP_Count optimization (walk the
+            # smallest index's page counts) instead of visiting every row, which
+            # is several times faster on a large packet_history.
+            if gateway_filter:
+                cursor.execute(
+                    f"SELECT COUNT(*) as total FROM packet_history WHERE 1=1{gateway_filter}",
+                    gateway_params,
+                )
+            else:
+                cursor.execute("SELECT COUNT(*) as total FROM packet_history")
             total_packets_all_time = cursor.fetchone()["total"]
 
             # Get packet types separately (more efficient than JSON aggregation in SQLite)
@@ -145,7 +305,7 @@ class DashboardRepository:
 
             conn.close()
 
-            return {
+            stats = {
                 "total_nodes": total_nodes,
                 "active_nodes_24h": stats_row["active_nodes_24h"] or 0,
                 "total_packets": total_packets_all_time or 0,
@@ -155,6 +315,9 @@ class DashboardRepository:
                 "packet_types": packet_types,
                 "success_rate": stats_row["success_rate"] or 0,
             }
+
+            _dashboard_stats_cache[gateway_id] = (now, dict(stats))
+            return stats
 
         except Exception as e:
             logger.error(f"Error getting dashboard stats: {e}")
@@ -3016,6 +3179,101 @@ class NodeRepository:
         except Exception as e:
             logger.error(f"Error getting unique packet channels: {e}")
             return []
+
+    @staticmethod
+    def get_node_telemetry_history(
+        node_id: int | str,
+        start_time: float | None = None,
+        end_time: float | None = None,
+        max_points: int = 1500,
+    ) -> dict[str, Any]:
+        """Return per-metric telemetry time series for a node.
+
+        Reads this node's ``TELEMETRY_APP`` packets in the ``[start_time,
+        end_time]`` window (open-ended when either is ``None``/``0``), decodes
+        each protobuf, and returns one point series per metric the node actually
+        reports. The query is bounded to the node and time window by the
+        ``(from_node_id, timestamp)`` index, so cost scales with the node's
+        telemetry in-window, not the whole table. Series longer than
+        ``max_points`` are decimated to keep the payload and chart render light;
+        the returned ``decimated`` flag lets the client re-request a narrower
+        window at full resolution (zoom-to-detail).
+        """
+        node_id_int = convert_node_id(node_id)
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            params: list[Any] = [node_id_int]
+            time_clause = ""
+            if start_time:
+                time_clause += " AND timestamp >= ?"
+                params.append(start_time)
+            if end_time:
+                time_clause += " AND timestamp <= ?"
+                params.append(end_time)
+
+            cursor.execute(
+                f"""
+                SELECT timestamp, raw_payload
+                FROM packet_history
+                WHERE from_node_id = ?
+                AND portnum = 67  -- TELEMETRY_APP
+                AND raw_payload IS NOT NULL
+                {time_clause}
+                ORDER BY timestamp ASC
+                """,
+                params,
+            )
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
+
+        series: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            raw = row["raw_payload"]
+            if not raw:
+                continue
+            try:
+                telemetry = telemetry_pb2.Telemetry()
+                telemetry.ParseFromString(raw)
+            except Exception:
+                continue
+
+            ts = row["timestamp"]
+            for sub_message, field, unit, group in _TELEMETRY_METRICS:
+                if not telemetry.HasField(sub_message):
+                    continue
+                metrics = getattr(telemetry, sub_message)
+                if not metrics.HasField(field):
+                    continue
+                entry = series.get(field)
+                if entry is None:
+                    entry = {"unit": unit, "group": group, "points": []}
+                    series[field] = entry
+                entry["points"].append([ts, round(float(getattr(metrics, field)), 3)])
+
+        # True latest telemetry time (before aggregation, whose last bucket
+        # centre lags the real last reading) — used for the offline note.
+        latest = rows[-1]["timestamp"] if rows else None
+
+        total = 0
+        was_decimated = False
+        for entry in series.values():
+            points = entry["points"]
+            total += len(points)
+            if len(points) > max_points:
+                was_decimated = True
+                avg_line, band = _aggregate(points, max_points)
+                entry["points"] = avg_line
+                entry["band"] = band
+
+        return {
+            "series": series,
+            "count": total,
+            "decimated": was_decimated,
+            "latest": latest,
+        }
 
 
 class TracerouteRepository:
