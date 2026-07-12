@@ -6,6 +6,21 @@
 # Display name shown in the navigation bar and browser title
 name: "Malla"
 
+# Operator page customization (optional).
+# custom_css is injected as an inline <style> at the end of every page's <head>,
+# so it overrides the built-in theme. The theme is driven by Bootstrap CSS
+# variables, so overriding --bs-primary recolors the whole site (incl. navbar).
+# Env var: MALLA_CUSTOM_CSS
+# custom_css: |
+#   :root { --bs-primary: #14532d; --bs-primary-rgb: 20, 83, 45; }
+#   .navbar { background-color: #14532d !important; }
+#
+# custom_html_head is raw HTML injected into <head> (favicon, meta tags,
+# <link>, <script>, ...). Scripts should wait for the DOM (defer / DOMContentLoaded).
+# Env var: MALLA_CUSTOM_HTML_HEAD
+# custom_html_head: |
+#   <link rel="icon" href="https://example.com/favicon.ico">
+
 # Markdown content rendered on the dashboard homepage
 home_markdown: |
   # Welcome to Malla

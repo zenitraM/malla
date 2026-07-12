@@ -24,6 +24,16 @@ class AppConfig:
     name: str = "Malla"
     home_markdown: str = ""
 
+    # Operator page customization (trusted deployment config, not user input).
+    # custom_css is inlined in a <style> at the end of every page's <head>;
+    # custom_html_head is raw HTML injected right after it (favicon, meta,
+    # <link>, <script>, ...). Both let operators restyle or extend the UI
+    # without editing templates or rebuilding the image. Because the theme is
+    # driven by Bootstrap CSS variables, overriding e.g. --bs-primary in
+    # custom_css recolors the whole site (buttons, links, navbar, ...).
+    custom_css: str = ""
+    custom_html_head: str = ""
+
     # Flask/server settings
     secret_key: str = "dev-secret-key-change-in-production"
     database_file: str = "meshtastic_history.db"

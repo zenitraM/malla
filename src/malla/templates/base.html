@@ -62,6 +62,10 @@
     </style>
 
     {% block extra_css %}{% endblock %}
+
+    {# Operator customization, injected last so it overrides the theme and per-page CSS #}
+    {% if APP_CONFIG and APP_CONFIG.custom_css %}<style>{{ APP_CONFIG.custom_css | safe }}</style>{% endif %}
+    {% if APP_CONFIG and APP_CONFIG.custom_html_head %}{{ APP_CONFIG.custom_html_head | safe }}{% endif %}
 </head>
 <body>
     <!-- Navigation -->
