@@ -56,6 +56,7 @@ from paho.mqtt.enums import CallbackAPIVersion
 # ---------------------------------------------------------------------------
 from malla.config import get_config  # Import here to avoid circular import issues
 
+from .database.connection import seed_query_planner_stats_async
 from .database.schema import ensure_startup_schema
 
 # Load the singleton configuration once at module import time.  This ensures the
@@ -282,13 +283,18 @@ def init_database() -> None:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Configure SQLite for better concurrency
+    # Configure SQLite for better concurrency and large-database performance.
+    # cache_size is negative so SQLite reads it as KiB (64 MiB) rather than a
+    # page count. mmap is intentionally left off: with continuous writes,
+    # memory-mapped readers can report "database disk image is malformed"
+    # during WAL checkpoints.
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA synchronous=NORMAL")
     cursor.execute("PRAGMA busy_timeout=30000")
     cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.execute("PRAGMA cache_size=10000")
+    cursor.execute("PRAGMA cache_size=-65536")  # 64 MiB (negative => KiB)
     cursor.execute("PRAGMA temp_store=MEMORY")
+    cursor.execute("PRAGMA analysis_limit=1000")  # bound ANALYZE / optimize work
 
     # Table for packet history
     cursor.execute("""
@@ -409,6 +415,13 @@ def init_database() -> None:
 
     conn.commit()
     conn.close()
+
+    # Seed query-planner statistics on first run so the planner picks
+    # index-based plans instead of full scans on a large packet_history. Runs in
+    # a background thread so a cold ANALYZE (~100s on a multi-GB DB) does not
+    # delay packet ingestion or hold the write lock.
+    seed_query_planner_stats_async(DATABASE_FILE)
+
     logging.info(
         "Database initialized: %s (%.3fs)",
         DATABASE_FILE,
@@ -950,9 +963,17 @@ def get_node_statistics() -> dict[str, Any]:
         )
         active_nodes_24h = cursor.fetchone()[0]
 
-        # Total packets received
-        cursor.execute("SELECT COUNT(*) FROM packet_history")
-        total_packets = cursor.fetchone()[0]
+        # Total packets received. Use the AUTOINCREMENT high-water mark from
+        # sqlite_sequence (O(1)) instead of COUNT(*) over the whole table, which
+        # would scan all of packet_history while holding db_lock every minute and
+        # stall packet ingestion as history grows. This is an upper bound; if row
+        # deletion (data retention) is ever enabled it slightly overcounts, which
+        # is acceptable for a log line.
+        cursor.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'packet_history'"
+        )
+        seq_row = cursor.fetchone()
+        total_packets = seq_row[0] if seq_row else 0
 
         conn.close()
 
@@ -1441,12 +1462,34 @@ def main() -> None:
 
     try:
         # Keep the main thread alive
+        optimize_interval = 3600  # refresh query-planner stats hourly
+        last_optimize = time.time()
         while True:
             time.sleep(60)  # Print stats every minute
             stats = get_node_statistics()
             logging.info(
                 f"Stats: {stats['total_nodes']} nodes, {stats['total_packets']} packets, {stats['active_nodes_24h']} active (24h)"
             )
+
+            # Periodically refresh query-planner statistics so the planner keeps
+            # choosing index-based plans as packet_history grows. PRAGMA optimize
+            # is bounded by the analysis_limit set on the connection and only
+            # re-analyzes indexes that changed enough to matter, so it usually
+            # does little. It runs on its own connection WITHOUT db_lock so its
+            # sampling never stalls packet ingestion; WAL plus busy_timeout make
+            # its brief final stats write safe alongside concurrent inserts.
+            now = time.time()
+            if now - last_optimize >= optimize_interval:
+                try:
+                    opt_conn = sqlite3.connect(DATABASE_FILE, timeout=60.0)
+                    opt_conn.execute("PRAGMA busy_timeout=30000")
+                    opt_conn.execute("PRAGMA analysis_limit=1000")
+                    opt_conn.execute("PRAGMA optimize")
+                    opt_conn.close()
+                    logging.debug("Ran PRAGMA optimize to refresh planner stats")
+                except Exception as exc:  # noqa: BLE001
+                    logging.warning("PRAGMA optimize failed: %s", exc)
+                last_optimize = now
     except KeyboardInterrupt:
         logging.info("Script interrupted by user. Shutting down...")
     finally:

@@ -129,6 +129,48 @@ def _get_existing_indexes(cursor: sqlite3.Cursor) -> set[str]:
     return {row[0] for row in cursor.fetchall()}
 
 
+def query_planner_stats_present(cursor: sqlite3.Cursor) -> bool:
+    """Return ``True`` if SQLite query-planner statistics (sqlite_stat1) exist."""
+
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1'"
+    )
+    if cursor.fetchone() is None:
+        return False
+    cursor.execute("SELECT 1 FROM sqlite_stat1 LIMIT 1")
+    return cursor.fetchone() is not None
+
+
+def ensure_query_planner_stats(cursor: sqlite3.Cursor) -> bool:
+    """Seed SQLite query-planner statistics if they are missing.
+
+    Without ``sqlite_stat1`` the planner guesses index selectivity and can pick
+    a badly-scaling plan (e.g. a full scan of ``packet_history`` for a query a
+    partial index would serve in milliseconds). A one-off ``ANALYZE`` fixes this;
+    ``PRAGMA analysis_limit`` keeps it bounded so it stays fast even on a
+    multi-gigabyte database. Returns ``True`` when ANALYZE was run.
+
+    Note: even a bounded ANALYZE reads ~``analysis_limit`` sample rows per index,
+    which can be ~100 seconds of random I/O on a cold multi-gigabyte database.
+    Prefer :func:`malla.database.connection.seed_query_planner_stats_async` on
+    the startup path so this never blocks request serving or packet ingestion.
+
+    Stats are only *seeded* here (when absent). Keeping them fresh as the
+    database grows is handled separately by periodic ``PRAGMA optimize`` in the
+    capture daemon.
+    """
+
+    if query_planner_stats_present(cursor):
+        return False  # stats already present – nothing to do
+
+    # analysis_limit bounds the work per index; without it ANALYZE would scan
+    # every index in full and could take many minutes on a huge packet_history.
+    cursor.execute("PRAGMA analysis_limit=1000")
+    logger.info("Query-planner statistics missing – running bounded ANALYZE")
+    cursor.execute("ANALYZE")
+    return True
+
+
 def ensure_startup_schema(
     cursor: sqlite3.Cursor, *, drop_legacy_indexes: bool = False
 ) -> None:

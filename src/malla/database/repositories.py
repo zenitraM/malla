@@ -72,6 +72,14 @@ def _store_relay_candidates(
     )
 
 
+# Dashboard stats are recomputed from an all-time COUNT(*) plus 24h aggregates
+# over packet_history. The landing page ("/") and /api/stats hit this on every
+# view, so a short TTL cache keeps the common case O(1) while the numbers stay
+# fresh to within a few seconds. Keyed by gateway_id (None => site-wide).
+DASHBOARD_STATS_CACHE_TTL_SECONDS = 30
+_dashboard_stats_cache: dict[str | None, tuple[float, dict[str, Any]]] = {}
+
+
 class DashboardRepository:
     """Repository for dashboard statistics."""
 
@@ -79,6 +87,13 @@ class DashboardRepository:
     def get_stats(gateway_id: str | None = None) -> dict[str, Any]:
         """Get overview statistics for the dashboard using optimized single query."""
         logger.info(f"Getting dashboard stats with gateway_id={gateway_id}")
+
+        now = time.time()
+        cached = _dashboard_stats_cache.get(gateway_id)
+        if cached is not None:
+            cached_at, cached_stats = cached
+            if now - cached_at <= DASHBOARD_STATS_CACHE_TTL_SECONDS:
+                return dict(cached_stats)
 
         try:
             conn = get_db_connection()
@@ -122,11 +137,18 @@ class DashboardRepository:
 
             stats_row = cursor.fetchone()
 
-            # Get total packet count (all time) separately
-            cursor.execute(
-                f"SELECT COUNT(*) as total FROM packet_history WHERE 1=1{gateway_filter}",
-                gateway_params,
-            )
+            # Get total packet count (all time) separately. Avoid a vestigial
+            # "WHERE 1=1" when there is no gateway filter: with a bare COUNT(*)
+            # and no WHERE clause SQLite uses its OP_Count optimization (walk the
+            # smallest index's page counts) instead of visiting every row, which
+            # is several times faster on a large packet_history.
+            if gateway_filter:
+                cursor.execute(
+                    f"SELECT COUNT(*) as total FROM packet_history WHERE 1=1{gateway_filter}",
+                    gateway_params,
+                )
+            else:
+                cursor.execute("SELECT COUNT(*) as total FROM packet_history")
             total_packets_all_time = cursor.fetchone()["total"]
 
             # Get packet types separately (more efficient than JSON aggregation in SQLite)
@@ -145,7 +167,7 @@ class DashboardRepository:
 
             conn.close()
 
-            return {
+            stats = {
                 "total_nodes": total_nodes,
                 "active_nodes_24h": stats_row["active_nodes_24h"] or 0,
                 "total_packets": total_packets_all_time or 0,
@@ -155,6 +177,9 @@ class DashboardRepository:
                 "packet_types": packet_types,
                 "success_rate": stats_row["success_rate"] or 0,
             }
+
+            _dashboard_stats_cache[gateway_id] = (now, dict(stats))
+            return stats
 
         except Exception as e:
             logger.error(f"Error getting dashboard stats: {e}")
