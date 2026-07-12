@@ -6,6 +6,7 @@ Malla (_Mesh_, in Spanish) is an ([AI-built](./AI.md)) tool that logs Meshtastic
 Check out some instances with running data from community MQTT servers:
 - meshtastic.es (Spain): https://malla.meshtastic.es
 - malla.ctmesh.org (Connecticut): https://malla.ctmesh.org
+- meshmap.pro (Taiwan): https://meshmap.pro
 
 ## Features
 
