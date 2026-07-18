@@ -131,7 +131,7 @@ def test_repository_aggregates_with_band(telemetry_client):
     # stays inside it and never claims a value outside the raw data's range.
     raw_lo = min(p[1] for p in full)
     raw_hi = max(p[1] for p in full)
-    for p, b in zip(pts, band):
+    for p, b in zip(pts, band, strict=True):
         if p[1] is not None:
             assert b[1] <= p[1] <= b[2]
             assert raw_lo <= b[1] and b[2] <= raw_hi

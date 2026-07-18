@@ -8,7 +8,7 @@ import json
 import logging
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from meshtastic import mesh_pb2, telemetry_pb2
 from meshtastic.protobuf import mqtt_pb2
@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 # with a unit and a coarse ``group`` so related metrics can be plotted together.
 # Only fields the node actually reports are returned. Values are read as-is,
 # matching the packet-detail view (no scaling).
-_TELEMETRY_METRICS: tuple[tuple[str, str, str, str], ...] = (
+_TELEMETRY_METRICS: tuple[
+    tuple[Literal["environment_metrics", "device_metrics"], str, str, str], ...
+] = (
     # (sub_message, field, unit, group)
     ("environment_metrics", "temperature", "°C", "environment"),
     ("environment_metrics", "relative_humidity", "%", "environment"),
