@@ -123,6 +123,24 @@ LEGACY_INDEX_NAMES: tuple[str, ...] = (
     "idx_packet_from_node",
 )
 
+# Per-local-day activity aggregates for the dashboard timeline. Completed days
+# never change (packet_history is append-only and rows are stamped with insert
+# time), so each (tz_offset, day) is computed once and reused forever; only the
+# current day is recomputed live. Without this, the "All" range re-aggregates
+# the entire multi-million-row packet_history on every view.
+ACTIVITY_ROLLUP_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS activity_daily_rollup (
+        tz_offset_minutes INTEGER NOT NULL,
+        day TEXT NOT NULL,
+        total_packets INTEGER NOT NULL DEFAULT 0,
+        active_nodes INTEGER NOT NULL DEFAULT 0,
+        gateway_count INTEGER NOT NULL DEFAULT 0,
+        new_nodes INTEGER NOT NULL DEFAULT 0,
+        computed_at REAL NOT NULL,
+        PRIMARY KEY (tz_offset_minutes, day)
+    )
+"""
+
 
 def _get_existing_tables(cursor: sqlite3.Cursor) -> set[str]:
     cursor.execute(
@@ -187,6 +205,8 @@ def ensure_startup_schema(
 
     existing_tables = _get_existing_tables(cursor)
     existing_indexes = _get_existing_indexes(cursor)
+
+    cursor.execute(ACTIVITY_ROLLUP_TABLE_SQL)
 
     if "node_info" in existing_tables:
         cursor.execute("PRAGMA table_info(node_info)")

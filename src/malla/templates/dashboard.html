@@ -2,6 +2,17 @@
 
 {% block title %}Mesh Network Dashboard - {{ APP_NAME }}{% endblock %}
 
+{% block extra_css %}
+<style>
+/* Activity-timeline panels: fixed chart height, tightened on phones so the
+   2x2 grid stays a compact at-a-glance block instead of a long stack. */
+.timeline-panel { height: 130px; position: relative; }
+@media (max-width: 575.98px) {
+    .timeline-panel { height: 110px; }
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid">
     {# Optional Markdown content defined in config.yaml #}
@@ -39,9 +50,9 @@
                 <div class="card-body card-metric">
                     <div class="metric-value text-success">{{ stats.active_nodes_24h }}</div>
                     <div class="metric-label">Active Nodes (24h)</div>
-                    {% set total_nodes_safe = stats.total_nodes if stats.total_nodes > 0 else 1 %}
-                    {% set coverage_pct = (stats.active_nodes_24h / total_nodes_safe * 100)|int %}
-                    <small class="text-muted">{{ coverage_pct }}% network coverage</small>
+                    {% set nodes_seen_7d_safe = stats.nodes_seen_7d if stats.nodes_seen_7d and stats.nodes_seen_7d > 0 else 1 %}
+                    {% set coverage_pct = (stats.active_nodes_24h / nodes_seen_7d_safe * 100)|int %}
+                    <small class="text-muted">{{ coverage_pct }}% network coverage (of {{ stats.nodes_seen_7d }} seen in 7d)</small>
                 </div>
             </div>
         </div>
@@ -86,20 +97,55 @@
 
     <!-- Network Health and Activity Row -->
     <div class="row mb-4">
-        <!-- Network Activity Chart -->
+        <!-- Network Activity Timeline -->
         <div class="col-md-8 mb-4">
             <div class="card h-100">
-                <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-graph-up-arrow"></i> Network Activity Trends (7 Days)</h5>
+                <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <h5 class="card-title mb-0"><i class="bi bi-graph-up-arrow"></i> Network Activity Trends</h5>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Time range" id="timelineRangeButtons">
+                        <button type="button" class="btn btn-outline-secondary" data-range="24h">24h</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="7d">7d</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="30d">30d</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="all">All</button>
+                    </div>
                 </div>
                 <div class="card-body">
-                    <div id="timeSeriesChartLoading" class="text-center py-4">
+                    <div id="activityTimelinePanelsLoading" class="text-center py-4">
                         <div class="spinner-border text-primary" role="status">
                             <span class="visually-hidden">Loading...</span>
                         </div>
                         <p class="mt-2 text-muted">Loading chart data...</p>
                     </div>
-                    <canvas id="timeSeriesChart" style="height: 300px; display: none;"></canvas>
+                    <div id="activityTimelinePanels" class="row g-3" style="display: none;">
+                        <div class="col-6">
+                            <div class="d-flex justify-content-between align-items-baseline flex-wrap mb-1">
+                                <small class="text-muted">Messages</small>
+                                <small class="fw-semibold" id="tlMessagesVal"></small>
+                            </div>
+                            <div class="timeline-panel"><canvas id="tlMessages"></canvas></div>
+                        </div>
+                        <div class="col-6">
+                            <div class="d-flex justify-content-between align-items-baseline flex-wrap mb-1">
+                                <small class="text-muted">Active Nodes</small>
+                                <small class="fw-semibold" id="tlActiveNodesVal"></small>
+                            </div>
+                            <div class="timeline-panel"><canvas id="tlActiveNodes"></canvas></div>
+                        </div>
+                        <div class="col-6">
+                            <div class="d-flex justify-content-between align-items-baseline flex-wrap mb-1">
+                                <small class="text-muted">Gateways</small>
+                                <small class="fw-semibold" id="tlGatewaysVal"></small>
+                            </div>
+                            <div class="timeline-panel"><canvas id="tlGateways"></canvas></div>
+                        </div>
+                        <div class="col-6">
+                            <div class="d-flex justify-content-between align-items-baseline flex-wrap mb-1">
+                                <small class="text-muted">New Nodes</small>
+                                <small class="fw-semibold" id="tlNewNodesVal"></small>
+                            </div>
+                            <div class="timeline-panel"><canvas id="tlNewNodes"></canvas></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -114,14 +160,14 @@
                     <div class="mb-3">
                         <h6>Network Coverage</h6>
                         <div class="progress mb-2">
-                            {% set total_nodes_safe = stats.total_nodes if stats.total_nodes > 0 else 1 %}
-                            {% set activity_percentage = (stats.active_nodes_24h / total_nodes_safe * 100)|int %}
+                            {% set nodes_seen_7d_safe = stats.nodes_seen_7d if stats.nodes_seen_7d and stats.nodes_seen_7d > 0 else 1 %}
+                            {% set activity_percentage = (stats.active_nodes_24h / nodes_seen_7d_safe * 100)|int %}
                             {% set coverage_class = 'bg-success' if activity_percentage >= 70 else 'bg-warning' if activity_percentage >= 40 else 'bg-danger' %}
                             <div class="progress-bar {{ coverage_class }}" style="width: {{ activity_percentage }}%;">
                                 {{ activity_percentage }}%
                             </div>
                         </div>
-                        <small class="text-muted">{{ stats.active_nodes_24h }} of {{ stats.total_nodes }} nodes active</small>
+                        <small class="text-muted">{{ stats.active_nodes_24h }} of {{ stats.nodes_seen_7d }} nodes seen this week active in 24h</small>
                     </div>
 
                     <div class="mb-3">
@@ -376,8 +422,8 @@
                     <div class="row">
                         <div class="col-12">
                             <strong>Network Health:</strong><br>
-                            {% set total_nodes_safe = stats.total_nodes if stats.total_nodes > 0 else 1 %}
-                            {% set activity_percentage = (stats.active_nodes_24h / total_nodes_safe * 100)|int %}
+                            {% set nodes_seen_7d_safe = stats.nodes_seen_7d if stats.nodes_seen_7d and stats.nodes_seen_7d > 0 else 1 %}
+                            {% set activity_percentage = (stats.active_nodes_24h / nodes_seen_7d_safe * 100)|int %}
                             {% if activity_percentage >= 70 %}
                                 <span class="text-success">Excellent</span>
                             {% elif activity_percentage >= 40 %}
@@ -477,12 +523,14 @@ function updateChartsForTheme() {
         chartInstances = {};
 
         // Recreate charts with new theme
-        createTimeSeriesChart(analyticsData.temporal_patterns);
         createNodeActivityChart(analyticsData.node_statistics);
         createGatewayActivityChart(analyticsData.gateway_distribution);
         createSignalDistributionChart(analyticsData.signal_quality);
-        createHopDistributionChart(analyticsData.temporal_patterns);
+        createHopDistributionChart(analyticsData.hop_distribution);
         createPacketTypesChart(analyticsData.packet_types);
+    }
+    if (timelineData) {
+        renderTimelinePanels();
     }
 }
 
@@ -491,10 +539,32 @@ document.addEventListener('DOMContentLoaded', function () {
     // Load analytics data asynchronously
     loadAnalyticsData();
 
+    // Activity timeline: restore the last-used range and wire the selector
+    loadActivityTimeline(timelineRange);
+    const rangeButtons = document.getElementById('timelineRangeButtons');
+    if (rangeButtons) {
+        rangeButtons.addEventListener('click', function (event) {
+            const button = event.target.closest('button[data-range]');
+            if (button && button.dataset.range !== timelineRange) {
+                loadActivityTimeline(button.dataset.range);
+            }
+        });
+    }
+
     // Listen for theme changes and update charts
     window.addEventListener('themeChanged', function(event) {
         updateChartsForTheme();
     });
+
+    // Re-render the timeline when crossing the phone breakpoint so tick
+    // density matches the new panel width (Chart.js only rescales, it does
+    // not re-read our narrow-mode options).
+    const narrowQuery = window.matchMedia('(max-width: 575.98px)');
+    if (typeof narrowQuery.addEventListener === 'function') {
+        narrowQuery.addEventListener('change', function () {
+            if (timelineData) renderTimelinePanels();
+        });
+    }
 });
 
 async function loadAnalyticsData() {
@@ -506,11 +576,10 @@ async function loadAnalyticsData() {
         analyticsData = await response.json();
 
         // Render all charts and tables with loaded data
-        createTimeSeriesChart(analyticsData.temporal_patterns);
         createNodeActivityChart(analyticsData.node_statistics);
         createGatewayActivityChart(analyticsData.gateway_distribution);
         createSignalDistributionChart(analyticsData.signal_quality);
-        createHopDistributionChart(analyticsData.temporal_patterns);
+        createHopDistributionChart(analyticsData.hop_distribution);
         createPacketTypesChart(analyticsData.packet_types);
         populateTopNodesTable(analyticsData.top_nodes);
 
@@ -539,58 +608,192 @@ function showErrorMessage(message) {
     console.error(message);
 }
 
-function createTimeSeriesChart(temporalData) {
-    if (!temporalData || !temporalData.hourly_breakdown) return;
+// ---------------------------------------------------------------------------
+// Activity timeline: four single-metric panels sharing one time axis, with a
+// 24h / 7d / 30d / All range selector. One metric per panel (no dual axes) so
+// each scale reads directly.
+// ---------------------------------------------------------------------------
+let timelineData = null;
+let timelineRange = localStorage.getItem('mallaTimelineRange') || '7d';
 
-    hideLoadingSpinner('timeSeriesChart');
-    const ctx = document.getElementById('timeSeriesChart');
-    if (!ctx) return;
+// kind: bars for per-bucket flows, lines for levels; agg drives the header stat.
+const TIMELINE_PANELS = [
+    { key: 'total_packets', canvas: 'tlMessages',    valueEl: 'tlMessagesVal',    color: 'info',      kind: 'bar',  agg: 'sum'  },
+    { key: 'active_nodes',  canvas: 'tlActiveNodes', valueEl: 'tlActiveNodesVal', color: 'success',   kind: 'line', agg: 'last' },
+    { key: 'gateway_count', canvas: 'tlGateways',    valueEl: 'tlGatewaysVal',    color: 'primary',   kind: 'line', agg: 'last' },
+    { key: 'new_nodes',     canvas: 'tlNewNodes',    valueEl: 'tlNewNodesVal',    color: 'warning',   kind: 'bar',  agg: 'sum'  },
+];
 
-    // Determine timezone offset for display.
-    // getTimezoneOffset() returns minutes *behind* UTC (positive = west), so negate
-    // to get the number of minutes to add to UTC to reach local time.
-    const tzPref = (typeof getTimezonePreference === 'function') ? getTimezonePreference() : 'local';
-    const tzOffsetMinutes = (tzPref === 'utc') ? 0 : -new Date().getTimezoneOffset();
+function hexToRgba(hex, alpha) {
+    let h = (hex || '').trim().replace('#', '');
+    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+    if (h.length !== 6) return `rgba(128, 128, 128, ${alpha})`;
+    const n = parseInt(h, 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
 
-    // The API returns data bucketed by UTC hour (0-23).  Rotate into local time by
-    // computing, for each local hour L, which UTC hour contributed its data.
-    // For half-hour / quarter-hour timezones we round to the nearest whole hour –
-    // this is the same approximation a UTC-only chart already makes per bucket.
-    const tzOffsetHours = Math.round(tzOffsetMinutes / 60);
+function formatCompact(value) {
+    return Math.abs(value) >= 1000
+        ? new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+        : String(value);
+}
 
-    // Build a UTC-indexed lookup: utcCounts[utcHour] = total_packets
-    const utcCounts = new Array(24).fill(0);
-    temporalData.hourly_breakdown.forEach(item => {
-        utcCounts[item.hour] = item.total_packets;
+// Bucket labels arrive as "YYYY-MM-DD" (days) or "YYYY-MM-DD HH:00" (hours);
+// ticks show a short form, tooltips keep the full label. Narrow panels get an
+// even shorter year-month ("25-12") so dense ticks can't collide.
+function shortBucketLabel(label, granularity, dense, narrow) {
+    if (granularity === 'hour') return label.slice(11);
+    if (!dense) return label.slice(5);
+    return narrow ? label.slice(2, 7) : label.slice(0, 7);
+}
+
+async function loadActivityTimeline(range) {
+    timelineRange = range;
+    try { localStorage.setItem('mallaTimelineRange', range); } catch (e) { /* private mode */ }
+
+    const buttons = document.querySelectorAll('#timelineRangeButtons button[data-range]');
+    buttons.forEach(b => {
+        const active = b.dataset.range === range;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', active);
     });
 
-    // Build chart arrays ordered by local hour (0 → 23)
-    const labels = [];
-    const data = [];
-    for (let localHour = 0; localHour < 24; localHour++) {
-        // The +24 before the outer % 24 ensures the result is non-negative in
-        // JavaScript, where (negative % positive) can return a negative number.
-        const utcHour = ((localHour - tzOffsetHours) % 24 + 24) % 24;
-        labels.push(`${localHour}:00`);
-        data.push(utcCounts[utcHour]);
+    const panels = document.getElementById('activityTimelinePanels');
+    if (panels) panels.style.opacity = '0.5';
+
+    try {
+        const tzPref = (typeof getTimezonePreference === 'function') ? getTimezonePreference() : 'local';
+        const tzOffset = (tzPref === 'utc') ? 0 : -new Date().getTimezoneOffset();
+        const response = await fetch(`/api/activity-timeline?range=${encodeURIComponent(range)}&tz_offset=${tzOffset}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        timelineData = await response.json();
+        renderTimelinePanels();
+    } catch (error) {
+        console.error('Error loading activity timeline:', error);
+        hideLoadingSpinner('activityTimelinePanels');
+    } finally {
+        if (panels) panels.style.opacity = '';
     }
+}
 
+function renderTimelinePanels() {
+    if (!timelineData || !timelineData.buckets) return;
+
+    // Not hideLoadingSpinner(): that forces display:block, which would break
+    // the Bootstrap .row flex layout of the panel grid.
+    const loading = document.getElementById('activityTimelinePanelsLoading');
+    if (loading) loading.style.display = 'none';
+    const panelsEl = document.getElementById('activityTimelinePanels');
+    if (panelsEl) panelsEl.style.display = '';
+
+    const buckets = timelineData.buckets;
+    const granularity = timelineData.granularity;
+    const dense = buckets.length > 60;  // "All": bars degrade into slivers, use lines
+    const labels = buckets.map(b => b.bucket);
     const colors = getChartColors();
-    const options = getDefaultChartOptions();
+    const latestLabel = granularity === 'hour' ? 'now' : 'today';
+    // Phones show the same 2x2 grid at ~half the panel width: fewer, smaller
+    // ticks so axis labels don't collide.
+    const narrow = window.matchMedia('(max-width: 575.98px)').matches;
+    const tickFont = narrow ? { size: 10 } : undefined;
 
-    chartInstances.timeSeriesChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Messages per Hour',
-                data: data,
-                borderColor: colors.info,
-                backgroundColor: colors.infoBg,
-                tension: 0.1
-            }]
-        },
-        options: options
+    TIMELINE_PANELS.forEach(panel => {
+        const ctx = document.getElementById(panel.canvas);
+        if (!ctx) return;
+
+        const chartKey = 'timeline_' + panel.key;
+        if (chartInstances[chartKey]) {
+            chartInstances[chartKey].destroy();
+        }
+
+        const series = buckets.map(b => b[panel.key] || 0);
+        const hex = colors[panel.color];
+
+        const valueEl = document.getElementById(panel.valueEl);
+        if (valueEl) {
+            // Headers must stay one line so the grid rows align: on phones,
+            // compact big sums (13.8M) and drop the today/now suffix.
+            if (panel.agg === 'sum') {
+                const total = series.reduce((a, v) => a + v, 0);
+                valueEl.textContent = narrow ? formatCompact(total) : total.toLocaleString();
+                valueEl.title = total.toLocaleString();
+            } else {
+                const latest = (series[series.length - 1] || 0).toLocaleString();
+                valueEl.textContent = narrow ? latest : `${latest} ${latestLabel}`;
+                valueEl.title = `${latest} ${latestLabel}`;
+            }
+        }
+
+        const type = (dense && panel.kind === 'bar') ? 'line' : panel.kind;
+        const dataset = type === 'bar'
+            ? {
+                data: series,
+                backgroundColor: hexToRgba(hex, 0.65),
+                hoverBackgroundColor: hexToRgba(hex, 0.85),
+                borderColor: hex,
+                borderWidth: 1,
+                borderRadius: 3,
+                borderSkipped: 'start',
+                maxBarThickness: 26,
+                categoryPercentage: 0.72,
+                barPercentage: 1
+            }
+            : {
+                data: series,
+                borderColor: hex,
+                backgroundColor: hexToRgba(hex, 0.12),
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                pointHitRadius: 10
+            };
+
+        chartInstances[chartKey] = new Chart(ctx, {
+            type: type,
+            data: { labels: labels, datasets: [dataset] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: c => c.parsed.y.toLocaleString()
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: {
+                            color: colors.mutedTextColor,
+                            maxTicksLimit: narrow ? 3 : 5,
+                            maxRotation: 0,
+                            autoSkip: true,
+                            font: tickFont,
+                            callback: function (value) {
+                                return shortBucketLabel(this.getLabelForValue(value), granularity, dense, narrow);
+                            }
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: colors.gridColor },
+                        ticks: {
+                            color: colors.mutedTextColor,
+                            maxTicksLimit: narrow ? 3 : 4,
+                            font: tickFont,
+                            callback: value => formatCompact(value)
+                        }
+                    }
+                }
+            }
+        });
     });
 }
 
@@ -607,7 +810,7 @@ function createNodeActivityChart(nodeData) {
     chartInstances.nodeActivityChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
-            labels: ['Very Active (>100)', 'Moderately Active (10-100)', 'Lightly Active (1-10)', 'Inactive'],
+            labels: ['Very Active (>100)', 'Moderately Active (10-100)', 'Lightly Active (1-10)', 'Quiet (seen in 7d)'],
             datasets: [{
                 data: [
                     activityDist.very_active || 0,
@@ -699,23 +902,28 @@ function createSignalDistributionChart(signalData) {
     });
 }
 
-function createHopDistributionChart(temporalData) {
-    // Create a simple hop distribution chart based on available data
+function createHopDistributionChart(hopDistribution) {
     hideLoadingSpinner('hopDistributionChart');
     const ctx = document.getElementById('hopDistributionChart');
     if (!ctx) return;
+    if (!hopDistribution || hopDistribution.length === 0) return;
 
     const colors = getChartColors();
 
-    // For now, create a chart showing message routing efficiency
-    // This could be enhanced with actual hop count data from the API
+    // Real hop counts (hop_start - hop_limit) over the last 24h, bucketed
+    // into direct / 1 / 2 / 3+ hops.
+    const totals = [0, 0, 0, 0];
+    hopDistribution.forEach(d => {
+        totals[Math.min(d.hops, 3)] += d.count;
+    });
+
     chartInstances.hopDistributionChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
-            labels: ['Direct Messages', 'Routed Messages', 'Multi-hop Messages'],
+            labels: ['Direct (0 hops)', '1 hop', '2 hops', '3+ hops'],
             datasets: [{
-                data: [60, 30, 10], // Placeholder data - could be enhanced with real hop analysis
-                backgroundColor: [colors.success, colors.warning, colors.danger]
+                data: totals,
+                backgroundColor: [colors.success, colors.info, colors.warning, colors.danger]
             }]
         },
         options: {

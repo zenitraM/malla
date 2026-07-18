@@ -242,6 +242,7 @@ class DashboardRepository:
             # Calculate time thresholds
             twenty_four_hours_ago = time.time() - (24 * 3600)
             one_hour_ago = time.time() - 3600
+            seven_days_ago = time.time() - (7 * 24 * 3600)
 
             # Build WHERE clause for gateway filtering
             gateway_filter = ""
@@ -277,6 +278,22 @@ class DashboardRepository:
 
             stats_row = cursor.fetchone()
 
+            # Nodes heard from at least once in the trailing 7 days. This is the
+            # denominator for the "network coverage" ratio shown on the dashboard:
+            # node_info only ever grows (it remembers every node ever seen), so
+            # active/total would decay toward zero as the roster ages. Sourcing
+            # both sides of the ratio from packet_history keeps them consistent;
+            # the (timestamp, from_node_id) covering index makes this cheap.
+            cursor.execute(
+                f"""
+                SELECT COUNT(DISTINCT from_node_id) as nodes_seen_7d
+                FROM packet_history
+                WHERE timestamp > ? AND from_node_id IS NOT NULL{gateway_filter}
+            """,
+                [seven_days_ago] + gateway_params,
+            )
+            nodes_seen_7d = cursor.fetchone()["nodes_seen_7d"] or 0
+
             # Get total packet count (all time) separately. Avoid a vestigial
             # "WHERE 1=1" when there is no gateway filter: with a bare COUNT(*)
             # and no WHERE clause SQLite uses its OP_Count optimization (walk the
@@ -310,6 +327,7 @@ class DashboardRepository:
             stats = {
                 "total_nodes": total_nodes,
                 "active_nodes_24h": stats_row["active_nodes_24h"] or 0,
+                "nodes_seen_7d": nodes_seen_7d,
                 "total_packets": total_packets_all_time or 0,
                 "recent_packets": stats_row["recent_packets"] or 0,
                 "avg_rssi": round(stats_row["avg_rssi"] or 0, 1),

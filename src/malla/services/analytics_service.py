@@ -5,6 +5,7 @@ Analytics service for Meshtastic Mesh Health Web UI
 import logging
 import time
 from collections import defaultdict
+from datetime import UTC, datetime
 from typing import Any
 
 from ..database.repositories import NodeRepository
@@ -66,7 +67,7 @@ class AnalyticsService:
                 filters, twenty_four_hours_ago
             )
             node_stats = AnalyticsService._get_node_activity_statistics(
-                filters, twenty_four_hours_ago
+                filters, twenty_four_hours_ago, seven_days_ago
             )
             signal_stats = AnalyticsService._get_signal_quality_statistics(
                 filters, twenty_four_hours_ago
@@ -81,6 +82,9 @@ class AnalyticsService:
             gateway_stats = AnalyticsService._get_gateway_distribution(
                 filters, twenty_four_hours_ago
             )
+            hop_distribution = AnalyticsService._get_hop_distribution(
+                filters, twenty_four_hours_ago
+            )
 
             result = {
                 "packet_statistics": packet_stats,
@@ -90,6 +94,7 @@ class AnalyticsService:
                 "top_nodes": top_nodes,
                 "packet_types": packet_types,
                 "gateway_distribution": gateway_stats,
+                "hop_distribution": hop_distribution,
             }
 
             # Save to cache
@@ -156,7 +161,7 @@ class AnalyticsService:
 
     @staticmethod
     def _get_node_activity_statistics(
-        filters: dict, since_timestamp: float
+        filters: dict, since_timestamp: float, seven_days_ago: float
     ) -> dict[str, Any]:
         """Get node activity statistics using optimized SQL query."""
         from ..database.connection import get_db_connection
@@ -200,10 +205,30 @@ class AnalyticsService:
         )
 
         activity_row = cursor.fetchone()
+
+        # Nodes heard from in the trailing 7 days — the reference roster for
+        # activity ratios. node_info only ever grows (every node ever seen),
+        # so ratios against it decay toward zero as the roster ages; a rolling
+        # window measures against nodes that are actually still around.
+        seen_params: list[Any] = [seven_days_ago]
+        seen_filter = ""
+        if filters.get("gateway_id"):
+            seen_filter = " AND gateway_id = ?"
+            seen_params.append(filters["gateway_id"])
+        cursor.execute(
+            f"""
+            SELECT COUNT(DISTINCT from_node_id) as nodes_seen_7d
+            FROM packet_history
+            WHERE timestamp >= ? AND from_node_id IS NOT NULL{seen_filter}
+        """,
+            seen_params,
+        )
+        nodes_seen_7d = cursor.fetchone()["nodes_seen_7d"] or 0
         conn.close()
 
         active_nodes = activity_row["active_nodes"] or 0
-        inactive_nodes = total_nodes - active_nodes
+        # "Inactive" = seen this week but silent in the current window.
+        inactive_nodes = max(nodes_seen_7d - active_nodes, 0)
 
         activity_ranges = {
             "very_active": activity_row["very_active"] or 0,
@@ -214,10 +239,11 @@ class AnalyticsService:
 
         return {
             "total_nodes": total_nodes,
+            "nodes_seen_7d": nodes_seen_7d,
             "active_nodes": active_nodes,
             "inactive_nodes": inactive_nodes,
-            "activity_rate": round((active_nodes / total_nodes * 100), 2)
-            if total_nodes > 0
+            "activity_rate": round((active_nodes / nodes_seen_7d * 100), 2)
+            if nodes_seen_7d > 0
             else 0,
             "activity_distribution": activity_ranges,
         }
@@ -384,6 +410,381 @@ class AnalyticsService:
             "peak_hour": peak_hour,
             "quiet_hour": quiet_hour,
         }
+
+    # ------------------------------------------------------------------
+    # Activity timeline (dashboard trends panels with a range selector)
+    # ------------------------------------------------------------------
+
+    TIMELINE_RANGES: frozenset[str] = frozenset({"24h", "7d", "30d", "all"})
+
+    # (range_key, tz_offset_minutes) → (timestamp, data)
+    _TIMELINE_CACHE: dict[tuple[str, int], tuple[float, dict[str, Any]]] = {}
+
+    @staticmethod
+    def get_activity_timeline(
+        range_key: str = "7d", tz_offset_minutes: int = 0
+    ) -> dict[str, Any]:
+        """Get the activity timeline for one of the ranges 24h / 7d / 30d / all.
+
+        Buckets are hourly for 24h and per local calendar day otherwise
+        (tz_offset_minutes = viewer's minutes east of UTC). Each bucket carries
+        packet volume, distinct sending nodes, distinct reporting gateways and
+        newly discovered nodes. Completed days are served from the
+        activity_daily_rollup table (append-only history makes them immutable),
+        so even the "all" range stays fast; only the current day/hour window is
+        aggregated live.
+        """
+        if range_key not in AnalyticsService.TIMELINE_RANGES:
+            range_key = "7d"
+
+        cache_key = (range_key, tz_offset_minutes)
+        now_ts = time.time()
+        cached = AnalyticsService._TIMELINE_CACHE.get(cache_key)
+        if cached and (now_ts - cached[0] < AnalyticsService._CACHE_TTL_SEC):
+            return cached[1]
+
+        if range_key == "24h":
+            buckets = AnalyticsService._get_hourly_buckets(tz_offset_minutes)
+            granularity = "hour"
+        else:
+            buckets = AnalyticsService._get_daily_buckets(range_key, tz_offset_minutes)
+            granularity = "day"
+
+        result = {"range": range_key, "granularity": granularity, "buckets": buckets}
+        AnalyticsService._TIMELINE_CACHE[cache_key] = (now_ts, result)
+        return result
+
+    @staticmethod
+    def _get_hourly_buckets(tz_offset_minutes: int) -> list[dict[str, Any]]:
+        """Aggregate the trailing 24 local-clock hours (last bucket = this hour so far)."""
+        from ..database.connection import get_db_connection
+
+        offset_sec = tz_offset_minutes * 60
+        current_hour_local = (int(time.time() + offset_sec) // 3600) * 3600
+        start_local = current_hour_local - 23 * 3600
+        start_utc = start_local - offset_sec
+
+        buckets: dict[str, dict[str, Any]] = {}
+        for i in range(24):
+            key = datetime.fromtimestamp(start_local + i * 3600, tz=UTC).strftime(
+                "%Y-%m-%d %H:00"
+            )
+            buckets[key] = {
+                "bucket": key,
+                "total_packets": 0,
+                "active_nodes": 0,
+                "gateway_count": 0,
+                "new_nodes": 0,
+            }
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    strftime('%Y-%m-%d %H:00', timestamp + ?, 'unixepoch') AS bucket,
+                    COUNT(*) AS total_packets,
+                    COUNT(DISTINCT from_node_id) AS active_nodes
+                FROM packet_history
+                WHERE timestamp >= ?
+                GROUP BY bucket
+            """,
+                (offset_sec, start_utc),
+            )
+            for row in cursor.fetchall():
+                entry = buckets.get(row["bucket"])
+                if entry:
+                    entry["total_packets"] = row["total_packets"]
+                    entry["active_nodes"] = row["active_nodes"]
+
+            cursor.execute(
+                """
+                SELECT
+                    strftime('%Y-%m-%d %H:00', timestamp + ?, 'unixepoch') AS bucket,
+                    COUNT(DISTINCT gateway_id) AS gateway_count
+                FROM packet_history
+                WHERE gateway_id IS NOT NULL AND timestamp >= ?
+                GROUP BY bucket
+            """,
+                (offset_sec, start_utc),
+            )
+            for row in cursor.fetchall():
+                entry = buckets.get(row["bucket"])
+                if entry:
+                    entry["gateway_count"] = row["gateway_count"]
+
+            cursor.execute(
+                """
+                SELECT
+                    strftime('%Y-%m-%d %H:00', first_seen + ?, 'unixepoch') AS bucket,
+                    COUNT(*) AS new_nodes
+                FROM node_info
+                WHERE first_seen >= ?
+                GROUP BY bucket
+            """,
+                (offset_sec, start_utc),
+            )
+            for row in cursor.fetchall():
+                entry = buckets.get(row["bucket"])
+                if entry:
+                    entry["new_nodes"] = row["new_nodes"]
+        finally:
+            conn.close()
+
+        return list(buckets.values())
+
+    @staticmethod
+    def _get_daily_buckets(
+        range_key: str, tz_offset_minutes: int
+    ) -> list[dict[str, Any]]:
+        """Aggregate per local calendar day for 7d / 30d / all.
+
+        Completed days come from (and are persisted to) activity_daily_rollup;
+        only today is computed live from packet_history.
+        """
+        from ..database.connection import get_db_connection
+        from ..database.schema import ACTIVITY_ROLLUP_TABLE_SQL
+
+        offset_sec = tz_offset_minutes * 60
+        today_local = (int(time.time() + offset_sec) // 86400) * 86400
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            # Defensive create: the web app normally creates this at startup,
+            # but the service must also work against bare test databases.
+            cursor.execute(ACTIVITY_ROLLUP_TABLE_SQL)
+
+            if range_key == "7d":
+                start_local = today_local - 7 * 86400
+            elif range_key == "30d":
+                start_local = today_local - 30 * 86400
+            else:  # all: from the local day of the first recorded packet
+                cursor.execute("SELECT MIN(timestamp) AS mn FROM packet_history")
+                row = cursor.fetchone()
+                mn = row["mn"] if row else None
+                start_local = (
+                    (int(mn + offset_sec) // 86400) * 86400
+                    if mn is not None
+                    else today_local
+                )
+                start_local = min(start_local, today_local)
+
+            day_epochs = list(range(start_local, today_local + 86400, 86400))
+            completed_epochs = [d for d in day_epochs if d < today_local]
+
+            rollup_rows = AnalyticsService._ensure_daily_rollup(
+                cursor, tz_offset_minutes, offset_sec, completed_epochs
+            )
+            conn.commit()
+
+            today_stats = AnalyticsService._compute_daily_span(
+                cursor, offset_sec, today_local, today_local + 86400
+            )
+        finally:
+            conn.close()
+
+        buckets: list[dict[str, Any]] = []
+        for day_epoch in day_epochs:
+            key = AnalyticsService._local_day_key(day_epoch)
+            source = today_stats if day_epoch >= today_local else rollup_rows
+            stats = source.get(key, {})
+            buckets.append(
+                {
+                    "bucket": key,
+                    "total_packets": stats.get("total_packets", 0),
+                    "active_nodes": stats.get("active_nodes", 0),
+                    "gateway_count": stats.get("gateway_count", 0),
+                    "new_nodes": stats.get("new_nodes", 0),
+                }
+            )
+        return buckets
+
+    @staticmethod
+    def _local_day_key(local_day_epoch: int) -> str:
+        """ISO date string for a local-midnight epoch (local time == shifted UTC)."""
+        return datetime.fromtimestamp(local_day_epoch, tz=UTC).date().isoformat()
+
+    @staticmethod
+    def _ensure_daily_rollup(
+        cursor: Any,
+        tz_offset_minutes: int,
+        offset_sec: int,
+        completed_epochs: list[int],
+    ) -> dict[str, dict[str, Any]]:
+        """Return rollup stats for the given completed local days, computing any
+        missing ones from packet_history and persisting them.
+
+        Rows are safe to persist forever: packet_history is append-only with
+        insert-time timestamps and node_info.first_seen is assigned once, so a
+        finished local day can never change retroactively.
+        """
+        if not completed_epochs:
+            return {}
+
+        wanted = {AnalyticsService._local_day_key(d): d for d in completed_epochs}
+        placeholders = ",".join("?" * len(wanted))
+        cursor.execute(
+            f"""
+            SELECT day, total_packets, active_nodes, gateway_count, new_nodes
+            FROM activity_daily_rollup
+            WHERE tz_offset_minutes = ? AND day IN ({placeholders})
+        """,
+            [tz_offset_minutes, *wanted.keys()],
+        )
+        cached: dict[str, dict[str, Any]] = {
+            row["day"]: dict(row) for row in cursor.fetchall()
+        }
+
+        missing = [epoch for key, epoch in wanted.items() if key not in cached]
+        if not missing:
+            return cached
+
+        # One aggregation pass over the contiguous span covering all missing
+        # days (holes are rare; recomputing a cached day inside the span is
+        # harmless — only missing days are written back).
+        computed = AnalyticsService._compute_daily_span(
+            cursor, offset_sec, min(missing), max(missing) + 86400
+        )
+        now_ts = time.time()
+        for epoch in missing:
+            key = AnalyticsService._local_day_key(epoch)
+            stats = computed.get(key, {})
+            row = {
+                "total_packets": stats.get("total_packets", 0),
+                "active_nodes": stats.get("active_nodes", 0),
+                "gateway_count": stats.get("gateway_count", 0),
+                "new_nodes": stats.get("new_nodes", 0),
+            }
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO activity_daily_rollup
+                (tz_offset_minutes, day, total_packets, active_nodes,
+                 gateway_count, new_nodes, computed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    tz_offset_minutes,
+                    key,
+                    row["total_packets"],
+                    row["active_nodes"],
+                    row["gateway_count"],
+                    row["new_nodes"],
+                    now_ts,
+                ),
+            )
+            cached[key] = {"day": key, **row}
+        return cached
+
+    @staticmethod
+    def _compute_daily_span(
+        cursor: Any, offset_sec: int, span_start_local: int, span_end_local: int
+    ) -> dict[str, dict[str, Any]]:
+        """Aggregate packet/node/gateway metrics per local day over one span.
+
+        The packet queries are answered entirely from the (timestamp,
+        from_node_id) and (timestamp, gateway_id) covering indexes.
+        """
+        start_utc = span_start_local - offset_sec
+        end_utc = span_end_local - offset_sec
+
+        stats: dict[str, dict[str, Any]] = {}
+
+        def entry(day: str) -> dict[str, Any]:
+            return stats.setdefault(day, {})
+
+        cursor.execute(
+            """
+            SELECT
+                date(timestamp + ?, 'unixepoch') AS day,
+                COUNT(*) AS total_packets,
+                COUNT(DISTINCT from_node_id) AS active_nodes
+            FROM packet_history
+            WHERE timestamp >= ? AND timestamp < ?
+            GROUP BY day
+        """,
+            (offset_sec, start_utc, end_utc),
+        )
+        for row in cursor.fetchall():
+            entry(row["day"]).update(
+                total_packets=row["total_packets"], active_nodes=row["active_nodes"]
+            )
+
+        cursor.execute(
+            """
+            SELECT
+                date(timestamp + ?, 'unixepoch') AS day,
+                COUNT(DISTINCT gateway_id) AS gateway_count
+            FROM packet_history
+            WHERE gateway_id IS NOT NULL AND timestamp >= ? AND timestamp < ?
+            GROUP BY day
+        """,
+            (offset_sec, start_utc, end_utc),
+        )
+        for row in cursor.fetchall():
+            entry(row["day"]).update(gateway_count=row["gateway_count"])
+
+        cursor.execute(
+            """
+            SELECT
+                date(first_seen + ?, 'unixepoch') AS day,
+                COUNT(*) AS new_nodes
+            FROM node_info
+            WHERE first_seen >= ? AND first_seen < ?
+            GROUP BY day
+        """,
+            (offset_sec, start_utc, end_utc),
+        )
+        for row in cursor.fetchall():
+            entry(row["day"]).update(new_nodes=row["new_nodes"])
+
+        return stats
+
+    @staticmethod
+    def _get_hop_distribution(
+        filters: dict, since_timestamp: float
+    ) -> list[dict[str, Any]]:
+        """Get the real hop-count distribution (hop_start - hop_limit) for the window."""
+        from ..database.connection import get_db_connection
+
+        where_conditions: list[str] = [
+            "timestamp >= ?",
+            "hop_start IS NOT NULL",
+            "hop_limit IS NOT NULL",
+            # Guard against malformed packets reporting negative hop counts.
+            "hop_start >= hop_limit",
+        ]
+        params: list[Any] = [since_timestamp]
+
+        if filters.get("gateway_id"):
+            where_conditions.append("gateway_id = ?")
+            params.append(filters["gateway_id"])
+
+        if filters.get("from_node"):
+            where_conditions.append("from_node_id = ?")
+            params.append(filters["from_node"])
+
+        where_clause = " AND ".join(where_conditions)
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT
+                (hop_start - hop_limit) AS hops,
+                COUNT(*) AS count
+            FROM packet_history
+            WHERE {where_clause}
+            GROUP BY hops
+            ORDER BY hops
+        """,
+            params,
+        )
+        distribution = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+
+        return distribution
 
     @staticmethod
     def _get_top_active_nodes(
