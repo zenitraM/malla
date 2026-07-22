@@ -263,7 +263,24 @@
                             <span class="visually-hidden">Loading...</span>
                         </div>
                     </div>
-                    <canvas id="signalDistributionChart" style="height: 300px; display: none;"></canvas>
+                    <!-- Two small-multiple histograms sharing one card: real
+                         distribution shape instead of four coarse buckets. -->
+                    <div id="signalDistributionChart" style="display: none;">
+                        <div class="d-flex justify-content-between align-items-baseline">
+                            <span class="small fw-semibold">RSSI</span>
+                            <span id="rssiHistogramCaption" class="small text-body-secondary"></span>
+                        </div>
+                        <div style="height: 120px;">
+                            <canvas id="rssiHistogramChart"></canvas>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-baseline mt-2">
+                            <span class="small fw-semibold">SNR</span>
+                            <span id="snrHistogramCaption" class="small text-body-secondary"></span>
+                        </div>
+                        <div style="height: 120px;">
+                            <canvas id="snrHistogramChart"></canvas>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -283,7 +300,17 @@
                             <span class="visually-hidden">Loading...</span>
                         </div>
                     </div>
-                    <canvas id="hopDistributionChart" style="height: 300px; display: none;"></canvas>
+                    <!-- Ordered hop-count columns (0..7): the doughnut hid the
+                         order and buried everything past 2 hops in one slice. -->
+                    <div id="hopDistributionChart" style="display: none;">
+                        <div class="d-flex justify-content-between align-items-baseline">
+                            <span class="small fw-semibold">Hops to gateway</span>
+                            <span id="hopDistributionCaption" class="small text-body-secondary"></span>
+                        </div>
+                        <div style="height: 272px;">
+                            <canvas id="hopDistributionCanvas"></canvas>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -908,63 +935,260 @@ function createGatewayActivityChart(gatewayData) {
     });
 }
 
+// Two small-multiple histograms (RSSI/SNR as measured at the reporting
+// gateway) replace the old four-bucket bars: fine 5 dB / 2 dB bins show the
+// actual distribution shape, gaps included.
 function createSignalDistributionChart(signalData) {
-    if (!signalData || !signalData.rssi_distribution) return;
+    if (!signalData) return;
 
     hideLoadingSpinner('signalDistributionChart');
-    const ctx = document.getElementById('signalDistributionChart');
-    if (!ctx) return;
 
-    const rssiDist = signalData.rssi_distribution;
-    const colors = getChartColors();
-    const options = getDefaultChartOptions();
-
-    chartInstances.signalDistributionChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: ['Excellent (>-70dBm)', 'Good (-70 to -80dBm)', 'Fair (-80 to -90dBm)', 'Poor (<-90dBm)'],
-            datasets: [{
-                label: 'Signal Quality Distribution',
-                data: [rssiDist.excellent || 0, rssiDist.good || 0, rssiDist.fair || 0, rssiDist.poor || 0],
-                backgroundColor: [colors.success, colors.warning, colors.info, colors.danger]
-            }]
-        },
-        options: options
+    createHistogramChart('rssiHistogramChart', signalData.rssi_histogram, {
+        unit: 'dBm',
+        tickEvery: 20,
+        captionId: 'rssiHistogramCaption',
+        avg: signalData.avg_rssi,
+        quality: { good: -70, bad: -125 },
+    });
+    createHistogramChart('snrHistogramChart', signalData.snr_histogram, {
+        unit: 'dB',
+        tickEvery: 8,
+        captionId: 'snrHistogramCaption',
+        avg: signalData.snr_histogram ? signalData.snr_histogram.rf_avg_snr : null,
+        quality: { good: 5, bad: -15 },
     });
 }
 
-function createHopDistributionChart(hopDistribution) {
-    hideLoadingSpinner('hopDistributionChart');
-    const ctx = document.getElementById('hopDistributionChart');
-    if (!ctx) return;
-    if (!hopDistribution || hopDistribution.length === 0) return;
+// Per-bar signal-quality ramp: theme success → warning → danger, using the
+// same good/bad semantics as the quality badges elsewhere in the UI. The
+// x-axis already encodes the value, so color is a redundant cue (the chart
+// stays readable under color-vision deficiency via position alone).
+function parseCssColor(str) {
+    if (!str) return null;
+    str = str.trim();
+    let m = str.match(/^#([0-9a-f]{3})$/i);
+    if (m) return m[1].split('').map(c => parseInt(c + c, 16));
+    m = str.match(/^#([0-9a-f]{6})$/i);
+    if (m) return [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16));
+    m = str.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
+    if (m) return [+m[1], +m[2], +m[3]];
+    return null;
+}
 
+// Mix in linear light so the green→amber→red midpoints stay vivid instead
+// of dipping through dark olive.
+function mixRgb(c1, c2, t) {
+    const ch = (i) => {
+        const a = Math.pow(c1[i] / 255, 2.2);
+        const b = Math.pow(c2[i] / 255, 2.2);
+        return Math.round(255 * Math.pow(a + (b - a) * t, 1 / 2.2));
+    };
+    return `rgb(${ch(0)}, ${ch(1)}, ${ch(2)})`;
+}
+
+function createHistogramChart(canvasId, histogram, opts) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+
+    if (chartInstances[canvasId]) {
+        chartInstances[canvasId].destroy();
+        delete chartInstances[canvasId];
+    }
+
+    const bins = (histogram && histogram.bins) || [];
+    const total = bins.reduce((sum, b) => sum + b.count, 0);
     const colors = getChartColors();
 
-    // Real hop counts (hop_start - hop_limit) over the last 24h, bucketed
-    // into direct / 1 / 2 / 3+ hops.
-    const totals = [0, 0, 0, 0];
-    hopDistribution.forEach(d => {
-        totals[Math.min(d.hops, 3)] += d.count;
+    const caption = document.getElementById(opts.captionId);
+    if (caption) {
+        caption.textContent = (total > 0 && opts.avg !== null && opts.avg !== undefined)
+            ? `avg ${opts.avg.toFixed(1)} ${opts.unit} · ${total.toLocaleString()} pkts`
+            : 'no data';
+    }
+    if (!bins.length) return;
+
+    const width = histogram.bin_width;
+    // The edge bins may be accumulators: everything above overflow_start
+    // (RSSI ≥ -60 dBm: co-located nodes) and everything below underflow_end
+    // (RSSI < -130 dBm: stray sub-sensitivity readings) collapse into one
+    // bar each, so the main body keeps its resolution and a stable axis.
+    const overflowStart = histogram.overflow_start;
+    const underflowEnd = histogram.underflow_end;
+    const isOverflowBin = (index) =>
+        overflowStart !== undefined && bins[index].start === overflowStart;
+    const isUnderflowBin = (index) =>
+        underflowEnd !== undefined && bins[index].start === underflowEnd - width;
+
+    // Color each bar by where its bin center sits on the good→bad scale.
+    // Full success at the "Excellent" boundary the badges use (RSSI -70 dBm /
+    // SNR +5 dB), full danger near the LoRa demodulation floor (-125 dBm /
+    // -15 dB), warning halfway; accumulator bins clamp to the nearest end.
+    const ramp = [colors.success, colors.warning, colors.danger].map(parseCssColor);
+    const rampOk = opts.quality && ramp.every(Boolean);
+    const barColors = bins.map((b) => {
+        if (!rampOk) return colors.primary;
+        const q = opts.quality;
+        const t = Math.min(1, Math.max(0,
+            (q.good - (b.start + width / 2)) / (q.good - q.bad)));
+        return t < 0.5
+            ? mixRgb(ramp[0], ramp[1], t * 2)
+            : mixRgb(ramp[1], ramp[2], (t - 0.5) * 2);
     });
 
-    chartInstances.hopDistributionChart = new Chart(ctx, {
-        type: 'doughnut',
+    chartInstances[canvasId] = new Chart(ctx, {
+        type: 'bar',
         data: {
-            labels: ['Direct (0 hops)', '1 hop', '2 hops', '3+ hops'],
+            labels: bins.map(b => b.start),
             datasets: [{
-                data: totals,
-                backgroundColor: [colors.success, colors.info, colors.warning, colors.danger]
+                data: bins.map(b => b.count),
+                backgroundColor: barColors,
+                borderRadius: { topLeft: 3, topRight: 3 },
+                borderSkipped: 'bottom',
+                categoryPercentage: 1.0,
+                barPercentage: 0.9
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: {
-                        color: colors.textColor
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => {
+                            const start = bins[items[0].dataIndex].start;
+                            if (isOverflowBin(items[0].dataIndex)) {
+                                return `${start} ${opts.unit} and above`;
+                            }
+                            if (isUnderflowBin(items[0].dataIndex)) {
+                                return `below ${start + width} ${opts.unit}`;
+                            }
+                            return `${start} to ${start + width} ${opts.unit}`;
+                        },
+                        label: (item) => {
+                            const count = bins[item.dataIndex].count;
+                            const pct = total ? (100 * count / total).toFixed(1) : '0';
+                            return `${count.toLocaleString()} packets (${pct}%)`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: {
+                        color: colors.mutedTextColor,
+                        maxRotation: 0,
+                        autoSkip: false,
+                        // Label only clean bin edges (every 20 dBm / 8 dB —
+                        // the card is narrow at every breakpoint) plus the
+                        // overflow accumulator; the tooltip carries the
+                        // exact per-bin ranges.
+                        callback: function (value, index) {
+                            const start = bins[index].start;
+                            if (isOverflowBin(index)) return '≥' + start;
+                            if (isUnderflowBin(index)) return '<' + (start + width);
+                            return start % opts.tickEvery === 0 ? start : '';
+                        }
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: colors.gridColor },
+                    border: { display: false },
+                    ticks: {
+                        color: colors.mutedTextColor,
+                        maxTicksLimit: 4,
+                        precision: 0
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Real hop counts (hop_start - hop_limit) over the last 24h as an ordered
+// column chart. The old doughnut lost the ordering and collapsed everything
+// past 2 hops into a single "3+" slice, which on this network hid ~78% of
+// the traffic; the full 0..7 spread is the actual routing story.
+function createHopDistributionChart(hopDistribution) {
+    hideLoadingSpinner('hopDistributionChart');
+    const ctx = document.getElementById('hopDistributionCanvas');
+    if (!ctx) return;
+    if (!hopDistribution || hopDistribution.length === 0) return;
+
+    if (chartInstances.hopDistributionChart) {
+        chartInstances.hopDistributionChart.destroy();
+        delete chartInstances.hopDistributionChart;
+    }
+
+    const colors = getChartColors();
+
+    // Dense 0..N axis (Meshtastic hop fields are 3-bit, so N <= 7);
+    // zero-fill so absent hop counts keep their slot.
+    const byHops = new Map(hopDistribution.map(d => [d.hops, d.count]));
+    const maxHops = Math.max(...byHops.keys(), 3);
+    const hops = [];
+    for (let h = 0; h <= maxHops; h++) {
+        hops.push({ hops: h, count: byHops.get(h) || 0 });
+    }
+
+    const total = hops.reduce((sum, d) => sum + d.count, 0);
+    const direct = byHops.get(0) || 0;
+    const avgHops = total
+        ? hops.reduce((sum, d) => sum + d.hops * d.count, 0) / total
+        : 0;
+
+    const caption = document.getElementById('hopDistributionCaption');
+    if (caption && total) {
+        caption.textContent =
+            `direct ${(100 * direct / total).toFixed(1)}% · avg ${avgHops.toFixed(1)} hops · ${total.toLocaleString()} pkts`;
+    }
+
+    chartInstances.hopDistributionChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: hops.map(d => d.hops === 0 ? 'direct' : String(d.hops)),
+            datasets: [{
+                data: hops.map(d => d.count),
+                backgroundColor: colors.primary,
+                borderRadius: { topLeft: 3, topRight: 3 },
+                borderSkipped: 'bottom',
+                maxBarThickness: 24
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => {
+                            const h = hops[items[0].dataIndex].hops;
+                            return h === 0 ? 'Direct (0 hops)' : `${h} hop${h > 1 ? 's' : ''}`;
+                        },
+                        label: (item) => {
+                            const count = hops[item.dataIndex].count;
+                            const pct = total ? (100 * count / total).toFixed(1) : '0';
+                            return `${count.toLocaleString()} packets (${pct}%)`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { color: colors.mutedTextColor, maxRotation: 0 }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: colors.gridColor },
+                    border: { display: false },
+                    ticks: {
+                        color: colors.mutedTextColor,
+                        maxTicksLimit: 5,
+                        precision: 0
                     }
                 }
             }

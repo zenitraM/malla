@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..database.repositories import NodeRepository
+from ..utils.signal_quality import rssi_valid_sql, snr_valid_sql
 
 logger = logging.getLogger(__name__)
 
@@ -272,24 +273,32 @@ class AnalyticsService:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Get signal statistics using SQL aggregation
+        # Get signal statistics using SQL aggregation. Every branch restricts
+        # itself to plausible values: without the guard a single garbage row
+        # (rx_rssi like -1386841926 from a corrupt frame) poisons the average,
+        # and the rssi=0 "not provided" sentinel would count as "excellent".
         cursor.execute(
             f"""
             SELECT
-                AVG(CASE WHEN rssi IS NOT NULL AND rssi != 0 THEN rssi END) as avg_rssi,
-                AVG(CASE WHEN snr IS NOT NULL THEN snr END) as avg_snr,
-                COUNT(CASE WHEN rssi IS NOT NULL AND rssi != 0 THEN 1 END) as rssi_count,
-                COUNT(CASE WHEN snr IS NOT NULL THEN 1 END) as snr_count,
+                AVG(CASE WHEN {rssi_valid_sql()} THEN rssi END) as avg_rssi,
+                AVG(CASE WHEN {snr_valid_sql()} THEN snr END) as avg_snr,
+                COUNT(CASE WHEN {rssi_valid_sql()} THEN 1 END) as rssi_count,
+                COUNT(CASE WHEN {snr_valid_sql()} THEN 1 END) as snr_count,
                 -- RSSI distribution
-                SUM(CASE WHEN rssi > -70 THEN 1 ELSE 0 END) as rssi_excellent,
-                SUM(CASE WHEN rssi > -80 AND rssi <= -70 THEN 1 ELSE 0 END) as rssi_good,
-                SUM(CASE WHEN rssi > -90 AND rssi <= -80 THEN 1 ELSE 0 END) as rssi_fair,
-                SUM(CASE WHEN rssi <= -90 THEN 1 ELSE 0 END) as rssi_poor,
+                SUM(CASE WHEN {rssi_valid_sql()} AND rssi > -70 THEN 1 ELSE 0 END) as rssi_excellent,
+                SUM(CASE WHEN {rssi_valid_sql()} AND rssi > -80 AND rssi <= -70 THEN 1 ELSE 0 END) as rssi_good,
+                SUM(CASE WHEN {rssi_valid_sql()} AND rssi > -90 AND rssi <= -80 THEN 1 ELSE 0 END) as rssi_fair,
+                SUM(CASE WHEN {rssi_valid_sql()} AND rssi <= -90 THEN 1 ELSE 0 END) as rssi_poor,
                 -- SNR distribution
-                SUM(CASE WHEN snr > 10 THEN 1 ELSE 0 END) as snr_excellent,
-                SUM(CASE WHEN snr > 5 AND snr <= 10 THEN 1 ELSE 0 END) as snr_good,
-                SUM(CASE WHEN snr > 0 AND snr <= 5 THEN 1 ELSE 0 END) as snr_fair,
-                SUM(CASE WHEN snr <= 0 THEN 1 ELSE 0 END) as snr_poor
+                SUM(CASE WHEN {snr_valid_sql()} AND snr > 10 THEN 1 ELSE 0 END) as snr_excellent,
+                SUM(CASE WHEN {snr_valid_sql()} AND snr > 5 AND snr <= 10 THEN 1 ELSE 0 END) as snr_good,
+                SUM(CASE WHEN {snr_valid_sql()} AND snr > 0 AND snr <= 5 THEN 1 ELSE 0 END) as snr_fair,
+                SUM(CASE WHEN {snr_valid_sql()} AND snr <= 0 THEN 1 ELSE 0 END) as snr_poor,
+                -- SNR average over RF receptions only (rows with a real RSSI):
+                -- gateway self-uplinks store snr=0 "not provided", which would
+                -- otherwise pile a fake spike at 0 in the histogram panel.
+                AVG(CASE WHEN {snr_valid_sql()} AND {rssi_valid_sql()}
+                    THEN snr END) as rf_avg_snr
             FROM packet_history
             WHERE {where_clause}
         """,
@@ -297,6 +306,50 @@ class AnalyticsService:
         )
 
         row = cursor.fetchone()
+
+        # Fine-grained histograms so the dashboard panel shows the real
+        # distribution shape instead of four coarse buckets. Bin edges align
+        # to clean values via a fixed origin; the SNR histogram counts RF
+        # receptions only (rows with a real RSSI) so the snr=0 "not provided"
+        # sentinel can't pile a fake spike at 0.
+        # Receptions at or above -60 dBm are all "node sitting next to the
+        # gateway" — a sparse, meaningless long tail if binned individually —
+        # so the last bin accumulates everything above that threshold and the
+        # main body keeps its horizontal resolution. Symmetrically, readings
+        # below -130 dBm sit at/under the LoRa sensitivity floor (0.03% of
+        # traffic, quantization noise like -141): the first bin accumulates
+        # them so the axis doesn't jitter with each stray reading.
+        rssi_overflow_start = -60
+        rssi_underflow_end = -130
+        overflow_bin = (rssi_overflow_start - (-150)) // 5
+        underflow_bin = (rssi_underflow_end - (-150)) // 5 - 1
+        cursor.execute(
+            f"""
+            SELECT MIN(MAX(CAST((rssi + 150) / 5 AS INTEGER), ?), ?) AS bin,
+                   COUNT(*) AS count
+            FROM packet_history
+            WHERE {where_clause} AND {rssi_valid_sql()}
+            GROUP BY bin
+            """,
+            [underflow_bin, overflow_bin, *params],
+        )
+        rssi_bins = AnalyticsService._zero_filled_bins(
+            cursor.fetchall(), origin=-150, width=5
+        )
+
+        cursor.execute(
+            f"""
+            SELECT CAST((snr + 30.0) / 2 AS INTEGER) AS bin, COUNT(*) AS count
+            FROM packet_history
+            WHERE {where_clause} AND {snr_valid_sql()} AND {rssi_valid_sql()}
+            GROUP BY bin
+            """,
+            params,
+        )
+        snr_bins = AnalyticsService._zero_filled_bins(
+            cursor.fetchall(), origin=-30, width=2
+        )
+
         conn.close()
 
         if not row or (row["rssi_count"] == 0 and row["snr_count"] == 0):
@@ -305,6 +358,13 @@ class AnalyticsService:
                 "avg_snr": None,
                 "rssi_distribution": {},
                 "snr_distribution": {},
+                "rssi_histogram": {
+                    "bin_width": 5,
+                    "bins": [],
+                    "overflow_start": rssi_overflow_start,
+                    "underflow_end": rssi_underflow_end,
+                },
+                "snr_histogram": {"bin_width": 2, "bins": [], "rf_avg_snr": None},
                 "total_measurements": 0,
             }
 
@@ -327,8 +387,40 @@ class AnalyticsService:
             "avg_snr": round(row["avg_snr"], 2) if row["avg_snr"] else None,
             "rssi_distribution": rssi_distribution,
             "snr_distribution": snr_distribution,
+            "rssi_histogram": {
+                "bin_width": 5,
+                "bins": rssi_bins,
+                "overflow_start": rssi_overflow_start,
+                "underflow_end": rssi_underflow_end,
+            },
+            "snr_histogram": {
+                "bin_width": 2,
+                "bins": snr_bins,
+                "rf_avg_snr": round(row["rf_avg_snr"], 2)
+                if row["rf_avg_snr"] is not None
+                else None,
+            },
             "total_measurements": max(row["rssi_count"] or 0, row["snr_count"] or 0),
         }
+
+    @staticmethod
+    def _zero_filled_bins(
+        rows: Any, origin: float, width: float
+    ) -> list[dict[str, Any]]:
+        """Convert GROUP BY bin rows into a dense [{start, count}] list.
+
+        Bins are indexed from ``origin`` in steps of ``width``; gaps between
+        the lowest and highest observed bins are zero-filled so the histogram
+        keeps honest holes instead of collapsing them.
+        """
+        counts = {int(r["bin"]): r["count"] for r in rows}
+        if not counts:
+            return []
+        lo, hi = min(counts), max(counts)
+        return [
+            {"start": origin + b * width, "count": counts.get(b, 0)}
+            for b in range(lo, hi + 1)
+        ]
 
     @staticmethod
     def _get_temporal_patterns(filters: dict, since_timestamp: float) -> dict[str, Any]:
@@ -793,9 +885,10 @@ class AnalyticsService:
 
         where_conditions: list[str] = [
             "timestamp >= ?",
-            "hop_start IS NOT NULL",
-            "hop_limit IS NOT NULL",
-            # Guard against malformed packets reporting negative hop counts.
+            # Meshtastic hop fields are 3-bit (0..7); corrupt frames report
+            # values like 173, and negative diffs are malformed too.
+            "hop_start BETWEEN 0 AND 7",
+            "hop_limit BETWEEN 0 AND 7",
             "hop_start >= hop_limit",
         ]
         params: list[Any] = [since_timestamp]

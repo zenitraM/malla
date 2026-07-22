@@ -29,6 +29,7 @@ from ..utils.node_utils import (
     get_bulk_node_short_names,
 )
 from ..utils.serialization_utils import convert_bytes_to_base64, sanitize_floats
+from ..utils.signal_quality import is_plausible_traceroute_snr
 from ..utils.traceroute_utils import parse_traceroute_payload
 
 logger = logging.getLogger(__name__)
@@ -1170,7 +1171,7 @@ def api_traceroute_link(node1_id, node2_id):
 
                     direction_counts[direction] = direction_counts.get(direction, 0) + 1
 
-                    if target_hop.snr is not None:
+                    if is_plausible_traceroute_snr(target_hop.snr):
                         snr_values.append(target_hop.snr)
 
                     # Create route_hops structure for UI - include ALL RF hops (forward and return)
@@ -1185,7 +1186,11 @@ def api_traceroute_link(node1_id, node2_id):
                                 "to_node_id": hop.to_node_id,
                                 "from_node_name": hop.from_node_name,
                                 "to_node_name": hop.to_node_name,
-                                "snr": hop.snr,
+                                # Null garbage payload SNR so the per-hop rows
+                                # can't display corrupt values as real signal.
+                                "snr": hop.snr
+                                if is_plausible_traceroute_snr(hop.snr)
+                                else None,
                                 "direction": hop.direction,  # Include direction info (forward_rf, return_rf)
                                 "is_target_hop": (
                                     (
@@ -1230,7 +1235,11 @@ def api_traceroute_link(node1_id, node2_id):
                         "to_node_name": tr_packet.to_node_name,
                         "gateway_id": tr_packet.gateway_id,
                         "gateway_node_name": gateway_node_name,
-                        "hop_snr": target_hop.snr,
+                        # Null out garbage SNR so the SNR-over-time chart
+                        # (which autoscales over hop_snr) can't be flattened.
+                        "hop_snr": target_hop.snr
+                        if is_plausible_traceroute_snr(target_hop.snr)
+                        else None,
                         "route_hops": route_hops,
                         "complete_path_display": tr_packet.format_path_display(
                             "display"

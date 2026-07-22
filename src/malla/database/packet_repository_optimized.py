@@ -7,6 +7,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+from ..utils.signal_quality import is_plausible_rssi, is_plausible_snr
 from . import get_db_connection
 
 logger = logging.getLogger(__name__)
@@ -180,10 +181,12 @@ class PacketRepositoryOptimized:
                         {p["gateway_id"] for p in packets_in_group if p["gateway_id"]}
                     )
                     rssi_values = [
-                        p["rssi"] for p in packets_in_group if p["rssi"] is not None
+                        p["rssi"]
+                        for p in packets_in_group
+                        if is_plausible_rssi(p["rssi"])
                     ]
                     snr_values = [
-                        p["snr"] for p in packets_in_group if p["snr"] is not None
+                        p["snr"] for p in packets_in_group if is_plausible_snr(p["snr"])
                     ]
                     hop_values = [
                         p["hop_count"]

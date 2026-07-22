@@ -4,6 +4,7 @@ from typing import Any
 
 from ..models.traceroute import TraceroutePacket
 from .node_utils import get_bulk_node_names
+from .signal_quality import is_plausible_traceroute_snr
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,9 @@ def build_combined_traceroute_graph(packets: list[dict[str, Any]]) -> dict[str, 
             "gateway_node_id": gateway_node_id,
             "timestamp": pkt.get("timestamp"),
             "mesh_packet_id": pkt.get("mesh_packet_id"),
-            "snr_values": [hop.snr for hop in rf_hops if hop.snr is not None],
+            "snr_values": [
+                hop.snr for hop in rf_hops if is_plausible_traceroute_snr(hop.snr)
+            ],
         }
 
         # Collect nodes from RF hops only (what physically happened on air)
@@ -113,7 +116,7 @@ def build_combined_traceroute_graph(packets: list[dict[str, Any]]) -> dict[str, 
             edge_stats[undirected_key]["packet_ids"].append(packet_id)
             edge_stats[undirected_key]["directions"].append([n1, n2])
             edge_stats[undirected_key]["paths"].add(packet_id)
-            if hop.snr is not None:
+            if is_plausible_traceroute_snr(hop.snr):
                 edge_stats[undirected_key]["snr_values"].append(hop.snr)
 
     # Get node names for all nodes (RF nodes + gateway nodes)

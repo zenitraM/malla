@@ -203,15 +203,18 @@ def test_timeline_24h_hourly_buckets(temp_database, monkeypatch):
     AnalyticsService._TIMELINE_CACHE.clear()
 
     now = time.time()
+    # Clamp into the current hour: a plain ``now - 60`` lands in the previous
+    # hour's bucket when the test runs within the first minute of an hour.
+    ts_current_hour = max(now - 60, (int(now) // HOUR) * HOUR + 1)
     _reset_data(
         temp_database,
         packets=[
-            (now - 60, 1, "!gw1", 3, 3),  # current hour
+            (ts_current_hour, 1, "!gw1", 3, 3),  # current hour
             (now - 5 * HOUR, 2, "!gw1", 3, 3),
             (now - 5 * HOUR + 30, 2, "!gw1", 3, 3),
             (now - 30 * HOUR, 3, "!gw1", 3, 3),  # outside the window
         ],
-        nodes=[(1, now - 60, now)],
+        nodes=[(1, ts_current_hour, now)],
     )
 
     timeline = AnalyticsService.get_activity_timeline("24h", 0)
@@ -322,6 +325,7 @@ def test_hop_distribution_counts_real_hops(temp_database, monkeypatch):
             (now - HOUR, 3, "!gw1", 5, 2),  # 3 hops
             (now - HOUR, 4, "!gw1", 2, 3),  # malformed (negative), excluded
             (now - HOUR, 5, "!gw1", None, None),  # unknown hops, excluded
+            (now - HOUR, 7, "!gw1", 173, 0),  # corrupt frame (3-bit field), excluded
             (now - 2 * DAY, 6, "!gw1", 3, 3),  # outside 24h window
         ],
         nodes=[(1, now - DAY, now)],

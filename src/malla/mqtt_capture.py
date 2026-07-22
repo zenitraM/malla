@@ -732,6 +732,9 @@ def log_packet_to_database(
     channel_id = (
         getattr(service_envelope, "channel_id", None) if service_envelope else None
     )
+    # Store rx_rssi/rx_snr exactly as parsed, even when a corrupt frame yields
+    # garbage (e.g. rx_rssi -1386841926): packet_history is the faithful raw
+    # record. Read-side aggregates filter with malla.utils.signal_quality.
     rssi = (
         getattr(mesh_packet, "rx_rssi", None)
         if mesh_packet and hasattr(mesh_packet, "rx_rssi")

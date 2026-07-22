@@ -23,6 +23,7 @@ from ..models.traceroute import (
     TraceroutePacket,  # Use the correct TraceroutePacket class
 )
 from ..utils.node_utils import get_bulk_node_names
+from ..utils.signal_quality import is_plausible_traceroute_snr
 from ..utils.traceroute_utils import parse_traceroute_payload
 
 logger = logging.getLogger(__name__)
@@ -686,7 +687,7 @@ class TracerouteService:
                         for hop in rf_hops:
                             # Early filtering: skip hops that won't meet criteria
                             if (
-                                hop.snr is None
+                                not is_plausible_traceroute_snr(hop.snr)
                                 or hop.snr == 0
                                 or hop.snr < min_snr
                                 or not hop.distance_km
@@ -762,9 +763,11 @@ class TracerouteService:
                             if path_distance_km < min_distance_km:
                                 pass  # too short – ignore
                             else:
-                                # Average SNR across hops (ignore None values)
+                                # Average SNR across hops (ignore missing/garbage values)
                                 valid_snrs = [
-                                    h.snr for h in rf_hops if h.snr is not None
+                                    h.snr
+                                    for h in rf_hops
+                                    if is_plausible_traceroute_snr(h.snr)
                                 ]
                                 avg_path_snr = (
                                     (sum(valid_snrs) / len(valid_snrs))
@@ -1109,8 +1112,10 @@ class TracerouteService:
 
                     # Process direct RF links
                     for hop in rf_hops:
-                        # Filter by SNR - if min_snr is -200, it means "no limit" so only filter None values
-                        if hop.snr is None or (min_snr != -200 and hop.snr < min_snr):
+                        # Filter by SNR - if min_snr is -200, it means "no limit" so only filter missing/garbage values
+                        if not is_plausible_traceroute_snr(hop.snr) or (
+                            min_snr != -200 and hop.snr < min_snr
+                        ):
                             stats["links_filtered_by_snr"] += 1
                             continue
                         # filter 0db links (MQTT or UDP)
@@ -1182,15 +1187,19 @@ class TracerouteService:
                         # Only add if it's not already a direct link
                         if indirect_key not in direct_links:
                             if indirect_key not in indirect_connections:
+                                path_snrs = [
+                                    h.snr
+                                    for h in rf_hops
+                                    if h.snr and is_plausible_traceroute_snr(h.snr)
+                                ]
                                 indirect_connections[indirect_key] = {
                                     "source": indirect_key[0],
                                     "target": indirect_key[1],
                                     "hop_count": len(rf_hops),
                                     "path_count": 1,
-                                    "avg_snr": sum(
-                                        hop.snr for hop in rf_hops if hop.snr
-                                    )
-                                    / len([h for h in rf_hops if h.snr]),
+                                    "avg_snr": (sum(path_snrs) / len(path_snrs))
+                                    if path_snrs
+                                    else None,
                                     "last_seen": tr_data["timestamp"],
                                     "last_packet_id": tr_data["id"],
                                 }

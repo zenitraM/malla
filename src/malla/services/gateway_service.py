@@ -13,6 +13,7 @@ from typing import Any
 from ..database.connection import get_db_connection
 from ..database.repositories import PacketRepository
 from ..utils.node_utils import get_bulk_node_names
+from ..utils.signal_quality import rssi_valid_sql, snr_valid_sql
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +75,13 @@ class GatewayService:
 
             # Get gateway distribution (top 20)
             cursor.execute(
-                """
+                f"""
                 SELECT
                     gateway_id,
                     COUNT(*) as packet_count,
                     COUNT(DISTINCT from_node_id) as unique_sources,
-                    AVG(CAST(rssi AS FLOAT)) as avg_rssi,
-                    AVG(CAST(snr AS FLOAT)) as avg_snr,
+                    AVG(CASE WHEN {rssi_valid_sql()} THEN CAST(rssi AS FLOAT) END) as avg_rssi,
+                    AVG(CASE WHEN {snr_valid_sql()} THEN CAST(snr AS FLOAT) END) as avg_snr,
                     MAX(timestamp) as last_seen
                 FROM packet_history
                 WHERE gateway_id IS NOT NULL
