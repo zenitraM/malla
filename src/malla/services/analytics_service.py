@@ -420,6 +420,15 @@ class AnalyticsService:
     # (range_key, tz_offset_minutes) → (timestamp, data)
     _TIMELINE_CACHE: dict[tuple[str, int], tuple[float, dict[str, Any]]] = {}
 
+    # Wall-clock budget per request for backfilling missing rollup days. Must
+    # stay well under the gunicorn worker timeout (30s in wsgi.py): a request
+    # that runs out of budget returns a "pending" response with its progress
+    # already committed, instead of being SIGKILLed mid-transaction — which
+    # would roll everything back and make the next request start from zero,
+    # a permanent failure loop on deployments where the full backfill can't
+    # finish inside one worker timeout.
+    _ROLLUP_TIME_BUDGET_SEC: float = 15.0
+
     @staticmethod
     def get_activity_timeline(
         range_key: str = "7d", tz_offset_minutes: int = 0
@@ -433,6 +442,11 @@ class AnalyticsService:
         activity_daily_rollup table (append-only history makes them immutable),
         so even the "all" range stays fast; only the current day/hour window is
         aggregated live.
+
+        Backfilling missing rollup days is bounded by _ROLLUP_TIME_BUDGET_SEC
+        per request. If the budget runs out the response carries
+        ``pending: True`` plus ``days_remaining``; the committed progress
+        survives, so the client just retries until pending clears.
         """
         if range_key not in AnalyticsService.TIMELINE_RANGES:
             range_key = "7d"
@@ -446,11 +460,25 @@ class AnalyticsService:
         if range_key == "24h":
             buckets = AnalyticsService._get_hourly_buckets(tz_offset_minutes)
             granularity = "hour"
+            days_remaining = 0
         else:
-            buckets = AnalyticsService._get_daily_buckets(range_key, tz_offset_minutes)
+            buckets, days_remaining = AnalyticsService._get_daily_buckets(
+                range_key, tz_offset_minutes
+            )
             granularity = "day"
 
-        result = {"range": range_key, "granularity": granularity, "buckets": buckets}
+        result = {
+            "range": range_key,
+            "granularity": granularity,
+            "buckets": buckets,
+            "pending": days_remaining > 0,
+        }
+        if days_remaining:
+            # Partial: some completed days aren't rolled up yet. Don't cache —
+            # the next request must resume the backfill, not replay this.
+            result["days_remaining"] = days_remaining
+            return result
+
         AnalyticsService._TIMELINE_CACHE[cache_key] = (now_ts, result)
         return result
 
@@ -537,16 +565,19 @@ class AnalyticsService:
     @staticmethod
     def _get_daily_buckets(
         range_key: str, tz_offset_minutes: int
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """Aggregate per local calendar day for 7d / 30d / all.
 
         Completed days come from (and are persisted to) activity_daily_rollup;
-        only today is computed live from packet_history.
+        only today is computed live from packet_history. Returns the buckets
+        and how many completed days are still missing from the rollup (0 when
+        the timeline is complete; buckets for missing days read as zero).
         """
         from ..database.connection import get_db_connection
         from ..database.schema import ACTIVITY_ROLLUP_TABLE_SQL
 
         offset_sec = tz_offset_minutes * 60
+        deadline = time.time() + AnalyticsService._ROLLUP_TIME_BUDGET_SEC
         today_local = (int(time.time() + offset_sec) // 86400) * 86400
 
         conn = get_db_connection()
@@ -574,14 +605,19 @@ class AnalyticsService:
             day_epochs = list(range(start_local, today_local + 86400, 86400))
             completed_epochs = [d for d in day_epochs if d < today_local]
 
-            rollup_rows = AnalyticsService._ensure_daily_rollup(
-                cursor, tz_offset_minutes, offset_sec, completed_epochs
+            rollup_rows, days_remaining = AnalyticsService._ensure_daily_rollup(
+                cursor, tz_offset_minutes, offset_sec, completed_epochs, deadline
             )
             conn.commit()
 
-            today_stats = AnalyticsService._compute_daily_span(
-                cursor, offset_sec, today_local, today_local + 86400
-            )
+            if days_remaining:
+                # Out of budget: the caller will report pending and the client
+                # retries, so don't spend more time aggregating today live.
+                today_stats: dict[str, dict[str, Any]] = {}
+            else:
+                today_stats = AnalyticsService._compute_daily_span(
+                    cursor, offset_sec, today_local, today_local + 86400
+                )
         finally:
             conn.close()
 
@@ -599,7 +635,7 @@ class AnalyticsService:
                     "new_nodes": stats.get("new_nodes", 0),
                 }
             )
-        return buckets
+        return buckets, days_remaining
 
     @staticmethod
     def _local_day_key(local_day_epoch: int) -> str:
@@ -612,16 +648,24 @@ class AnalyticsService:
         tz_offset_minutes: int,
         offset_sec: int,
         completed_epochs: list[int],
-    ) -> dict[str, dict[str, Any]]:
-        """Return rollup stats for the given completed local days, computing any
-        missing ones from packet_history and persisting them.
+        deadline: float,
+    ) -> tuple[dict[str, dict[str, Any]], int]:
+        """Return rollup stats for the given completed local days, computing
+        missing ones from packet_history until *deadline* and persisting them.
 
         Rows are safe to persist forever: packet_history is append-only with
         insert-time timestamps and node_info.first_seen is assigned once, so a
         finished local day can never change retroactively.
+
+        Missing days are computed one at a time, newest first, and each day is
+        committed as soon as it is done, so progress survives even if this
+        request is killed or runs out of budget. At least one day is always
+        computed per call (guaranteed convergence); past that, the loop stops
+        once *deadline* is reached. Returns the stats found/computed plus the
+        number of days still missing (0 = complete).
         """
         if not completed_epochs:
-            return {}
+            return {}, 0
 
         wanted = {AnalyticsService._local_day_key(d): d for d in completed_epochs}
         placeholders = ",".join("?" * len(wanted))
@@ -637,20 +681,18 @@ class AnalyticsService:
             row["day"]: dict(row) for row in cursor.fetchall()
         }
 
-        missing = [epoch for key, epoch in wanted.items() if key not in cached]
-        if not missing:
-            return cached
-
-        # One aggregation pass over the contiguous span covering all missing
-        # days (holes are rare; recomputing a cached day inside the span is
-        # harmless — only missing days are written back).
-        computed = AnalyticsService._compute_daily_span(
-            cursor, offset_sec, min(missing), max(missing) + 86400
+        missing = sorted(
+            (epoch for key, epoch in wanted.items() if key not in cached),
+            reverse=True,
         )
-        now_ts = time.time()
-        for epoch in missing:
+        for done, epoch in enumerate(missing):
+            if done and time.time() >= deadline:
+                return cached, len(missing) - done
+
             key = AnalyticsService._local_day_key(epoch)
-            stats = computed.get(key, {})
+            stats = AnalyticsService._compute_daily_span(
+                cursor, offset_sec, epoch, epoch + 86400
+            ).get(key, {})
             row = {
                 "total_packets": stats.get("total_packets", 0),
                 "active_nodes": stats.get("active_nodes", 0),
@@ -671,11 +713,12 @@ class AnalyticsService:
                     row["active_nodes"],
                     row["gateway_count"],
                     row["new_nodes"],
-                    now_ts,
+                    time.time(),
                 ),
             )
+            cursor.connection.commit()
             cached[key] = {"day": key, **row}
-        return cached
+        return cached, 0
 
     @staticmethod
     def _compute_daily_span(

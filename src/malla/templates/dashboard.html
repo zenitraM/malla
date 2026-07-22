@@ -114,7 +114,11 @@
                         <div class="spinner-border text-primary" role="status">
                             <span class="visually-hidden">Loading...</span>
                         </div>
-                        <p class="mt-2 text-muted">Loading chart data...</p>
+                        <p class="mt-2 text-muted" id="activityTimelineLoadingText">Loading chart data...</p>
+                    </div>
+                    <div id="activityTimelinePanelsError" class="text-center py-4 text-muted" style="display: none;">
+                        <i class="bi bi-exclamation-triangle"></i> Could not load activity data.
+                        <a href="#" onclick="loadActivityTimeline(timelineRange); return false;">Retry</a>
                     </div>
                     <div id="activityTimelinePanels" class="row g-3" style="display: none;">
                         <div class="col-6">
@@ -659,6 +663,8 @@ async function loadActivityTimeline(range) {
     });
 
     const panels = document.getElementById('activityTimelinePanels');
+    const errorEl = document.getElementById('activityTimelinePanelsError');
+    if (errorEl) errorEl.style.display = 'none';
     if (panels) panels.style.opacity = '0.5';
 
     try {
@@ -668,13 +674,38 @@ async function loadActivityTimeline(range) {
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        timelineData = await response.json();
+        const data = await response.json();
+        if (data.pending) {
+            // The server backfills its daily rollup in bounded slices so a
+            // request never outlives the worker timeout; committed progress
+            // survives between calls, so just poll until the range completes.
+            showTimelineBackfillProgress(data.days_remaining);
+            setTimeout(() => { if (timelineRange === range) loadActivityTimeline(range); }, 1000);
+            return;
+        }
+        timelineData = data;
         renderTimelinePanels();
     } catch (error) {
         console.error('Error loading activity timeline:', error);
-        hideLoadingSpinner('activityTimelinePanels');
+        const loading = document.getElementById('activityTimelinePanelsLoading');
+        if (loading) loading.style.display = 'none';
+        if (panels) panels.style.display = 'none';
+        if (errorEl) errorEl.style.display = '';
     } finally {
         if (panels) panels.style.opacity = '';
+    }
+}
+
+function showTimelineBackfillProgress(daysRemaining) {
+    const loading = document.getElementById('activityTimelinePanelsLoading');
+    if (loading) loading.style.display = '';
+    const panels = document.getElementById('activityTimelinePanels');
+    if (panels) panels.style.display = 'none';
+    const text = document.getElementById('activityTimelineLoadingText');
+    if (text) {
+        text.textContent = daysRemaining
+            ? `Building daily history — ${daysRemaining} day${daysRemaining === 1 ? '' : 's'} to go...`
+            : 'Building daily history...';
     }
 }
 

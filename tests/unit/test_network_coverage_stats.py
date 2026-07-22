@@ -252,6 +252,62 @@ def test_timeline_all_starts_at_first_packet(temp_database, monkeypatch):
     assert sum(b["total_packets"] for b in buckets) == 2
 
 
+def test_timeline_backfill_is_budgeted_and_resumable(temp_database, monkeypatch):
+    """Rollup backfill commits per day and yields when the time budget is spent.
+
+    On large deployments the first 7d/30d/all request used to aggregate every
+    missing day in one transaction; past the gunicorn worker timeout it was
+    SIGKILLed, the transaction rolled back, and every retry started from zero
+    (a permanent 502 loop, seen on malla.meshtastic.es). A zero budget must
+    still make progress — exactly one day per call — and repeated calls must
+    converge to a complete, correct timeline.
+    """
+    monkeypatch.setenv("MALLA_DATABASE_FILE", temp_database)
+    AnalyticsService._TIMELINE_CACHE.clear()
+    # Deadline is already in the past when the backfill starts: every call
+    # computes only its guaranteed single day.
+    monkeypatch.setattr(AnalyticsService, "_ROLLUP_TIME_BUDGET_SEC", -1.0)
+
+    now = time.time()
+    local_today_start = (int(now) // DAY) * DAY
+    # One packet per completed day for the last 3 days, plus one today.
+    _reset_data(
+        temp_database,
+        packets=[
+            (local_today_start - d * DAY + HOUR, d, "!gw1", 3, 3) for d in (1, 2, 3)
+        ]
+        + [(now, 9, "!gw9", 3, 3)],
+        nodes=[(1, now - 10 * DAY, now)],
+    )
+
+    first = AnalyticsService.get_activity_timeline("7d", 0)
+    assert first["pending"] is True
+    assert first["days_remaining"] == 6  # 7 completed days wanted, 1 done
+
+    conn = sqlite3.connect(temp_database)
+    (rollup_count,) = conn.execute(
+        "SELECT COUNT(*) FROM activity_daily_rollup"
+    ).fetchone()
+    conn.close()
+    assert rollup_count == 1  # progress committed despite the exhausted budget
+
+    # Pending responses are not cached: the next call resumes immediately.
+    second = AnalyticsService.get_activity_timeline("7d", 0)
+    assert second["pending"] is True
+    assert second["days_remaining"] == 5
+
+    for _ in range(5):
+        result = AnalyticsService.get_activity_timeline("7d", 0)
+    assert result["pending"] is False
+    assert "days_remaining" not in result
+
+    days = result["buckets"]
+    assert len(days) == 8
+    assert days[-1]["total_packets"] == 1  # today, computed live
+    assert all(d["total_packets"] == 1 for d in days[-4:-1])  # the 3 backfilled
+    assert all(d["total_packets"] == 0 for d in days[:-4])
+
+
 def test_hop_distribution_counts_real_hops(temp_database, monkeypatch):
     """Hop distribution reflects hop_start - hop_limit, excluding malformed rows."""
     monkeypatch.setenv("MALLA_DATABASE_FILE", temp_database)
