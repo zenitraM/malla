@@ -97,6 +97,7 @@ def build_combined_traceroute_graph(packets: list[dict[str, Any]]) -> dict[str, 
             "gateway_id": gateway_id,
             "gateway_node_id": gateway_node_id,
             "timestamp": pkt.get("timestamp"),
+            "mesh_packet_id": pkt.get("mesh_packet_id"),
             "snr_values": [hop.snr for hop in rf_hops if hop.snr is not None],
         }
 
@@ -218,6 +219,7 @@ def build_combined_traceroute_graph(packets: list[dict[str, Any]]) -> dict[str, 
         paths.append(
             {
                 "packet_id": packet_id,
+                "mesh_packet_id": path_info.get("mesh_packet_id"),
                 "nodes": path_info["nodes"],
                 "color": path_color,
                 "gateway_id": path_info["gateway_id"],

@@ -866,10 +866,8 @@
 
             <!-- Combined Traceroute Graph for TRACEROUTE_APP packets -->
             {% if packet.portnum_name == 'TRACEROUTE_APP' %}
-            <div class="card mb-4">
-                <div class="card-body">
-                    {% include 'components/traceroute_graph.html' %}
-                </div>
+            <div class="col-12">
+                {% include 'components/traceroute_graph.html' %}
             </div>
             {% endif %}
 

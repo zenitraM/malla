@@ -169,7 +169,8 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
                 SELECT
                     id, timestamp, gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
                     payload_length, processed_successfully,
-                    raw_payload, from_node_id, to_node_id, portnum, portnum_name, relay_node
+                    raw_payload, from_node_id, to_node_id, portnum, portnum_name, relay_node,
+                    mesh_packet_id
                 FROM packet_history
                 WHERE mesh_packet_id = ?
                 AND id != ?
@@ -189,7 +190,8 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
                 SELECT
                     id, timestamp, gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
                     payload_length, processed_successfully,
-                    raw_payload, from_node_id, to_node_id, portnum, portnum_name, relay_node
+                    raw_payload, from_node_id, to_node_id, portnum, portnum_name, relay_node,
+                    mesh_packet_id
                 FROM packet_history
                 WHERE from_node_id = ?
                 AND timestamp BETWEEN ? AND ?
@@ -403,6 +405,32 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
             ] + receptions  # Receptions already include raw_payload
             packet_graph_data = build_combined_traceroute_graph(graph_packets)
 
+            # Attach node locations so the front-end can show hop distances
+            try:
+                graph_node_ids = [n["id"] for n in packet_graph_data.get("nodes", [])]
+                if graph_node_ids:
+                    node_locations = LocationRepository.get_node_locations(
+                        {"node_ids": graph_node_ids}
+                    )
+                    packet_graph_data["locations"] = {
+                        loc["node_id"]: {
+                            "lat": loc["latitude"],
+                            "lon": loc["longitude"],
+                        }
+                        for loc in node_locations
+                        if loc.get("latitude") is not None
+                        and loc.get("longitude") is not None
+                    }
+                else:
+                    packet_graph_data["locations"] = {}
+                logger.info(
+                    f"Attached {len(packet_graph_data.get('locations', {}))} "
+                    f"node locations for graph distances"
+                )
+            except Exception as e:
+                logger.warning(f"Error getting graph node locations: {e}")
+                packet_graph_data["locations"] = {}
+
             # Convert any bytes objects to base64 for JSON serialization
             from ..utils.serialization_utils import convert_bytes_to_base64
 
@@ -411,7 +439,12 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
             logger.warning(
                 f"Failed to build combined traceroute graph for packet {packet_id}: {e}"
             )
-            packet_graph_data = {"nodes": [], "edges": [], "paths": []}
+            packet_graph_data = {
+                "nodes": [],
+                "edges": [],
+                "paths": [],
+                "locations": {},
+            }
 
         # Add gateway names and locations to packet and receptions
         packet["gateway_name"] = gateway_names.get(packet["gateway_id"], None)

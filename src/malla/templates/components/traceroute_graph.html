@@ -1,20 +1,26 @@
 <!-- Combined Traceroute Graph Component -->
 <div class="card mb-4">
     <div class="card-header">
-        <h5><i class="bi bi-diagram-3"></i> Combined Traceroute Graph</h5>
-    </div>
-    <div class="card-body p-0">
-        <div class="p-3 pt-3">
-            <div class="row">
-                <div class="col-md-8">
-                    <small class="text-muted">
-                        <i class="bi bi-info-circle"></i>
-                        <strong>Controls:</strong>
-                        Drag nodes to rearrange • Mouse wheel to zoom • Click and drag background to pan • Hover for details
-                    </small>
-                </div>
-                <div class="col-md-4 text-end">
+        <div class="row align-items-center">
+            <div class="col-md-7">
+                <h5 class="mb-0"><i class="bi bi-diagram-3"></i> Combined Traceroute Graph</h5>
+                <small class="text-muted">
+                    · edge width = packets · node size = traffic · square = gateway
+                </small>
+            </div>
+            <div class="col-md-5 text-end">
+                <div class="d-inline-flex align-items-center gap-2 flex-wrap justify-content-md-end">
+                    <div class="position-relative" id="node-search-wrap">
+                        <input type="text" id="node-search" class="form-control form-control-sm" placeholder="Search node…" autocomplete="off" aria-label="Search node">
+                        <div id="node-search-results" class="node-search-results"></div>
+                    </div>
                     <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" class="btn btn-outline-secondary" onclick="zoomGraphIn()" title="Zoom in">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="zoomGraphOut()" title="Zoom out">
+                            <i class="bi bi-dash-lg"></i>
+                        </button>
                         <button type="button" class="btn btn-outline-secondary" onclick="centerCombinedGraph()">
                             <i class="bi bi-arrows-move"></i> Center
                         </button>
@@ -24,8 +30,16 @@
                     </div>
                 </div>
             </div>
-                        <div class="row mt-2">
-                <div class="col-lg-9 col-md-8 col-12">
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="p-3 pt-3">
+            <div class="row mt-2">
+                <div class="col-12">
+                    <div class="text-muted mb-1" style="font-size: 0.8rem;">
+                        <i class="bi bi-info-circle"></i>
+                        Click a node to focus all receptions through it · click a reception below for its exact route · wheel to zoom · drag background to pan
+                    </div>
                     <div id="combined-traceroute-graph" class="traceroute-graph-container">
                         <div class="text-center" id="combined-graph-loader">
                             <div class="spinner-border text-primary" role="status">
@@ -35,59 +49,33 @@
                         </div>
                     </div>
                 </div>
-                <div class="col-lg-3 col-md-4 col-12 mt-3 mt-md-0">
-                    <div class="card h-100">
-                        <div class="card-header">
-                            <h6 class="card-title mb-0"><i class="bi bi-info-circle"></i> Legend & Paths</h6>
-                        </div>
-                        <div class="card-body p-2" style="max-height: 700px; overflow-y: auto;">
-                            <!-- Nodes Section -->
-                            <div class="mb-3">
-                                <h6 class="text-muted mb-2" style="font-size: 0.85rem;">Nodes</h6>
-                                <div class="legend-item mb-1" data-tooltip="Nodes that route packets through the mesh network">
-                                    <span class="badge bg-primary me-2" style="font-size: 0.7rem;">🔄</span>
-                                    <small>Router Node</small>
-                                </div>
-                                <div class="legend-item mb-1" data-tooltip="Nodes that receive packets and can act as internet gateways">
-                                    <span class="badge bg-success me-2" style="font-size: 0.7rem;">📡</span>
-                                    <small>Gateway Node</small>
-                                </div>
-                                <div class="legend-item mb-1" data-tooltip="The node that originated this traceroute packet">
-                                    <span class="badge bg-warning me-2" style="font-size: 0.7rem;">🚀</span>
-                                    <small>Source Node</small>
-                                </div>
-                                <div class="legend-item mb-1" data-tooltip="The intended destination of this traceroute packet">
-                                    <span class="badge bg-secondary me-2" style="font-size: 0.7rem;">🎯</span>
-                                    <small>Target Node</small>
-                                </div>
-                            </div>
+            </div>
+        </div>
+    </div>
+</div>
 
-                            <!-- Connections Section -->
-                            <div class="mb-3">
-                                <h6 class="text-muted mb-2" style="font-size: 0.85rem;">Connections</h6>
-                                <div class="legend-item mb-1" data-tooltip="Direct radio frequency communication between two nodes">
-                                    <div class="legend-line legend-rf-link"></div>
-                                    <small>RF Link</small>
-                                </div>
-                                <div class="legend-item mb-1" data-tooltip="Gateway heard the packet at the end of this RF path">
-                                    <div class="legend-line legend-gateway-connection"></div>
-                                    <small>Gateway Connection</small>
-                                </div>
-                                <div class="legend-item mb-1" data-tooltip="Gateway received packet directly from source (no RF routing)">
-                                    <div class="legend-line legend-direct-reception"></div>
-                                    <small>Direct Reception (0 hops)</small>
-                                </div>
-                            </div>
-
-                            <!-- Packet Paths Section -->
-                            <div class="mb-3">
-                                <h6 class="text-muted mb-2" style="font-size: 0.85rem;">Packet Paths</h6>
-                                <div id="legend-paths-container">
-                                    <small class="text-muted">Loading paths...</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+<!-- Details: route path (left) + receptions (right), sibling sections -->
+<div class="row">
+    <div class="col-lg-5 col-md-6 col-12">
+        <div class="card mb-4">
+            <div class="card-header py-1">
+                <h6 class="card-title mb-0" style="font-size: 0.85rem;">
+                    <i class="bi bi-signpost-2"></i> Route — <span id="strip-pkt-id">…</span>
+                </h6>
+            </div>
+            <div class="card-body py-2" style="max-height: 460px; overflow-y: auto;">
+                <div id="route-strip" class="route-strip"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-7 col-md-6 col-12">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h6 class="card-title mb-0"><i class="bi bi-signpost-split"></i> Receptions</h6>
+            </div>
+            <div class="card-body p-2" style="max-height: 460px; overflow-y: auto;">
+                <div id="reception-groups">
+                    <small class="text-muted">Loading receptions...</small>
                 </div>
             </div>
         </div>
@@ -105,102 +93,177 @@
     background: var(--bs-body-bg);
 }
 
-/* Mobile responsiveness */
 @media (max-width: 768px) {
     .traceroute-graph-container {
         height: 500px;
     }
 }
 
-/* Legend items */
-.legend-item {
-    display: flex;
-    align-items: center;
-    padding: 4px 6px;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-    position: relative;
-}
-
-.legend-item:hover {
-    background-color: rgba(0, 123, 255, 0.1);
-}
-
-.legend-path-item {
-    display: flex;
-    align-items: center;
-    padding: 3px 6px;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    margin-bottom: 2px;
-    border-left: 3px solid transparent;
-}
-
-.legend-path-item:hover {
-    background-color: rgba(0, 0, 0, 0.05);
-    transform: translateX(2px);
-}
-
-.legend-path-item.highlighted {
-    background-color: rgba(0, 123, 255, 0.15);
-    border-left-color: var(--path-color, #007bff);
-}
-
-.legend-path-color {
-    width: 16px;
-    height: 3px;
-    margin-right: 8px;
-    border-radius: 2px;
-    flex-shrink: 0;
-}
-
-.legend-path-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.legend-path-title {
-    font-size: 0.75rem;
-    font-weight: 600;
-    margin-bottom: 1px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.legend-path-details {
-    font-size: 0.65rem;
-    color: #6c757d;
-    line-height: 1.2;
-}
-
-/* Tooltip styles */
-.legend-tooltip {
-    position: absolute;
-    background: rgba(0, 0, 0, 0.9);
-    color: white;
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-size: 0.75rem;
-    pointer-events: none;
-    z-index: 1000;
-    max-width: 250px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    opacity: 0;
-    transition: opacity 0.2s ease;
-    white-space: nowrap;
-}
-
 .traceroute-graph-container svg {
     cursor: grab;
+    display: block;
 }
 
 .traceroute-graph-container svg:active {
     cursor: grabbing;
 }
 
+/* Route strip - vertical route list (chip per hop, ↓ arrows) */
+.route-strip {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 4px 2px;
+}
+
+.hop-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 10px;
+    padding: 4px 10px;
+    white-space: nowrap;
+}
+
+.hop-chip .chip-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.hop-chip .chip-name {
+    font-weight: 600;
+    color: var(--bs-body-color);
+}
+
+.hop-chip .chip-full {
+    font-size: 10px;
+    color: var(--bs-secondary-color);
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.hop-chip .chip-dist {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--bs-body-color);
+    opacity: 0.75;
+}
+
+.hop-chip .idx {
+    color: var(--bs-secondary-color);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.hop-chip .snr {
+    color: var(--bs-secondary-color);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.hop-chip.gateway {
+    background: var(--bs-primary-bg-subtle);
+    border-color: var(--bs-primary-border-subtle);
+}
+
+.hop-chip.focus-chip {
+    background: var(--bs-info-bg-subtle);
+    border-color: var(--bs-info-border-subtle);
+}
+
+.hop-arrow {
+    color: var(--bs-secondary-color);
+    font-size: 12px;
+    align-self: flex-start;
+    padding: 0 8px;
+    transform: rotate(90deg);
+}
+
+.snr-badge {
+    background: var(--bs-success-bg-subtle);
+    border: 1px solid var(--bs-success-border-subtle);
+    color: var(--bs-success-text-emphasis);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+
+/* Reception sidebar */
+.meshhead {
+    font-size: 12px;
+    margin-bottom: 2px;
+    color: var(--bs-body-color);
+}
+
+.muted {
+    font-size: 11px;
+    color: var(--bs-secondary-color);
+    margin-bottom: 8px;
+}
+
+.gwgroup {
+    margin-bottom: 10px;
+}
+
+.gwgroup h4 {
+    margin: 0 0 4px;
+    font-size: 11px;
+    color: var(--bs-secondary-color);
+    font-weight: 600;
+}
+
+.gw {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--bs-body-color);
+}
+
+.gw:hover {
+    background-color: var(--bs-primary-bg-subtle);
+}
+
+.gw .cnt {
+    color: var(--bs-secondary-color);
+    font-size: 11px;
+}
+
+.gw .pkt-link {
+    margin-left: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--bs-primary);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.gw .pkt-link:hover {
+    text-decoration: underline;
+}
+
+.gw.rec.active {
+    background: var(--bs-info-bg-subtle);
+    font-weight: 600;
+}
+
+.gw.rec.in-focus {
+    background: var(--bs-primary-bg-subtle);
+}
+
+/* Graph tooltip */
 .graph-tooltip {
     position: absolute;
     background: rgba(0, 0, 0, 0.95);
@@ -238,113 +301,95 @@
     margin: 2px 4px 2px 0;
 }
 
-.node-circle {
+/* Node / link styling */
+.node-group {
     cursor: pointer;
-    transition: all 0.3s ease;
-    filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.2));
 }
 
-.node-circle:hover {
-    stroke-width: 4px !important;
-    filter: drop-shadow(2px 2px 8px rgba(0,0,0,0.4)) brightness(1.1);
-    transform: scale(1.1);
-}
-
-.node-router {
-    fill: #4a90e2;
-    stroke: #2c5aa0;
-}
-
-.node-gateway {
-    fill: #28a745;
-    stroke: #1e7e34;
-}
-
-.node-gateway-router {
-    fill: url(#gatewayRouterGradient);
-    stroke: #1e7e34;
-}
-
-.node-source {
-    fill: #ff6b35 !important;
-    stroke: #d63031 !important;
-    stroke-width: 4px !important;
-}
-
-.node-target {
-    fill: #6c5ce7 !important;
-    stroke: #5f3dc4 !important;
-    stroke-width: 4px !important;
-}
-
-.link-line {
-    transition: all 0.3s ease;
-    cursor: pointer;
-    filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.1));
-}
-
-.link-line:hover {
-    stroke-width: 8px !important;
-    filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.3));
-}
-
-.gateway-connection {
-    stroke-dasharray: 5,5;
-    stroke: #17a2b8;
-    stroke-width: 2;
-    opacity: 0.7;
-}
-
-.gateway-connection:hover {
-    opacity: 1;
-    stroke-width: 4;
-}
-
-.gateway-connection-zero-hop {
-    stroke-dasharray: 2,2;
-    stroke: #fd7e14;
-    stroke-width: 2;
-    opacity: 0.7;
-}
-
-.gateway-connection-zero-hop:hover {
-    opacity: 1;
-    stroke-width: 4;
-}
-
-.path-line {
-    fill: none;
-    stroke-width: 4;
-    opacity: 0.8;
-    transition: all 0.3s ease;
-    pointer-events: none;
-    filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.2));
-}
-
-.path-line:hover {
-    opacity: 1;
-    stroke-width: 6;
+.node-group.label-hl .node-label {
+    font-weight: 800;
 }
 
 .node-label {
     pointer-events: none;
     user-select: none;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-weight: 600;
-    text-shadow: 1px 1px 2px rgba(255,255,255,0.8);
+    font-weight: 700;
     font-size: 11px;
+    fill: var(--bs-body-color);
+    text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
 }
 
-.link-label {
+.hop-header {
     pointer-events: none;
     user-select: none;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-weight: bold;
-    text-shadow: 1px 1px 2px rgba(255,255,255,0.9);
     font-size: 10px;
+    font-weight: 700;
+    fill: var(--bs-secondary-color);
+    letter-spacing: 0.5px;
 }
 
-/* Old path legend CSS removed - now using sidebar legend */
+.link-line {
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.link-line:hover {
+    stroke-width: 8px !important;
+    filter: drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.gateway-connection {
+    stroke-dasharray: 4, 3;
+    stroke: #60a5fa;
+    stroke-width: 1.5;
+    opacity: 0.7;
+}
+
+.dimmed {
+    opacity: 0.08;
+    transition: opacity 0.15s;
+}
+
+/* Node search */
+#node-search {
+    width: 190px;
+}
+
+.node-search-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1050;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    max-height: 260px;
+    overflow-y: auto;
+    display: none;
+    text-align: left;
+}
+
+.node-search-results:not(:empty) {
+    display: block;
+}
+
+.node-search-item {
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--bs-body-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.node-search-item:hover {
+    background: var(--bs-primary-bg-subtle);
+}
 
 .modal-backdrop {
     position: fixed;
@@ -352,7 +397,7 @@
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0,0,0,0.5);
+    background: rgba(0, 0, 0, 0.5);
     z-index: 9999;
     cursor: pointer;
 }
@@ -366,7 +411,7 @@
     border: 1px solid var(--bs-border-color);
     border-radius: 12px;
     padding: 24px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     z-index: 10000;
     max-width: 600px;
     width: 90%;
@@ -380,11 +425,14 @@
 <script>
 // Set graph data from template context
 window.packetGraphData = {{ packet_graph_data | tojson }};
+// The packet this page is about (its reception is traced by default)
+window.pagePacketId = {{ packet.id }};
 
-let combinedGraphSimulation = null;
 let combinedGraphSvg = null;
 let combinedGraphG = null;
-let pathElements = [];
+let graphTooltip = null;       // hover tooltip, appended to <body> so page coords work
+let tracedPacketId = null;    // single reception being traced (exact route)
+let focusedNodeId = null;     // node whose full reception cone is highlighted
 
 function tooltipLine(label, value) {
     return el('div', null,
@@ -407,6 +455,157 @@ function setGraphTooltip(tooltip, event, contentNode) {
         .style('top', (event.pageY - 10) + 'px');
 }
 
+// Short label for dense graphs: prefer the parenthesized short name
+// ("MeteoVillena_03 (LAVI)" -> "LAVI"), else the last token.
+function shortLabel(label) {
+    if (!label) return '';
+    const m = /\(([^()]+)\)\s*$/.exec(label);
+    if (m) return m[1].trim();
+    const tokens = label.trim().split(/\s+/);
+    return tokens.length > 1 ? tokens[tokens.length - 1] : label;
+}
+
+function shortId(nid) {
+    return '!' + nid.toString(16).padStart(8, '0');
+}
+
+// Long node name without the trailing short-name parens:
+// "MeteoVillena_03 (LAVI)" -> "MeteoVillena_03"
+function stripParens(label) {
+    if (!label) return '';
+    return label.replace(/\s*\([^()]*\)\s*$/, '').trim();
+}
+
+// Layered (hop-depth based) layout for the combined traceroute graph.
+// The data has a natural structure - source -> RF hops - so we position nodes
+// by their minimum hop depth. Wide columns (many gateways at the same depth)
+// wrap into staggered sub-columns, and a one-pass barycenter ordering lines
+// nodes up with their neighbours in the previous column to cut crossings.
+// Pure static layout: no force simulation, renders instantly.
+function computeGraphLayout(nodes, paths, links, dense) {
+    const depthOf = {};
+    paths.forEach(path => {
+        path.nodes.forEach((nid, i) => {
+            if (depthOf[nid] === undefined || i < depthOf[nid]) depthOf[nid] = i;
+        });
+        if (path.gateway_node_id != null && path.nodes.length > 0) {
+            const d = path.nodes.length;
+            if (depthOf[path.gateway_node_id] === undefined || d < depthOf[path.gateway_node_id]) {
+                depthOf[path.gateway_node_id] = d;
+            }
+        }
+    });
+    nodes.forEach(n => {
+        if (depthOf[n.id] === undefined) depthOf[n.id] = 1;
+    });
+
+    const MAX_COL = dense ? 16 : 12;   // max nodes per sub-column before wrapping
+    const ROW_GAP = dense ? 68 : 84;   // vertical gap between rows (room for two-line labels)
+    const COL_GAP = dense ? 130 : 230; // horizontal gap between main depth columns
+    const SUB_GAP = dense ? 120 : 210; // horizontal offset for wrapped sub-columns
+    const PAD = 70;                    // margin around the layout
+
+    const byDepth = {};
+    nodes.forEach(n => {
+        (byDepth[depthOf[n.id]] = byDepth[depthOf[n.id]] || []).push(n);
+    });
+    const depths = Object.keys(byDepth).map(Number).sort((a, b) => a - b);
+
+    // Adjacency (both RF links and gateway connections) for barycenter ordering.
+    const edgesByNode = new Map();
+    const addEdge = (a, b) => {
+        if (!edgesByNode.has(a)) edgesByNode.set(a, new Set());
+        edgesByNode.get(a).add(b);
+        if (!edgesByNode.has(b)) edgesByNode.set(b, new Set());
+        edgesByNode.get(b).add(a);
+    };
+    links.forEach(l => addEdge(String(l.source), String(l.target)));
+
+    const pos = {};
+    const prevY = {};
+    let x = 0;
+    let maxY = 0;
+    depths.forEach((d, di) => {
+        const col = byDepth[d];
+
+        // Order this column by the average y of its neighbours in the previous
+        // column, so edges line up instead of crossing.
+        if (di > 0) {
+            const prevIdSet = new Set(byDepth[depths[di - 1]].map(n => String(n.id)));
+            const avgY = {};
+            col.forEach(n => {
+                const nb = edgesByNode.get(String(n.id));
+                let sum = 0, cnt = 0;
+                if (nb) nb.forEach(nid => {
+                    if (prevIdSet.has(nid)) { sum += prevY[nid]; cnt++; }
+                });
+                avgY[String(n.id)] = cnt ? sum / cnt : null;
+            });
+            col.sort((a, b) => {
+                const ya = avgY[String(a.id)], yb = avgY[String(b.id)];
+                if (ya == null && yb == null) return 0;
+                if (ya == null) return 1;
+                if (yb == null) return -1;
+                return ya - yb;
+            });
+        }
+
+        const subCols = Math.max(1, Math.ceil(col.length / MAX_COL));
+        const perSub = Math.ceil(col.length / subCols);
+        col.forEach((n, i) => {
+            const sub = Math.min(subCols - 1, Math.floor(i / perSub));
+            const py = PAD + (i % perSub) * ROW_GAP;
+            pos[n.id] = { x: PAD + x + sub * SUB_GAP, y: py };
+            prevY[String(n.id)] = py;
+            if (py > maxY) maxY = py;
+        });
+        x += COL_GAP + (subCols - 1) * SUB_GAP;
+    });
+    return { pos: pos, totalWidth: x + PAD * 2, maxY: maxY, depthOf: depthOf };
+}
+
+// ---- SNR helpers ----
+function fmtSnr(snr) {
+    if (snr == null) return '';
+    return `${snr >= 0 ? '+' : ''}${snr.toFixed(1)}dB`;
+}
+
+// Two-line hop chip for the route strip: `#i SHORT -5.5dB` over the full name.
+function hopChip(strip, opts) {
+    const chip = strip.append('span').attr('class', 'hop-chip');
+    if (opts.extraClass) chip.classed(opts.extraClass, true);
+    const top = chip.append('span').attr('class', 'chip-top');
+    top.append('span').attr('class', 'idx').text(opts.idx);
+    top.append('span').attr('class', 'chip-name').text(opts.label);
+    if (opts.snr != null) {
+        top.append('span').attr('class', 'snr').attr('title', 'avg SNR on this hop').text(fmtSnr(opts.snr));
+    }
+    if (opts.full && opts.full !== opts.label) chip.append('span').attr('class', 'chip-full').text(stripParens(opts.full));
+    if (opts.distKm != null) chip.append('span').attr('class', 'chip-dist').text(opts.distKm);
+    if (opts.title) chip.attr('title', opts.title);
+    return chip;
+}
+
+// Filled SNR badge in the graph overlay: pops over edges. An optional
+// distance (formatted string) is rendered below the pill.
+function snrBadgeSvg(parent, x, y, snr, color, dist) {
+    if (snr == null) return;
+    const txt = fmtSnr(snr);
+    const w = 12 + txt.length * 5.6;
+    const g = parent.append('g').attr('class', 'edge-badge').attr('transform', `translate(${x},${y})`);
+    g.append('rect').attr('x', -w / 2).attr('y', -9).attr('width', w).attr('height', 18).attr('rx', 9)
+        .attr('fill', color).attr('stroke', '#fff').attr('stroke-width', 1.5);
+    g.append('text').attr('text-anchor', 'middle').attr('dy', 3.5)
+        .attr('font-size', '10px').attr('font-weight', '800').attr('fill', '#fff')
+        .text(txt);
+    if (dist) {
+        g.append('text').attr('text-anchor', 'middle').attr('y', 15)
+            .attr('font-size', '9px').attr('font-weight', '700')
+            .attr('fill', color).attr('stroke', '#fff').attr('stroke-width', 1.5).attr('paint-order', 'stroke')
+            .text(dist);
+    }
+}
+
 function loadCombinedTracerouteGraph() {
     const container = document.getElementById('combined-traceroute-graph');
     if (!container || !window.packetGraphData || window.packetGraphData.nodes.length === 0) {
@@ -425,88 +624,9 @@ function loadCombinedTracerouteGraph() {
     // Clear container
     container.replaceChildren();
 
-    // Set up D3 dimensions
-    const containerRect = container.getBoundingClientRect();
-    const width = containerRect.width;
-    const height = 700;
-
-    // Create SVG with zoom behavior
-    const svg = d3.select(container)
-        .append('svg')
-        .attr('width', width)
-        .attr('height', height);
-
-    // Store references for utility functions
-    combinedGraphSvg = svg;
-
-    // Create zoom behavior
-    const zoom = d3.zoom()
-        .scaleExtent([0.1, 4])
-        .on('zoom', (event) => {
-            g.attr('transform', event.transform);
-        });
-
-    svg.call(zoom);
-
-    // Create main group for all graph elements
-    const g = svg.append('g');
-    combinedGraphG = g;
-
-    // Create tooltip div
-    const tooltip = d3.select(container)
-        .append('div')
-        .attr('class', 'graph-tooltip')
-        .style('opacity', 0);
-
-    // Define gradients and markers
-    const defs = svg.append('defs');
-
-    // Gradient for gateway-router nodes
-    const gatewayRouterGradient = defs.append('linearGradient')
-        .attr('id', 'gatewayRouterGradient')
-        .attr('x1', '0%').attr('y1', '0%')
-        .attr('x2', '100%').attr('y2', '100%');
-
-    gatewayRouterGradient.append('stop')
-        .attr('offset', '0%')
-        .attr('stop-color', '#28a745');
-
-    gatewayRouterGradient.append('stop')
-        .attr('offset', '100%')
-        .attr('stop-color', '#4a90e2');
-
-    // Create arrow markers
-    defs.append('marker')
-        .attr('id', 'combined-arrowhead')
-        .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 15)
-        .attr('refY', 0)
-        .attr('markerWidth', 6)
-        .attr('markerHeight', 6)
-        .attr('orient', 'auto')
-        .append('path')
-        .attr('d', 'M0,-5L10,0L0,5')
-        .attr('fill', '#666');
-
-    // Create bidirectional arrow marker
-    defs.append('marker')
-        .attr('id', 'combined-bidirectional')
-        .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 15)
-        .attr('refY', 0)
-        .attr('markerWidth', 6)
-        .attr('markerHeight', 6)
-        .attr('orient', 'auto')
-        .append('path')
-        .attr('d', 'M0,-5L10,0L0,5M10,-3L8,0L10,3')
-        .attr('fill', '#666');
-
     // Process graph data
-    const nodes = window.packetGraphData.nodes.map(d => ({
-        ...d,
-        size: d.type === 'gateway' ? 16 : 12,
-        connections: d.connections || 0
-    }));
+    const rawNodes = window.packetGraphData.nodes;
+    const nodes = rawNodes.map(n => ({ ...n, label: shortLabel(n.label), full: n.label }));
 
     const links = window.packetGraphData.edges.map(d => ({
         source: d.from,
@@ -522,9 +642,19 @@ function loadCombinedTracerouteGraph() {
         paths: d.paths || []
     }));
 
-    const paths = window.packetGraphData.paths || [];
+    // SNR of the RF link between two node ids (direction-agnostic), if observed.
+    function edgeSnr(a, b) {
+        const l = links.find(l => (l.source === a && l.target === b) || (l.source === b && l.target === a));
+        return l && l.avg_snr != null ? l.avg_snr : null;
+    }
 
-    // Create gateway connections
+    const paths = window.packetGraphData.paths || [];
+    // key receptions by the mesh packet they all belong to (one transmission
+    // heard by many gateways); falls back to the row id
+    paths.forEach(p => { if (p.mesh_packet_id == null) p.mesh_packet_id = p.packet_id; });
+
+    // Build gateway connections (last RF hop -> gateway, and 0-hop direct
+    // receptions source -> gateway).
     const gatewayConnections = [];
 
     // First, handle gateways that heard packets with RF hops (connect to last hop)
@@ -535,7 +665,6 @@ function loadCombinedTracerouteGraph() {
             const lastHopNode = nodes.find(n => n.id === lastHop);
 
             if (gatewayNode && lastHopNode && gatewayNode.id !== lastHopNode.id) {
-                // Check if this connection already exists
                 const existingConnection = gatewayConnections.find(gc =>
                     gc.source === lastHop && gc.target === path.gateway_node_id
                 );
@@ -562,23 +691,19 @@ function loadCombinedTracerouteGraph() {
     if (sourceNode) {
         nodes.forEach(node => {
             if (node.type === 'gateway' && !node.is_source) {
-                // Check if this gateway is already connected via RF hops
                 const alreadyConnected = gatewayConnections.some(gc =>
                     gc.target === node.id || gc.source === node.id
                 );
-
-                // Check if this gateway is part of any RF routing
                 const isInRFPath = links.some(link =>
                     link.source === node.id || link.target === node.id
                 );
 
                 if (!alreadyConnected && !isInRFPath) {
-                    // This is a 0-hop gateway - connect directly to source
                     gatewayConnections.push({
                         source: sourceNode.id,
                         target: node.id,
                         type: 'gateway-connection-zero-hop',
-                        packet_ids: [], // We don't have specific packet IDs for these
+                        packet_ids: [],
                         gateway_id: 'direct',
                         strength: 2,
                         hop_count: 0
@@ -591,495 +716,645 @@ function loadCombinedTracerouteGraph() {
     // Combine regular links with gateway connections
     const allLinks = [...links, ...gatewayConnections];
 
-    // Create force simulation
-    const simulation = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(allLinks).id(d => d.id).distance(d => {
-            if (d.type === 'gateway-connection') return 80;
-            return Math.max(100, 180 - d.strength * 8);
-        }))
-        .force('charge', d3.forceManyBody().strength(-800))
-        .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(d => (d.size || 12) + 20));
-
-    combinedGraphSimulation = simulation;
-
-    // Create path lines (behind everything else)
-    const pathGroup = g.append('g').attr('class', 'paths');
-
-    // Create links
-    const link = g.append('g')
-        .attr('class', 'links')
-        .selectAll('line')
-        .data(allLinks)
-        .enter().append('line')
-        .attr('class', d => {
-            if (d.type === 'gateway-connection') return 'gateway-connection';
-            if (d.type === 'gateway-connection-zero-hop') return 'gateway-connection-zero-hop';
-            return 'link-line';
-        })
-        .attr('stroke', d => {
-            if (d.type === 'gateway-connection') return '#17a2b8';
-            if (d.type === 'gateway-connection-zero-hop') return '#fd7e14'; // Orange for 0-hop
-            return d.color;
-        })
-        .attr('stroke-opacity', 0.8)
-        .attr('stroke-width', d => d.strength)
-        .attr('stroke-dasharray', d => {
-            if (d.type === 'gateway-connection') return '5,5';
-            if (d.type === 'gateway-connection-zero-hop') return '2,2'; // Shorter dashes for 0-hop
-            return 'none';
-        })
-        .attr('marker-end', d => {
-            if (d.type === 'gateway-connection' || d.type === 'gateway-connection-zero-hop') return 'url(#combined-arrowhead)';
-            return d.is_bidirectional ? 'url(#combined-bidirectional)' : 'url(#combined-arrowhead)';
-        })
-        .on('mouseover', function(event, d) {
-            // Highlight the link
-            d3.select(this).attr('stroke-width', d.strength + 3);
-
-            tooltip.transition()
-                .duration(200)
-                .style('opacity', .95);
-
-            const sourceNode = nodes.find(n => n.id === (d.source.id || d.source));
-            const targetNode = nodes.find(n => n.id === (d.target.id || d.target));
-
-            let contentNode;
-            if (d.type === 'gateway-connection') {
-                contentNode = tooltipWithTitle(
-                    `Gateway Connection (${d.hop_count || 'N/A'} hops)`,
-                    tooltipLine('From', sourceNode ? sourceNode.label : d.source),
-                    tooltipLine('To Gateway', targetNode ? targetNode.label : d.target),
-                    tooltipLine('Type', 'Gateway heard packet at this hop'),
-                    tooltipLine('Packets', d.packet_ids.join(', ')),
-                    tooltipLine('Gateway ID', d.gateway_id || 'Unknown')
-                );
-            } else if (d.type === 'gateway-connection-zero-hop') {
-                contentNode = tooltipWithTitle(
-                    'Direct Gateway Reception (0 hops)',
-                    tooltipLine('From', sourceNode ? sourceNode.label : d.source),
-                    tooltipLine('To Gateway', targetNode ? targetNode.label : d.target),
-                    tooltipLine('Type', 'Gateway received packet directly from source'),
-                    tooltipLine('Hops', '0 (Direct reception)'),
-                    tooltipLine('Note', 'No RF routing involved')
-                );
-            } else {
-                const lines = [
-                    tooltipLine('From', sourceNode ? sourceNode.label : d.source),
-                    tooltipLine('To', targetNode ? targetNode.label : d.target),
-                    tooltipLine('Observations', d.value),
-                    tooltipLine('Type', d.is_bidirectional ? 'Bidirectional' : 'Unidirectional')
-                ];
-
-                if (d.avg_snr) {
-                    lines.push(tooltipLine('Avg SNR', `${d.avg_snr.toFixed(1)} dB`));
-                }
-
-                lines.push(tooltipLine('Unique Packets', String(d.packet_ids.length)));
-
-                if (d.paths && d.paths.length > 0) {
-                    lines.push(el('div', null,
-                        el('strong', null, 'Packets:'),
-                        textNode(' '),
-                        d.paths.map((packetId) => el('span', { className: 'tooltip-badge' }, String(packetId)))
-                    ));
-                }
-
-                contentNode = tooltipWithTitle('RF Link Details', ...lines);
-            }
-
-            setGraphTooltip(tooltip, event, contentNode);
-        })
-        .on('mouseout', function(event, d) {
-            // Reset link appearance
-            d3.select(this).attr('stroke-width', d.strength);
-
-            tooltip.transition()
-                .duration(500)
-                .style('opacity', 0);
-        })
-        .on('click', function(event, d) {
-            event.stopPropagation();
-
-            const sourceNode = nodes.find(n => n.id === (d.source.id || d.source));
-            const targetNode = nodes.find(n => n.id === (d.target.id || d.target));
-
-            if (sourceNode && targetNode && d.type !== 'gateway-connection') {
-                showLinkDetails(sourceNode, targetNode, d);
-            }
-        });
-
-    // Create link labels
-    const linkLabel = g.append('g')
-        .attr('class', 'link-labels')
-        .selectAll('text')
-        .data(links.filter(d => d.label && d.value > 1))
-        .enter().append('text')
-        .attr('class', 'link-label')
-        .attr('font-size', '10px')
-        .attr('fill', '#333')
-        .attr('font-weight', 'bold')
-        .attr('text-anchor', 'middle')
-        .attr('stroke', 'white')
-        .attr('stroke-width', 2)
-        .attr('paint-order', 'stroke')
-        .text(d => d.label);
-
-    // Create node groups
-    const nodeGroup = g.append('g')
-        .attr('class', 'nodes')
-        .selectAll('g')
-        .data(nodes)
-        .enter().append('g')
-        .attr('class', 'node-group')
-        .style('cursor', 'pointer')
-        .call(d3.drag()
-            .on('start', dragstarted)
-            .on('drag', dragged)
-            .on('end', dragended));
-
-    // Add circles for nodes
-    const nodeCircle = nodeGroup.append('circle')
-        .attr('class', d => {
-            let classes = `node-circle node-${d.type}`;
-            if (d.is_source) classes += ' node-source';
-            if (d.is_target) classes += ' node-target';
-            return classes;
-        })
-        .attr('r', d => d.size || 12)
-        .attr('stroke-width', 3);
-
-    // Add node labels (show full names)
-    const nodeLabel = nodeGroup.append('text')
-        .attr('class', 'node-label')
-        .attr('font-size', '11px')
-        .attr('fill', '#333')
-        .attr('font-weight', 'bold')
-        .attr('text-anchor', 'middle')
-        .attr('dy', d => (d.size || 12) + 18)
-        .text(d => d.label || '');
-
-    // Add node type icons
-    const nodeIcon = nodeGroup.append('text')
-        .attr('class', 'node-icon')
-        .attr('font-size', '10px')
-        .attr('fill', 'white')
-        .attr('text-anchor', 'middle')
-        .attr('dy', '4px')
-        .text(d => {
-            if (d.is_source) return '🚀';
-            if (d.is_target) return '🎯';
-            return d.type === 'gateway' ? '📡' : '🔄';
-        });
-
-    // Add hover effects and tooltips to nodes
-    nodeGroup
-        .on('mouseover', function(event, d) {
-            // Highlight the node
-            d3.select(this).select('.node-circle')
-                .attr('stroke-width', 6)
-                .style('filter', 'drop-shadow(2px 2px 8px rgba(0,0,0,0.4)) brightness(1.1) scale(1.1)');
-
-            tooltip.transition()
-                .duration(200)
-                .style('opacity', .95);
-
-            let nodeTypeIcon = d.type === 'gateway' ? '📡' : '🔄';
-            let nodeTypeName = d.type === 'gateway' ? 'Gateway' : 'Router';
-
-            if (d.is_source) {
-                nodeTypeIcon = '🚀';
-                nodeTypeName = 'Source ' + nodeTypeName;
-            }
-            if (d.is_target) {
-                nodeTypeIcon = '🎯';
-                nodeTypeName = 'Target ' + nodeTypeName;
-            }
-
-            // Find paths that include this node
-            const nodePaths = paths.filter(path => path.nodes.includes(d.id));
-            const details = [
-                tooltipLine('Name', d.label),
-                tooltipLine('ID', `!${d.id.toString(16).padStart(8, '0')}`),
-                tooltipLine('Type', `${nodeTypeName}${d.is_gateway ? ' (receives packets)' : ''}`),
-                tooltipLine('RF Connections', String(allLinks.filter(l => (l.source.id || l.source) === d.id || (l.target.id || l.target) === d.id).length))
-            ];
-
-            if (nodePaths.length > 0) {
-                details.push(tooltipLine('Packet Paths', String(nodePaths.length)));
-                details.push(el('div', null,
-                    nodePaths.slice(0, 3).map((path) => el('span', { className: 'tooltip-badge' }, `Packet ${path.packet_id}`))
-                ));
-                if (nodePaths.length > 3) {
-                    details.push(el('div', null, el('span', { className: 'tooltip-badge' }, `+${nodePaths.length - 3} more`)));
-                }
-            }
-
-            // Find gateway connections
-            const gatewayConnections = allLinks.filter(l =>
-                l.type === 'gateway-connection' &&
-                ((l.source.id || l.source) === d.id || (l.target.id || l.target) === d.id)
-            );
-            if (gatewayConnections.length > 0) {
-                details.push(tooltipLine('Gateway Connections', String(gatewayConnections.length)));
-            }
-
-            setGraphTooltip(tooltip, event, tooltipWithTitle(`${nodeTypeIcon} ${nodeTypeName} Details`, ...details));
-        })
-        .on('mouseout', function(event, d) {
-            // Reset node appearance
-            d3.select(this).select('.node-circle')
-                .attr('stroke-width', 3)
-                .style('filter', null);
-
-            tooltip.transition()
-                .duration(500)
-                .style('opacity', 0);
-        })
-        .on('click', function(event, d) {
-            event.stopPropagation();
-            // Navigate to node details
-            window.open(`/node/${d.id}`, '_blank');
-        });
-
-    // Old path legend removed - now using sidebar legend
-
-    // Store references for global access
-    window.combinedGraphPathGroup = pathGroup;
-    window.combinedGraphNodeGroup = nodeGroup;
-    window.combinedGraphLink = link;
-
-    // Update positions on simulation tick
-    simulation.on('tick', () => {
-        // Constrain nodes to stay within bounds with padding
-        const padding = 50;
-        nodeGroup.attr('transform', d => {
-            d.x = Math.max(padding, Math.min(width - padding, d.x));
-            d.y = Math.max(padding, Math.min(height - padding, d.y));
-            return `translate(${d.x},${d.y})`;
-        });
-
-        link
-            .attr('x1', d => d.source.x)
-            .attr('y1', d => d.source.y)
-            .attr('x2', d => d.target.x)
-            .attr('y2', d => d.target.y);
-
-        linkLabel
-            .attr('x', d => (d.source.x + d.target.x) / 2)
-            .attr('y', d => (d.source.y + d.target.y) / 2);
-
-        // Update path lines
-        updatePathLines();
+    // Static layered (hop-depth) layout. If full labels would shrink the fit
+    // below readability, fall back to short labels with a tighter layout.
+    const containerRect = container.getBoundingClientRect();
+    const width = containerRect.width;
+    let useShortLabels = nodes.length > 30;
+    let layout = computeGraphLayout(nodes, paths, allLinks, useShortLabels);
+    if (!useShortLabels && (0.92 * width) / layout.totalWidth < 0.55) {
+        useShortLabels = true;
+        layout = computeGraphLayout(nodes, paths, allLinks, true);
+    }
+    nodes.forEach(n => {
+        const p = layout.pos[n.id];
+        n.x = p.x;
+        n.y = p.y;
     });
 
-    // Function to update path lines
-    function updatePathLines() {
-        // Draw distinct paths for each packet with different styles
-        const pathLines = pathGroup.selectAll('.path-line')
-            .data(paths);
+    // Position lookups for drawing links/paths.
+    const nodeById = new Map(nodes.map(n => [n.id, n]));
+    const nx = id => { const n = nodeById.get(id); return n ? n.x : 0; };
+    const ny = id => { const n = nodeById.get(id); return n ? n.y : 0; };
 
-        pathLines.enter()
-            .append('path')
-            .attr('class', 'path-line')
-            .merge(pathLines)
-            .attr('stroke', d => d.color)
-            .attr('stroke-width', 4)
-            .attr('stroke-dasharray', (d, i) => {
-                // Different dash patterns for different paths
-                const patterns = ['none', '10,5', '15,5,5,5', '20,5,5,5,5,5', '8,3'];
-                return patterns[i % patterns.length];
-            })
-            .attr('d', d => {
-                if (d.nodes.length < 2) return '';
+    // Aggregate traffic stats (node size / edge width encoding)
+    const relayCount = {}, heardCount = {}, packetsOnEdge = {};
+    paths.forEach(p => {
+        p.nodes.slice(1).forEach(nid => relayCount[nid] = (relayCount[nid] || 0) + 1);
+        if (p.gateway_node_id != null) heardCount[p.gateway_node_id] = (heardCount[p.gateway_node_id] || 0) + 1;
+    });
+    links.forEach(l => packetsOnEdge[l.source + '-' + l.target] = (l.packet_ids || []).length);
 
-                // Create a curved path through all nodes
-                const pathNodes = d.nodes.map(nodeId => nodes.find(n => n.id === nodeId)).filter(n => n);
-                if (pathNodes.length < 2) return '';
-
-                let pathString = `M${pathNodes[0].x},${pathNodes[0].y}`;
-
-                for (let i = 1; i < pathNodes.length; i++) {
-                    const prev = pathNodes[i - 1];
-                    const curr = pathNodes[i];
-
-                    // Add curve with offset based on path index to separate overlapping paths
-                    const pathIndex = paths.findIndex(p => p.packet_id === d.packet_id);
-                    const offset = (pathIndex % 5 - 2) * 15; // Spread paths out
-
-                    const midX = (prev.x + curr.x) / 2;
-                    const midY = (prev.y + curr.y) / 2;
-
-                    pathString += ` Q${midX + offset},${midY + offset} ${curr.x},${curr.y}`;
-                }
-
-                return pathString;
-            });
-
-        pathLines.exit().remove();
-    }
-
-    // Drag functions
-    function dragstarted(event, d) {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
-        d.fx = d.x;
-        d.fy = d.y;
-    }
-
-    function dragged(event, d) {
-        d.fx = event.x;
-        d.fy = event.y;
-    }
-
-    function dragended(event, d) {
-        if (!event.active) simulation.alphaTarget(0);
-        d.fx = null;
-        d.fy = null;
-    }
-
-    // Populate legend paths
-    populateLegendPaths(paths, nodes);
-}
-
-// Global function to highlight a specific path
-function highlightPath(pathData, highlight) {
-    if (!window.combinedGraphPathGroup || !window.combinedGraphNodeGroup || !window.combinedGraphLink) {
-        return; // Graph not ready yet
-    }
-
-    // Highlight the path line
-    window.combinedGraphPathGroup.selectAll('.path-line')
-        .filter(d => d.packet_id === pathData.packet_id)
-        .style('stroke-width', highlight ? 6 : 4)
-        .style('opacity', highlight ? 1 : 0.8);
-
-    // Highlight the nodes in the path
-    const pathNodes = pathData.nodes;
-    window.combinedGraphNodeGroup.selectAll('.node-circle')
-        .filter(d => pathNodes.includes(d.id))
-        .style('stroke', highlight ? pathData.color : null)
-        .style('stroke-width', highlight ? 5 : 3);
-
-    // Highlight gateway connection if exists
-    if (pathData.gateway_node_id) {
-        window.combinedGraphLink.filter(d =>
-            d.type === 'gateway-connection' &&
-            d.packet_ids.includes(pathData.packet_id)
-        )
-        .style('stroke-width', highlight ? 4 : 2)
-        .style('opacity', highlight ? 1 : 0.7);
-    }
-}
-
-// Function to populate the legend with path information
-function populateLegendPaths(paths, nodes) {
-    const container = document.getElementById('legend-paths-container');
-    if (!container || !paths || paths.length === 0) {
-        setChildren(container, el('small', { className: 'text-muted' }, 'No paths available'));
-        return;
-    }
-
-    container.replaceChildren();
-
-    // Sort paths by hop count and packet ID
-    const sortedPaths = [...paths].sort((a, b) => {
-        if (a.hop_count !== b.hop_count) return a.hop_count - b.hop_count;
-        return a.packet_id - b.packet_id;
+    // Receptions grouped by mesh packet
+    const meshGroups = new Map();
+    paths.forEach(p => {
+        const k = p.mesh_packet_id;
+        if (!meshGroups.has(k)) meshGroups.set(k, []);
+        meshGroups.get(k).push(p);
     });
 
-    sortedPaths.forEach((path, index) => {
-        const pathItem = document.createElement('div');
-        pathItem.className = 'legend-path-item';
-        pathItem.style.setProperty('--path-color', path.color);
-
-        // Create path visualization
-        const pathNodes = path.nodes.map(nodeId => {
-            const node = nodes.find(n => n.id === nodeId);
-            return node ? node.label : `!${nodeId.toString(16).padStart(8, '0')}`;
-        });
-
-        const gatewayInfo = path.gateway_node_id ?
-            nodes.find(n => n.id === path.gateway_node_id) : null;
-
-        pathItem.append(
-            el('div', { className: 'legend-path-color', style: { backgroundColor: path.color } }),
-            el('div', { className: 'legend-path-info' },
-                el('div', { className: 'legend-path-title' }, `Packet ${path.packet_id} (${path.hop_count} hops)`),
-                el('div', { className: 'legend-path-details' }, `${pathNodes.join(' -> ')}${gatewayInfo ? ` -> Gateway ${gatewayInfo.label}` : ''}`),
-                path.avg_snr ? el('div', { className: 'legend-path-details' }, `Avg SNR: ${path.avg_snr.toFixed(1)} dB`) : null
-            )
-        );
-
-        // Add hover interactions
-        pathItem.addEventListener('mouseenter', () => {
-            pathItem.classList.add('highlighted');
-            highlightPath(path, true);
-        });
-
-        pathItem.addEventListener('mouseleave', () => {
-            pathItem.classList.remove('highlighted');
-            highlightPath(path, false);
-        });
-
-        // Add click interaction for mobile
-        pathItem.addEventListener('click', () => {
-            const isHighlighted = pathItem.classList.contains('highlighted');
-            // Remove highlight from all other paths
-            container.querySelectorAll('.legend-path-item').forEach(item => {
-                item.classList.remove('highlighted');
-                const itemPath = sortedPaths.find(p => p.packet_id == item.querySelector('.legend-path-title').textContent.match(/\d+/)[0]);
-                if (itemPath) highlightPath(itemPath, false);
-            });
-
-            if (!isHighlighted) {
-                pathItem.classList.add('highlighted');
-                highlightPath(path, true);
-            }
-        });
-
-        container.appendChild(pathItem);
-    });
-
-    // Add summary if there are many paths
-    if (paths.length > 10) {
-        const summary = document.createElement('div');
-        summary.className = 'text-muted mt-2';
-        summary.style.fontSize = '0.65rem';
-        summary.style.fontStyle = 'italic';
-        summary.textContent = `Showing first 10 of ${paths.length} paths`;
-        container.appendChild(summary);
-    }
-}
-
-function showLinkDetails(sourceNode, targetNode, linkData) {
-    // Remove any existing modal
-    const existingBackdrop = document.querySelector('.modal-backdrop');
-    if (existingBackdrop) {
-        existingBackdrop.remove();
+    // All receptions that transit a node (as a router hop or as its hearing gateway)
+    function receptionsThroughNode(id) {
+        return paths.filter(p => p.gateway_node_id === id || p.nodes.includes(id));
     }
 
-    // Create backdrop
-    const backdrop = document.createElement('div');
-    backdrop.className = 'modal-backdrop';
-    backdrop.onclick = (e) => {
-        e.stopPropagation();
-        backdrop.remove();
+    // Node locations (node_id -> {lat, lon}) for hop distances
+    const locations = window.packetGraphData.locations || {};
+    function fmtKm(km) {
+        return km < 1 ? Math.round(km * 1000) + ' m' : km.toFixed(1) + ' km';
+    }
+    // Great-circle distance between two nodes in km (null if unknown).
+    function distKm(a, b) {
+        const la = locations[a], lb = locations[b];
+        if (!la || !lb) return null;
+        const toRad = x => x * Math.PI / 180;
+        const dLat = toRad(lb.lat - la.lat);
+        const dLon = toRad(lb.lon - la.lon);
+        const s = Math.sin(dLat / 2) ** 2
+            + Math.cos(toRad(la.lat)) * Math.cos(toRad(lb.lat)) * Math.sin(dLon / 2) ** 2;
+        return 2 * 6371 * Math.asin(Math.sqrt(s));
+    }
+    function hopDist(a, b) {
+        const km = distKm(a, b);
+        return km == null ? null : fmtKm(km);
+    }
+
+    // Set up D3 dimensions. Height is adaptive: give the layered layout
+    // enough vertical room so dense graphs aren't squished into 700px.
+    const height = Math.max(700, Math.min(2000, layout.maxY + 170));
+    container.style.height = height + 'px';
+
+    // Create SVG with zoom behavior
+    const svg = d3.select(container)
+        .append('svg')
+        .attr('width', width)
+        .attr('height', height);
+
+    // Store references for utility functions
+    combinedGraphSvg = svg;
+
+    // Main labels are always the short name; the long name (parens stripped)
+    // appears below once the graph is zoomed in far enough to fit it.
+    let showFullLabels = false;
+    window.syncGraphLabels = (k) => {
+        const wantFull = k >= 1.5;
+        if (wantFull !== showFullLabels) {
+            showFullLabels = wantFull;
+            nodeGroup.selectAll('.node-full').style('display', showFullLabels ? null : 'none');
+            renderOverlay();
+        }
     };
 
-    // Create modal content
+    // Create zoom behavior
+    const zoom = d3.zoom()
+        .scaleExtent([0.1, 4])
+        .on('zoom', (event) => {
+            g.attr('transform', event.transform);
+            if (window.syncGraphLabels) window.syncGraphLabels(event.transform.k);
+        });
+
+    svg.call(zoom);
+
+    // Create main group for all graph elements
+    const g = svg.append('g');
+    combinedGraphG = g;
+
+    // Hover tooltip (global, body-level so page coordinates position correctly)
+    const tooltip = graphTooltip;
+
+    // Create overlay group (inside the zoomed group so it pans/zooms with the graph)
+    const overlay = g.append('g').attr('class', 'overlay');
+
+    // ================= Aggregate base render =================
+    const base = g.append('g').attr('class', 'base');
+
+    // hop column headers (SOURCE, hop N) at the left edge of each depth column,
+    // keyed by the LAYOUT depth (not path index) so they line up with columns
+    const colX = {};
+    nodes.forEach(n => {
+        const d = layout.depthOf[n.id];
+        if (d === undefined) return;
+        colX[d] = colX[d] === undefined ? n.x : Math.min(colX[d], n.x);
+    });
+    const headerG = base.append('g').attr('class', 'hop-headers');
+    headerG.selectAll('text').data(Object.keys(colX).map(Number).sort((a, b) => a - b)).join('text')
+        .attr('class', 'hop-header')
+        .attr('x', d => colX[d]).attr('y', 18)
+        .attr('text-anchor', 'middle')
+        .text(d => d === 0 ? 'SOURCE' : 'hop ' + d);
+
+    const EDGE_COLOR = '#64748b'; // neutral: edge width carries the traffic signal
+
+    // RF links: width = packets
+    const edges = base.append('g').selectAll('line').data(links).join('line')
+        .attr('class', 'link-line')
+        .attr('x1', d => nx(d.source)).attr('y1', d => ny(d.source))
+        .attr('x2', d => nx(d.target)).attr('y2', d => ny(d.target))
+        .attr('stroke', EDGE_COLOR)
+        .attr('stroke-width', d => 1 + 3.5 * Math.log10(1 + (packetsOnEdge[d.source + '-' + d.target] || 1)))
+        .attr('stroke-opacity', 0.9)
+        .attr('stroke-linecap', 'round');
+
+    edges.append('title').text(d => {
+        const a = nodeById.get(d.source), b = nodeById.get(d.target);
+        return `${a ? a.full : shortId(d.source)} → ${b ? b.full : shortId(d.target)}\n${packetsOnEdge[d.source + '-' + d.target] || 0} packets · avg SNR ${d.avg_snr != null ? d.avg_snr.toFixed(1) + ' dB' : 'n/a'}`;
+    });
+
+    // gateway connections: dashed
+    const gwLines = base.append('g').selectAll('line').data(gatewayConnections).join('line')
+        .attr('class', 'gateway-connection')
+        .attr('x1', d => nx(d.source)).attr('y1', d => ny(d.source))
+        .attr('x2', d => nx(d.target)).attr('y2', d => ny(d.target));
+
+    // nodes: squares for gateways (size by packets heard), circles for routers
+    // (size by packets relayed), source highlighted
+    const nodeGroup = base.append('g').selectAll('g').data(nodes).join('g')
+        .attr('class', 'node-group')
+        .attr('transform', d => `translate(${d.x},${d.y})`);
+
+    nodeGroup.each(function(d) {
+        const sel = d3.select(this);
+        if (d.is_source) {
+            sel.append('circle').attr('r', 15).attr('fill', '#f97316').attr('stroke', '#c2410c').attr('stroke-width', 2.5);
+        } else if (d.type === 'gateway') {
+            const sz = 9 + 5 * Math.log10(1 + (heardCount[d.id] || 0));
+            sel.append('rect').attr('x', -sz / 2).attr('y', -sz / 2).attr('width', sz).attr('height', sz).attr('rx', 3)
+                .attr('fill', '#16a34a').attr('stroke', '#166534').attr('stroke-width', 1.5);
+        } else {
+            const r = 7 + 4 * Math.log10(1 + (relayCount[d.id] || 0));
+            sel.append('circle').attr('r', r).attr('fill', '#3b82f6').attr('stroke', '#1d4ed8').attr('stroke-width', 1.5);
+        }
+        sel.append('text').attr('class', 'node-label')
+            .attr('y', d => d.type === 'gateway' ? 26 : 28)
+            .attr('text-anchor', 'middle')
+            .text(d => d.label);
+        sel.append('text').attr('class', 'node-full')
+            .attr('y', d => d.type === 'gateway' ? 40 : 42)
+            .attr('text-anchor', 'middle')
+            .attr('font-size', '9px').attr('font-weight', '600')
+            .attr('fill', 'var(--bs-secondary-color)')
+            .style('display', 'none')
+            .text(d => stripParens(d.full || d.label));
+    });
+
+    // SNR + distance badges on the busiest edges, skipping any that would
+    // collide with a node label (keeps the initial view clean)
+    const labelRects = [];
+    nodeGroup.each(function(d) {
+        const r = this.querySelector('.node-label').getBoundingClientRect();
+        labelRects.push({ x: r.x, y: r.y, w: r.width, h: r.height });
+    });
+    links.filter(l => (packetsOnEdge[l.source + '-' + l.target] || 0) >= 10 && l.avg_snr != null)
+        .forEach(l => {
+            const mx = (nx(l.source) + nx(l.target)) / 2;
+            const my = (ny(l.source) + ny(l.target)) / 2 - 20;
+            const dist = hopDist(l.source, l.target);
+            const pillW = 12 + fmtSnr(l.avg_snr).length * 5.6;
+            const bw = pillW + 8;
+            const bh = 22 + (dist ? 12 : 0);
+            const hit = labelRects.some(r => mx - bw / 2 < r.x + r.w && mx + bw / 2 > r.x && my - 9 < r.y + r.h && my - 9 + bh > r.y);
+            if (hit) return;
+            snrBadgeSvg(base, mx, my, l.avg_snr, EDGE_COLOR, dist);
+        });
+
+    // node hover tooltip
+    nodeGroup
+        .on('mouseover', function(event, d) {
+            tooltip.style('opacity', 0.95);
+            const details = [
+                tooltipLine('Name', d.full || d.label),
+                tooltipLine('ID', shortId(d.id)),
+                tooltipLine('Type', d.type === 'gateway' ? 'Gateway' : 'Router'),
+                tooltipLine('Relayed', String(relayCount[d.id] || 0)),
+                tooltipLine('Heard', String(heardCount[d.id] || 0))
+            ];
+            setGraphTooltip(tooltip, event,
+                tooltipWithTitle(`${d.is_source ? '🚀 ' : ''}${d.full || d.label}`, ...details));
+        })
+        .on('mouseout', function(event, d) {
+            tooltip.style('opacity', 0);
+        })
+        .on('click', function(event, d) {
+            event.stopPropagation();
+            focusNode(d.id);
+        });
+
+    // link hover tooltip + click -> details modal
+    edges
+        .on('mouseover', function(event, d) {
+            d3.select(this).attr('stroke-width', d.strength + 3);
+            tooltip.style('opacity', 0.95);
+            const a = nodeById.get(d.source), b = nodeById.get(d.target);
+            setGraphTooltip(tooltip, event,
+                tooltipWithTitle('RF Link',
+                    tooltipLine('From', a ? a.full : shortId(d.source)),
+                    tooltipLine('To', b ? b.full : shortId(d.target)),
+                    tooltipLine('Packets', String(packetsOnEdge[d.source + '-' + d.target] || 0)),
+                    tooltipLine('Avg SNR', d.avg_snr != null ? d.avg_snr.toFixed(1) + ' dB' : 'n/a')));
+        })
+        .on('mouseout', function(event, d) {
+            d3.select(this).attr('stroke-width', d => 1 + 3.5 * Math.log10(1 + (packetsOnEdge[d.source + '-' + d.target] || 1)));
+            tooltip.style('opacity', 0);
+        })
+        .on('click', function(event, d) {
+            event.stopPropagation();
+            const a = nodeById.get(d.source), b = nodeById.get(d.target);
+            if (a && b) showLinkDetails(a, b, d);
+        });
+
+    // click background -> clear selection
+    svg.on('click', function(event) {
+        if (event.target === svg.node() || event.target === base.node() || event.target === g.node()) {
+            clearSelection();
+        }
+    });
+
+    // ================= Overlay render (trace / cone) =================
+    // Highlight by REUSING the base labels: dim the non-selected nodes/edges
+    // individually and recolor the selected ones - no duplicate label painting.
+    function applyHighlight(hlNodes, hlEdges, color) {
+        const active = !!color;
+        nodeGroup.classed('dimmed', d => active && !hlNodes.has(d.id));
+        nodeGroup.classed('label-hl', d => active && hlNodes.has(d.id));
+        nodeGroup.selectAll('.node-label').style('fill', d => active && hlNodes.has(d.id) ? color : null);
+        nodeGroup.selectAll('.node-full').style('fill', d => active && hlNodes.has(d.id) ? '#6d28d9' : null);
+        edges.classed('dimmed', d => active && !hlEdges.has(d.source + '-' + d.target));
+        gwLines.classed('dimmed', active);
+        headerG.classed('dimmed', active);
+        base.selectAll('.edge-badge').classed('dimmed', active);
+    }
+
+    function clearHighlight() {
+        applyHighlight(new Set(), new Set(), null);
+    }
+
+    function renderOverlay() {
+        overlay.selectAll('*').remove();
+        if (tracedPacketId != null) { renderReceptionOverlay(); return; }
+        if (focusedNodeId != null) { renderConeOverlay(focusedNodeId); return; }
+        clearHighlight();
+    }
+
+    function renderReceptionOverlay() {
+        overlay.selectAll('*').remove();
+        const p = paths.find(p => p.packet_id === tracedPacketId);
+        if (!p) { clearHighlight(); return; }
+        const routeNodes = p.nodes.map(nid => nodeById.get(nid)).filter(Boolean);
+        const routeIds = [...p.nodes];
+        if (p.gateway_node_id != null && !p.nodes.includes(p.gateway_node_id)) routeIds.push(p.gateway_node_id);
+
+        // reuse base labels: highlight the route nodes, dim everything else
+        const hlNodes = new Set(routeIds);
+        const hlEdges = new Set();
+        routeIds.slice(1).forEach((nid, i) => hlEdges.add(routeIds[i] + '-' + nid));
+        applyHighlight(hlNodes, hlEdges, p.color);
+
+        // main path: source -> last RF hop (solid)
+        const pts = routeNodes.map(n => ({ x: n.x, y: n.y }));
+        overlay.append('polyline').attr('points', pts.map(pt => `${pt.x},${pt.y}`).join(' '))
+            .attr('fill', 'none').attr('stroke', '#fff').attr('stroke-width', 9).attr('stroke-linejoin', 'round').attr('stroke-opacity', 0.95);
+        overlay.append('polyline').attr('points', pts.map(pt => `${pt.x},${pt.y}`).join(' '))
+            .attr('fill', 'none').attr('stroke', p.color).attr('stroke-width', 4).attr('stroke-linejoin', 'round');
+
+        // gateway hop: dashed segment last RF node -> gateway + gateway ring/label
+        if (p.gateway_node_id != null && nodeById.get(p.gateway_node_id) && routeNodes.length) {
+            const last = routeNodes[routeNodes.length - 1];
+            const gp = nodeById.get(p.gateway_node_id);
+            overlay.append('line').attr('x1', last.x).attr('y1', last.y)
+                .attr('x2', gp.x).attr('y2', gp.y)
+                .attr('stroke', '#fff').attr('stroke-width', 7).attr('stroke-dasharray', '6,4').attr('stroke-opacity', 0.95);
+            overlay.append('line').attr('x1', last.x).attr('y1', last.y)
+                .attr('x2', gp.x).attr('y2', gp.y)
+                .attr('stroke', p.color).attr('stroke-width', 3).attr('stroke-dasharray', '6,4');
+            const gsz = 9 + 5 * Math.log10(1 + (heardCount[p.gateway_node_id] || 0));
+            overlay.append('rect').attr('x', gp.x - gsz / 2 - 3).attr('y', gp.y - gsz / 2 - 3)
+                .attr('width', gsz + 6).attr('height', gsz + 6).attr('rx', 5)
+                .attr('fill', 'none').attr('stroke', p.color).attr('stroke-width', 3);
+
+        }
+
+        // rings for the RF route nodes (labels are reused from the base graph)
+        overlay.selectAll('circle').data(routeNodes).join('circle')
+            .attr('cx', d => d.x).attr('cy', d => d.y)
+            .attr('r', d => d.is_source ? 15 : 9)
+            .attr('fill', 'none').attr('stroke', p.color).attr('stroke-width', 3);
+
+        // per-hop SNR badges along the route (RF edges + the gateway reception)
+        routeIds.forEach((nid, i) => {
+            if (i === 0) return;
+            const prevN = nodeById.get(routeIds[i - 1]), curN = nodeById.get(nid);
+            if (!prevN || !curN) return;
+            const snr = i < routeIds.length - 1 ? edgeSnr(routeIds[i - 1], nid) : p.avg_snr;
+            if (snr == null) return;
+            snrBadgeSvg(overlay, (prevN.x + curN.x) / 2, (prevN.y + curN.y) / 2 - 10, snr, p.color, hopDist(routeIds[i - 1], nid));
+        });
+    }
+
+    function renderConeOverlay(nodeId) {
+        overlay.selectAll('*').remove();
+        const recs = receptionsThroughNode(nodeId);
+        if (!recs.length) { clearHighlight(); return; }
+        const nodeIds = new Set();
+        const edgeCounts = new Map();
+        const edgeRecs = new Map(); // edge key -> receptions using it (for SNR fallback)
+        recs.forEach(p => {
+            const chain = [...p.nodes];
+            if (p.gateway_node_id != null && !chain.includes(p.gateway_node_id)) chain.push(p.gateway_node_id);
+            chain.forEach((nid, i) => {
+                nodeIds.add(nid);
+                if (i === 0) return;
+                const k = chain[i - 1] + '-' + nid;
+                edgeCounts.set(k, (edgeCounts.get(k) || 0) + 1);
+                if (!edgeRecs.has(k)) edgeRecs.set(k, []);
+                edgeRecs.get(k).push(p);
+            });
+        });
+        edgeCounts.forEach((cnt, k) => {
+            const [a, b] = k.split('-').map(Number);
+            const na = nodeById.get(a), nb = nodeById.get(b);
+            if (!na || !nb) return;
+            const w = 1 + 3 * Math.log10(1 + cnt);
+            overlay.append('line').attr('x1', na.x).attr('y1', na.y).attr('x2', nb.x).attr('y2', nb.y)
+                .attr('stroke', '#fff').attr('stroke-width', w + 5).attr('stroke-opacity', 0.9).attr('stroke-linecap', 'round');
+            overlay.append('line').attr('x1', na.x).attr('y1', na.y).attr('x2', nb.x).attr('y2', nb.y)
+                .attr('stroke', '#6366f1').attr('stroke-width', w).attr('stroke-linecap', 'round');
+        });
+        // SNR badges on EVERY cone edge: RF links use the link's avg SNR;
+        // gateway hops fall back to the receptions' own SNR.
+        edgeCounts.forEach((cnt, k) => {
+            const [a, b] = k.split('-').map(Number);
+            const na = nodeById.get(a), nb = nodeById.get(b);
+            if (!na || !nb) return;
+            let snr = edgeSnr(a, b);
+            if (snr == null) {
+                const vals = (edgeRecs.get(k) || []).map(p => p.avg_snr).filter(v => v != null);
+                if (vals.length) snr = vals.reduce((x, y) => x + y, 0) / vals.length;
+            }
+            if (snr == null) return;
+            snrBadgeSvg(overlay, (na.x + nb.x) / 2, (na.y + nb.y) / 2 - 10, snr, '#4f46e5', hopDist(a, b));
+        });
+        nodeIds.forEach(id => {
+            const n = nodeById.get(id);
+            if (!n) return;
+            const og = overlay.append('g').attr('transform', `translate(${n.x},${n.y})`);
+            if (n.type === 'gateway') {
+                og.append('rect').attr('x', -9).attr('y', -9).attr('width', 18).attr('height', 18).attr('rx', 4)
+                    .attr('fill', 'none').attr('stroke', '#6366f1').attr('stroke-width', 3);
+            } else {
+                og.append('circle').attr('r', n.is_source ? 16 : 10).attr('fill', 'none').attr('stroke', '#6366f1').attr('stroke-width', 3);
+            }
+        });
+        // reuse base labels: highlight cone nodes, dim everything else
+        const hlEdges = new Set(edgeCounts.keys());
+        applyHighlight(nodeIds, hlEdges, '#6366f1');
+    }
+
+    // ================= Selection state =================
+    function markRows() {
+        const focusRecs = focusedNodeId != null ? receptionsThroughNode(focusedNodeId) : null;
+        d3.selectAll('.rec').classed('active', d => !!d && d.packet_id === tracedPacketId)
+            .classed('in-focus', d => !!d && !!focusRecs && focusRecs.some(p => p.packet_id === d.packet_id));
+    }
+
+    function traceReception(id) {
+        tracedPacketId = id;
+        focusedNodeId = null;
+        renderOverlay();
+        renderStrip();
+        markRows();
+    }
+
+    function focusNode(id) {
+        focusedNodeId = id;
+        tracedPacketId = null;
+        renderOverlay();
+        renderStrip();
+        markRows();
+    }
+
+    function clearSelection() {
+        tracedPacketId = null;
+        focusedNodeId = null;
+        renderOverlay();
+        renderStrip();
+        markRows();
+    }
+
+    // ================= Route strip =================
+    function renderStrip() {
+        const strip = d3.select('#route-strip');
+        strip.selectAll('*').remove();
+        if (focusedNodeId != null) {
+            const n = nodeById.get(focusedNodeId);
+            const recs = receptionsThroughNode(focusedNodeId);
+            const lastHops = new Set(recs.map(p => p.nodes[p.nodes.length - 1]));
+            const gws = new Set(recs.filter(p => p.gateway_node_id != null).map(p => p.gateway_node_id));
+            d3.select('#strip-pkt-id').text('focus');
+            // route leading up to the cone: dominant prefix (source -> focused node)
+            const prefixCounts = new Map();
+            let bestPrefix = null, bestCount = 0;
+            recs.forEach(p => {
+                const idx = p.nodes.indexOf(focusedNodeId);
+                const prefix = idx >= 0 ? p.nodes.slice(0, idx + 1) : p.nodes;
+                const key = prefix.join(',');
+                const c = (prefixCounts.get(key) || 0) + 1;
+                prefixCounts.set(key, c);
+                if (c > bestCount) { bestCount = c; bestPrefix = prefix; }
+            });
+            const isGwFocus = !!(n && n.type === 'gateway');
+            (bestPrefix || []).forEach((nid, i) => {
+                const cn = nodeById.get(nid);
+                const isFocus = !isGwFocus && i === bestPrefix.length - 1;
+                hopChip(strip, {
+                    idx: isFocus ? 'focus' : '#' + i,
+                    label: cn ? cn.label : shortId(nid),
+                    full: cn ? (cn.full || '') : '',
+                    snr: i > 0 && bestPrefix.length > 1 ? edgeSnr(bestPrefix[i - 1], nid) : null,
+                    distKm: i > 0 ? hopDist(bestPrefix[i - 1], nid) : null,
+                    extraClass: isFocus ? 'focus-chip' : null,
+                    title: cn ? (cn.full || cn.label) : shortId(nid)
+                });
+                if (i < bestPrefix.length - 1) strip.append('span').attr('class', 'hop-arrow').text('→');
+            });
+            if (isGwFocus) {
+                strip.append('span').attr('class', 'hop-arrow').text('→');
+                hopChip(strip, {
+                    idx: 'focus',
+                    label: n ? n.label : shortId(focusedNodeId),
+                    full: n ? (n.full || '') : '',
+                    snr: null,
+                    distKm: bestPrefix && bestPrefix.length ? hopDist(bestPrefix[bestPrefix.length - 1], focusedNodeId) : null,
+                    extraClass: 'focus-chip'
+                });
+            }
+            strip.append('span').style('margin-left', '8px').style('font-size', '12px').style('color', 'var(--bs-secondary-color)')
+                .text(`· hop ${bestPrefix ? bestPrefix.length - 1 : '?'} · ${recs.length} receptions · ${gws.size} gateways · ${lastHops.size} last hops — click a reception below for its exact route`);
+            return;
+        }
+        const p = paths.find(p => p.packet_id === tracedPacketId);
+        d3.select('#strip-pkt-id').text(tracedPacketId != null ? `#${tracedPacketId}` : '—');
+        if (!p) {
+            strip.append('span').style('color', 'var(--bs-secondary-color)').style('font-size', '12px')
+                .text('Select a reception to see its exact route.');
+            return;
+        }
+        p.nodes.forEach((nid, i) => {
+            const n = nodeById.get(nid);
+            hopChip(strip, {
+                idx: '#' + i,
+                label: n ? n.label : shortId(nid),
+                full: n ? (n.full || '') : '',
+                snr: i > 0 ? edgeSnr(p.nodes[i - 1], nid) : null,
+                distKm: i > 0 ? hopDist(p.nodes[i - 1], nid) : null,
+                title: n ? (n.full || n.label) : shortId(nid)
+            });
+            if (i < p.nodes.length - 1) strip.append('span').attr('class', 'hop-arrow').text('→');
+        });
+        if (p.gateway_node_id != null) {
+            const gw = nodeById.get(p.gateway_node_id);
+            strip.append('span').attr('class', 'hop-arrow').text('→');
+            hopChip(strip, {
+                idx: 'gw',
+                label: gw ? gw.label : shortId(p.gateway_node_id),
+                full: gw ? (gw.full || '') : '',
+                snr: p.avg_snr,
+                distKm: p.nodes.length ? hopDist(p.nodes[p.nodes.length - 1], p.gateway_node_id) : null,
+                extraClass: 'gateway'
+            });
+        }
+        // reception-level summary with the packet's own SNR as a badge
+        const sum = strip.append('span').style('margin-left', '10px').style('display', 'inline-flex')
+            .style('align-items', 'center').style('gap', '8px');
+        sum.append('span').attr('class', 'snr-badge')
+            .text(`reception SNR ${p.avg_snr != null ? fmtSnr(p.avg_snr) : 'n/a'}`);
+        sum.append('span').style('font-size', '11px').style('color', 'var(--bs-secondary-color)').text(`· ${p.hop_count} hops`);
+    }
+
+    // ================= Sidebar: mesh packet -> last hop -> receptions =================
+    function renderSidebar() {
+        const gg = d3.select('#reception-groups');
+        gg.selectAll('*').remove();
+        if (paths.length === 0) {
+            gg.append('small').attr('class', 'text-muted').text('No receptions.');
+            return;
+        }
+        meshGroups.forEach((recs, mid) => {
+            const byLast = {};
+            recs.forEach(p => { const last = p.nodes[p.nodes.length - 1]; (byLast[last] = byLast[last] || []).push(p); });
+            const lastHops = Object.keys(byLast);
+            const avgSnr = recs.reduce((sum, p) => sum + (p.avg_snr || 0), 0) / Math.max(recs.length, 1);
+            gg.append('div').attr('class', 'meshhead')
+                .html(`<b>Mesh pkt !${mid.toString(16).padStart(8, '0')}</b>`);
+            gg.append('div').attr('class', 'muted')
+                .text(`${recs.length} reception${recs.length !== 1 ? 's' : ''} · ${lastHops.length} last hop${lastHops.length !== 1 ? 's' : ''}${isFinite(avgSnr) ? ' · avg SNR ' + avgSnr.toFixed(1) + ' dB' : ''}`);
+            lastHops.sort((a, b) => byLast[b].length - byLast[a].length).forEach(last => {
+                const ps = byLast[last];
+                const grp = gg.append('div').attr('class', 'gwgroup');
+                // show the full hop path leading to this last hop (shared prefix)
+                const pathLabel = (ps[0].nodes || []).map(nid =>
+                    (nodeById.get(nid) || {}).label || shortId(+nid)).join(' → ');
+                grp.append('h4').text(`${pathLabel} · ${ps.length} rec${ps.length !== 1 ? 's' : ''}`);
+                ps.forEach(p => {
+                    const gw = nodeById.get(p.gateway_node_id);
+                    const row = grp.append('div').attr('class', 'gw rec').attr('data-id', p.gateway_node_id).datum(p)
+                        .attr('title', `${p.nodes.map(nid => (nodeById.get(nid) || {}).full || shortId(nid)).join(' → ')}${p.gateway_node_id != null ? ' → ' + ((nodeById.get(p.gateway_node_id) || {}).full || shortId(p.gateway_node_id)) : ''} · ${p.hop_count} hops · avg SNR ${p.avg_snr != null ? p.avg_snr.toFixed(1) + ' dB' : 'n/a'}`)
+                        .on('click', () => traceReception(p.packet_id));
+                    row.append('span').text(gw ? gw.label : shortId(p.gateway_node_id));
+                    const right = row.append('span').attr('class', 'cnt');
+                    right.append('span').text(`${p.hop_count}h · ${p.avg_snr != null ? p.avg_snr.toFixed(1) + 'dB' : 'n/a'}`);
+                    right.append('a').attr('class', 'pkt-link')
+                        .attr('href', `/packet/${p.packet_id}`)
+                        .attr('target', '_blank')
+                        .attr('rel', 'noopener')
+                        .attr('title', 'Open packet page in a new tab')
+                        .text(`#${p.packet_id}`)
+                        .on('click', (ev) => ev.stopPropagation());
+                });
+            });
+        });
+    }
+
+    // ================= Node search =================
+    function centerOnNode(id) {
+        const n = nodeById.get(id);
+        if (!n || !combinedGraphSvg) return;
+        const rect = document.getElementById('combined-traceroute-graph').getBoundingClientRect();
+        const k = Math.max(1.2, d3.zoomTransform(combinedGraphSvg.node()).k);
+        applyGraphTransform(d3.zoomIdentity.translate(rect.width / 2 - k * n.x, rect.height / 2 - k * n.y).scale(k));
+    }
+
+    function setupNodeSearch() {
+        const input = document.getElementById('node-search');
+        const results = document.getElementById('node-search-results');
+        if (!input || !results) return;
+        input.addEventListener('input', () => {
+            const q = input.value.trim().toLowerCase();
+            results.replaceChildren();
+            if (q.length < 1) return;
+            const matches = nodes.filter(n =>
+                (n.label && n.label.toLowerCase().includes(q)) ||
+                (n.full && n.full.toLowerCase().includes(q)) ||
+                shortId(n.id).toLowerCase().includes(q)
+            ).slice(0, 10);
+            matches.forEach(n => {
+                const item = document.createElement('div');
+                item.className = 'node-search-item';
+                item.textContent = `${n.label} — ${n.full || shortId(n.id)}`;
+                item.onclick = () => {
+                    focusNode(n.id);
+                    centerOnNode(n.id);
+                    input.value = '';
+                    results.replaceChildren();
+                };
+                results.appendChild(item);
+            });
+        });
+        input.addEventListener('blur', () => setTimeout(() => results.replaceChildren(), 150));
+    }
+
+    // ================= Static render + fit =================
+    // fit the viewport to the graph
+    const bounds = g.node().getBBox();
+    const fitScale = Math.min(1.5, (0.92 * width) / Math.max(bounds.width, 1));
+    const fittedHeight = Math.max(450, Math.min(1600, Math.ceil(bounds.height * fitScale + 90)));
+    if (fittedHeight !== height) {
+        container.style.height = fittedHeight + 'px';
+        svg.attr('height', fittedHeight);
+    }
+    fitCombinedGraph();
+
+    // initial state: full aggregate view (no auto-trace - the graph should be
+    // readable on load; tracing/focusing is on-demand). Preserve a selection
+    // that survived a rebuild (e.g. window resize).
+    renderSidebar();
+    setupNodeSearch();
+    if (tracedPacketId != null || focusedNodeId != null) {
+        renderOverlay();
+        renderStrip();
+        markRows();
+    } else {
+        renderStrip();
+    }
+}
+
+// ================= Link details modal (kept from previous design) =================
+function showLinkDetails(sourceNode, targetNode, linkData) {
+    const existingBackdrop = document.querySelector('.modal-backdrop');
+    if (existingBackdrop) existingBackdrop.remove();
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.onclick = (e) => { e.stopPropagation(); backdrop.remove(); };
+
     const modal = document.createElement('div');
     modal.className = 'modal-content';
-    modal.onclick = (e) => e.stopPropagation(); // Prevent closing when clicking inside modal
+    modal.onclick = (e) => e.stopPropagation();
 
     const snrBadge = linkData.avg_snr
         ? badge(`${linkData.avg_snr.toFixed(1)} dB`, linkData.avg_snr > -10 ? 'bg-success' : linkData.avg_snr > -20 ? 'bg-warning' : 'bg-danger')
         : badge('N/A', 'bg-secondary');
 
-    const closeButton = el('button', {
-        className: 'btn-close btn-close-white',
-        ariaLabel: 'Close',
-        type: 'button'
-    });
+    const closeButton = el('button', { className: 'btn-close btn-close-white', ariaLabel: 'Close', type: 'button' });
     closeButton.addEventListener('click', () => backdrop.remove());
 
     const hopsButton = buttonLink({
@@ -1108,8 +1383,8 @@ function showLinkDetails(sourceNode, targetNode, linkData) {
         ),
         el('div', null,
             el('div', { className: 'row mb-3' },
-                el('div', { className: 'col-6' }, el('strong', null, 'From:'), el('br'), el('span', { className: 'text-primary' }, sourceNode.label)),
-                el('div', { className: 'col-6' }, el('strong', null, 'To:'), el('br'), el('span', { className: 'text-primary' }, targetNode.label))
+                el('div', { className: 'col-6' }, el('strong', null, 'From:'), el('br'), el('span', { className: 'text-primary' }, sourceNode.full || sourceNode.label)),
+                el('div', { className: 'col-6' }, el('strong', null, 'To:'), el('br'), el('span', { className: 'text-primary' }, targetNode.full || targetNode.label))
             ),
             el('div', { className: 'row mb-3' },
                 el('div', { className: 'col-4' }, el('strong', null, 'Observations:'), el('br'), badge(String(linkData.value), 'bg-info')),
@@ -1125,114 +1400,77 @@ function showLinkDetails(sourceNode, targetNode, linkData) {
     document.body.appendChild(backdrop);
 }
 
-// Utility functions for external control
-function centerCombinedGraph() {
-    if (combinedGraphSvg && combinedGraphG) {
-        const bounds = combinedGraphG.node().getBBox();
-        const containerRect = document.getElementById('combined-traceroute-graph').getBoundingClientRect();
-        const fullWidth = containerRect.width;
-        const fullHeight = 700;
-        const scale = 0.8 / Math.max(bounds.width / fullWidth, bounds.height / fullHeight);
-        const translate = [
-            fullWidth / 2 - scale * (bounds.x + bounds.width / 2),
-            fullHeight / 2 - scale * (bounds.y + bounds.height / 2)
-        ];
+// ================= Zoom utilities =================
+// Apply a zoom transform directly: set the visual transform on the graph
+// group AND keep d3-zoom's internal state in sync so wheel/pan gestures
+// continue from the applied transform.
+function applyGraphTransform(transform) {
+    if (!combinedGraphSvg || !combinedGraphG) return;
+    combinedGraphG.attr('transform', transform);
+    combinedGraphSvg.property('__zoom', transform);
+    if (window.syncGraphLabels) window.syncGraphLabels(transform.k);
+}
 
-        combinedGraphSvg.transition().duration(750)
-            .call(d3.zoom().transform, d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
-    }
+function fitCombinedGraph() {
+    if (!combinedGraphSvg || !combinedGraphG) return;
+    const bounds = combinedGraphG.node().getBBox();
+    if (!bounds.width || !bounds.height) return;
+
+    const containerRect = document.getElementById('combined-traceroute-graph').getBoundingClientRect();
+    const fullWidth = containerRect.width;
+    const fullHeight = containerRect.height;
+    // Fit the whole graph inside the viewport with a small margin, but cap the
+    // zoom so small graphs don't blow up too far.
+    const scale = Math.min(1.5, 0.92 / Math.max(bounds.width / fullWidth, bounds.height / fullHeight));
+    const translate = [
+        fullWidth / 2 - scale * (bounds.x + bounds.width / 2),
+        fullHeight / 2 - scale * (bounds.y + bounds.height / 2)
+    ];
+    applyGraphTransform(d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
+}
+
+function centerCombinedGraph() {
+    fitCombinedGraph();
 }
 
 function resetCombinedGraphZoom() {
-    if (combinedGraphSvg) {
-        combinedGraphSvg.transition().duration(750)
-            .call(d3.zoom().transform, d3.zoomIdentity);
-    }
+    applyGraphTransform(d3.zoomIdentity);
+}
+
+// Zoom in/out by a factor, keeping the viewport centre fixed.
+function zoomGraphBy(factor) {
+    if (!combinedGraphSvg) return;
+    const svgEl = combinedGraphSvg.node();
+    const t = d3.zoomTransform(svgEl);
+    const k = Math.min(4, Math.max(0.1, t.k * factor));
+    const containerRect = document.getElementById('combined-traceroute-graph').getBoundingClientRect();
+    const cx = containerRect.width / 2;
+    const cy = containerRect.height / 2;
+    // d3 Transform.scale multiplies the current k, so scale by k / t.k to
+    // reach the absolute target k while keeping the viewport centre fixed.
+    const next = t.translate(cx, cy).scale(k / t.k).translate(-cx, -cy);
+    applyGraphTransform(next);
+}
+
+function zoomGraphIn() {
+    zoomGraphBy(1.4);
+}
+
+function zoomGraphOut() {
+    zoomGraphBy(1 / 1.4);
 }
 
 // Initialize graph when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
-    // Small delay to ensure container dimensions are available
+    graphTooltip = d3.select(document.body)
+        .append('div')
+        .attr('class', 'graph-tooltip')
+        .style('opacity', 0);
     setTimeout(loadCombinedTracerouteGraph, 100);
-
-    // Initialize legend tooltips
-    initializeLegendTooltips();
 });
-
-// Function to initialize legend tooltips
-function initializeLegendTooltips() {
-    let tooltip = null;
-
-    // Create tooltip element
-    function createTooltip() {
-        if (tooltip) return tooltip;
-
-        tooltip = document.createElement('div');
-        tooltip.className = 'legend-tooltip';
-        document.body.appendChild(tooltip);
-        return tooltip;
-    }
-
-    // Show tooltip
-    function showTooltip(element, text, event) {
-        const tooltipEl = createTooltip();
-        tooltipEl.textContent = text;
-        tooltipEl.style.opacity = '1';
-
-        // Position tooltip
-        const rect = element.getBoundingClientRect();
-        const tooltipRect = tooltipEl.getBoundingClientRect();
-
-        let left = event.clientX + 10;
-        let top = event.clientY - 10;
-
-        // Adjust if tooltip would go off screen
-        if (left + tooltipRect.width > window.innerWidth) {
-            left = event.clientX - tooltipRect.width - 10;
-        }
-        if (top < 0) {
-            top = event.clientY + 20;
-        }
-
-        tooltipEl.style.left = left + 'px';
-        tooltipEl.style.top = top + 'px';
-    }
-
-    // Hide tooltip
-    function hideTooltip() {
-        if (tooltip) {
-            tooltip.style.opacity = '0';
-        }
-    }
-
-    // Add event listeners to legend items
-    document.addEventListener('mouseenter', function(e) {
-        const legendItem = e.target.closest('.legend-item[data-tooltip]');
-        if (legendItem) {
-            const tooltipText = legendItem.getAttribute('data-tooltip');
-            showTooltip(legendItem, tooltipText, e);
-        }
-    }, true);
-
-    document.addEventListener('mouseleave', function(e) {
-        const legendItem = e.target.closest('.legend-item[data-tooltip]');
-        if (legendItem) {
-            hideTooltip();
-        }
-    }, true);
-
-    document.addEventListener('mousemove', function(e) {
-        const legendItem = e.target.closest('.legend-item[data-tooltip]');
-        if (legendItem && tooltip && tooltip.style.opacity === '1') {
-            const tooltipText = legendItem.getAttribute('data-tooltip');
-            showTooltip(legendItem, tooltipText, e);
-        }
-    }, true);
-}
 
 // Handle window resize
 window.addEventListener('resize', function() {
-    // Debounce resize events
     clearTimeout(window.combinedGraphResizeTimeout);
     window.combinedGraphResizeTimeout = setTimeout(function() {
         const container = document.getElementById('combined-traceroute-graph');
