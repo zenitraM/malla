@@ -1242,11 +1242,14 @@ function loadCombinedTracerouteGraph() {
             const byLast = {};
             recs.forEach(p => { const last = p.nodes[p.nodes.length - 1]; (byLast[last] = byLast[last] || []).push(p); });
             const lastHops = Object.keys(byLast);
-            const avgSnr = recs.reduce((sum, p) => sum + (p.avg_snr || 0), 0) / Math.max(recs.length, 1);
+            const snrVals = recs.map(p => p.avg_snr).filter(v => v != null);
+            const avgSnr = snrVals.length
+                ? snrVals.reduce((sum, v) => sum + v, 0) / snrVals.length
+                : null;
             gg.append('div').attr('class', 'meshhead')
                 .html(`<b>Mesh pkt !${mid.toString(16).padStart(8, '0')}</b>`);
             gg.append('div').attr('class', 'muted')
-                .text(`${recs.length} reception${recs.length !== 1 ? 's' : ''} · ${lastHops.length} last hop${lastHops.length !== 1 ? 's' : ''}${isFinite(avgSnr) ? ' · avg SNR ' + avgSnr.toFixed(1) + ' dB' : ''}`);
+                .text(`${recs.length} reception${recs.length !== 1 ? 's' : ''} · ${lastHops.length} last hop${lastHops.length !== 1 ? 's' : ''}${avgSnr != null ? ' · avg SNR ' + avgSnr.toFixed(1) + ' dB' : ''}`);
             lastHops.sort((a, b) => byLast[b].length - byLast[a].length).forEach(last => {
                 const ps = byLast[last];
                 const grp = gg.append('div').attr('class', 'gwgroup');
