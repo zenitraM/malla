@@ -95,3 +95,66 @@ def test_build_combined_graph_basic(mock_get_names, mock_parse):
     )
     assert nodeab_edge is not None
     assert nodeab_edge["value"] == 2
+
+
+@pytest.mark.unit
+@patch("src.malla.utils.traceroute_utils.parse_traceroute_payload")
+@patch("src.malla.utils.node_utils.get_bulk_node_names")
+def test_combined_graph_paths_carry_mesh_packet_id(mock_get_names, mock_parse):
+    """Each graph path must keep its packet's mesh_packet_id.
+
+    The receptions sidebar groups receptions by mesh packet id (one mesh
+    transmission heard by many gateways), so paths must expose the id the
+    front-end keys them under.
+    """
+    mock_get_names.return_value = {}
+
+    payload = json.dumps(
+        {
+            "route_nodes": [0x02],
+            "snr_towards": [5.0, 4.0],
+            "route_back": [],
+            "snr_back": [],
+        }
+    ).encode()
+
+    def parse_side_effect(raw):
+        return json.loads(raw.decode())
+
+    mock_parse.side_effect = parse_side_effect
+
+    base_time = int(time.time())
+    packets = [
+        {
+            "id": 1,
+            "timestamp": base_time,
+            "from_node_id": 0x01,
+            "to_node_id": 0x03,
+            "gateway_id": "!00000001",
+            "hop_start": 3,
+            "hop_limit": 0,
+            "raw_payload": payload,
+            "portnum_name": "TRACEROUTE_APP",
+            "payload_length": len(payload),
+            "mesh_packet_id": 0xAABBCC01,
+        },
+        {
+            "id": 2,
+            "timestamp": base_time + 0.5,
+            "from_node_id": 0x01,
+            "to_node_id": 0x03,
+            "gateway_id": "!00000002",
+            "hop_start": 3,
+            "hop_limit": 0,
+            "raw_payload": payload,
+            "portnum_name": "TRACEROUTE_APP",
+            "payload_length": len(payload),
+            "mesh_packet_id": 0xAABBCC02,
+        },
+    ]
+
+    graph = build_combined_traceroute_graph(packets)
+
+    paths_by_id = {path["packet_id"]: path for path in graph["paths"]}
+    assert paths_by_id[1]["mesh_packet_id"] == 0xAABBCC01
+    assert paths_by_id[2]["mesh_packet_id"] == 0xAABBCC02
