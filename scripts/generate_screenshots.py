@@ -107,6 +107,11 @@ def _discover_playwright_chromium_executable() -> str | None:
 
 _configure_playwright_nodejs_path()
 
+# The packet-detail page whose combined traceroute graph is captured. The real
+# URL depends on the demo DB (packet id), so the capture loop resolves this
+# sentinel to the URL returned by _build_demo_database().
+PACKET_GRAPH_ROUTE = "/packet/__combined_traceroute_demo__"
+
 # The list of (route, output filename) to capture – order matters for README.
 # JPEG is used for smaller, README-friendly assets.
 PAGES: list[tuple[str, str]] = [
@@ -117,6 +122,7 @@ PAGES: list[tuple[str, str]] = [
     ("/traceroute", "traceroutes.jpg"),
     ("/map", "map.jpg"),
     ("/traceroute-graph", "traceroute_graph.jpg"),
+    (PACKET_GRAPH_ROUTE, "traceroute_graph_packet.jpg"),
     ("/traceroute-hops", "hop_analysis.jpg"),
     ("/gateway/compare", "gateway_compare.jpg"),
     ("/longest-links", "longest_links.jpg"),
@@ -170,6 +176,7 @@ def _build_demo_database(db_path: Path) -> None:
     fixtures = DatabaseFixtures()
     fixtures.create_test_database(str(db_path))
     _seed_demo_chat_examples(db_path)
+    return _seed_demo_traceroute_receptions(db_path)
 
 
 def _ensure_packet_history_column(
@@ -219,6 +226,38 @@ def _build_service_envelope(
         packet.decoded.reply_id = reply_id
     if is_emoji:
         packet.decoded.emoji = 1
+
+    return envelope.SerializeToString()
+
+
+def _build_traceroute_envelope(
+    *,
+    mesh_packet_id: int,
+    timestamp: float,
+    from_node_id: int,
+    to_node_id: int,
+    channel_index: int,
+    hop_limit: int,
+    hop_start: int,
+    gateway_id: str,
+    raw_payload: bytes,
+    channel_id: str | None = None,
+) -> bytes:
+    envelope = mqtt_pb2.ServiceEnvelope()
+    envelope.gateway_id = gateway_id
+    if channel_id is not None:
+        envelope.channel_id = channel_id
+
+    packet = envelope.packet
+    packet.id = mesh_packet_id
+    setattr(packet, "from", from_node_id)
+    packet.to = to_node_id
+    packet.channel = channel_index
+    packet.hop_limit = hop_limit
+    packet.hop_start = hop_start
+    packet.rx_time = int(timestamp)
+    packet.decoded.portnum = portnums_pb2.PortNum.TRACEROUTE_APP
+    packet.decoded.payload = raw_payload
 
     return envelope.SerializeToString()
 
@@ -403,6 +442,129 @@ def _seed_demo_chat_examples(db_path: Path) -> None:
         conn.commit()
 
 
+def _seed_demo_traceroute_receptions(db_path: Path) -> str | None:
+    """Give the demo DB one traceroute heard by several gateways.
+
+    The combined traceroute graph on the packet detail page is built from the
+    packet plus every reception of the same mesh transmission; the fixture
+    traceroutes are single-reception rows, so without this the graph would
+    show a single path and the receptions panel one row. We take the freshest
+    four-hop traceroute (0x87654321 → 0x22222222, no return path, so the
+    rendered chain starts at the source) and add receptions of that same mesh
+    packet as heard by a handful of named fixture gateways.
+
+    Returns the packet detail URL for the enriched packet (or None if the
+    fixture data does not contain a suitable traceroute).
+    """
+
+    _LOG.info("Seeding demo traceroute multi-gateway receptions")
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        _ensure_packet_history_column(cursor, "raw_service_envelope", "BLOB")
+
+        row = cursor.execute(
+            """
+            SELECT id, timestamp, from_node_id, to_node_id, portnum, portnum_name,
+                   gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
+                   payload_length, raw_payload, mesh_packet_id, channel_index
+            FROM packet_history
+            WHERE from_node_id = ? AND portnum_name = 'TRACEROUTE_APP'
+            ORDER BY timestamp DESC LIMIT 1
+            """,
+            (0x87654321,),  # four-hop forward-only traceroute
+        ).fetchone()
+        if row is None:
+            _LOG.warning("No four-hop traceroute found – skipping receptions")
+            return None
+
+        main = dict(row)
+        mesh_packet_id = main["mesh_packet_id"]
+        raw_payload = main["raw_payload"]
+        channel_index = main["channel_index"] if main["channel_index"] is not None else 0
+
+        # Hearing gateways: fixture nodes with names so the graph shows labels.
+        # (gateway_id, snr, rssi)
+        hearing_gateways = [
+            ("!deadbeef", -9.4, -88),  # Test Node Gamma Client
+            ("!dddddddd", -12.7, -97),  # Test Edge Node Delta
+            ("!77777777", -7.9, -81),  # Test Mesh Node Hotel
+            ("!88888888", -15.3, -105),  # Test Bridge Node India
+            ("!bbbbbbbb", -10.8, -92),  # Test Edge Node Lima
+        ]
+
+        next_packet_id = cursor.execute(
+            "SELECT COALESCE(MAX(id), 0) + 1 FROM packet_history"
+        ).fetchone()[0]
+
+        for offset, (gateway_id, snr, rssi) in enumerate(hearing_gateways, start=1):
+            timestamp = main["timestamp"] + offset * 0.35
+            raw_service_envelope = _build_traceroute_envelope(
+                mesh_packet_id=mesh_packet_id,
+                timestamp=timestamp,
+                from_node_id=main["from_node_id"],
+                to_node_id=main["to_node_id"],
+                channel_index=channel_index,
+                channel_id=main["channel_id"],
+                hop_limit=main["hop_limit"],
+                hop_start=main["hop_start"],
+                gateway_id=gateway_id,
+                raw_payload=raw_payload,
+            )
+
+            cursor.execute(
+                """
+                INSERT INTO packet_history (
+                    id, timestamp, topic, from_node_id, to_node_id, portnum, portnum_name,
+                    gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
+                    payload_length, raw_payload, mesh_packet_id, processed_successfully,
+                    via_mqtt, want_ack, priority, delayed, channel_index, rx_time,
+                    pki_encrypted, next_hop, relay_node, tx_after, raw_service_envelope
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    next_packet_id + offset,
+                    timestamp,
+                    f"msh/US/{gateway_id}/e/{main['channel_id']}/{gateway_id}",
+                    main["from_node_id"],
+                    main["to_node_id"],
+                    main["portnum"],
+                    main["portnum_name"],
+                    gateway_id,
+                    main["channel_id"],
+                    rssi,
+                    snr,
+                    main["hop_limit"],
+                    main["hop_start"],
+                    main["payload_length"],
+                    raw_payload,
+                    mesh_packet_id,
+                    True,
+                    True,
+                    False,
+                    0,
+                    0,
+                    channel_index,
+                    int(timestamp),
+                    False,
+                    None,
+                    None,
+                    None,
+                    raw_service_envelope,
+                ),
+            )
+
+        conn.commit()
+
+    _LOG.info(
+        "Seeded %d receptions for traceroute packet %s",
+        len(hearing_gateways),
+        main["id"],
+    )
+    return f"/packet/{main['id']}"
+
+
 def _launch_app_thread(cfg: AppConfig):
     """Run *create_app* in a background daemon thread and return it."""
 
@@ -416,7 +578,9 @@ def _launch_app_thread(cfg: AppConfig):
     return t
 
 
-def _capture_screenshots(base_url: str, out_dir: Path) -> list[Path]:
+def _capture_screenshots(
+    base_url: str, out_dir: Path, packet_graph_url: str | None
+) -> list[Path]:
     """Use Playwright to capture screenshots for all *PAGES*.
 
     Returns the list of created image paths.
@@ -457,6 +621,11 @@ def _capture_screenshots(base_url: str, out_dir: Path) -> list[Path]:
         page.on("pageerror", lambda error: _LOG.error(f"BROWSER ERROR: {error}"))
 
         for route, filename in PAGES:
+            if route == PACKET_GRAPH_ROUTE:
+                if packet_graph_url is None:
+                    _LOG.warning("No demo traceroute packet – skipping graph shots")
+                    continue
+                route = packet_graph_url
             url = f"{base_url}{route}"
             _LOG.info("Capturing %s → %s", url, filename)
             screenshot_kwargs: dict[str, Any] = {
@@ -464,6 +633,7 @@ def _capture_screenshots(base_url: str, out_dir: Path) -> list[Path]:
                 "type": "jpeg",
                 "quality": 90,
             }
+            captured_here = False
 
             try:
                 page.goto(url, wait_until="networkidle", timeout=30_000)
@@ -1106,12 +1276,138 @@ def _capture_screenshots(base_url: str, out_dir: Path) -> list[Path]:
                     except Exception:
                         pass  # Continue if map doesn't load markers
 
+                elif route == packet_graph_url:
+                    # Combined traceroute graph on the packet detail page:
+                    # capture the default aggregate view, a cone focus (click
+                    # the source node), and a traced reception (click the
+                    # first reception row). All shots are clipped to the graph
+                    # card + details row so the README shows the graph, not
+                    # the whole packet page.
+                    try:
+                        page.wait_for_selector(
+                            "#combined-traceroute-graph svg .node-group",
+                            timeout=15000,
+                        )
+                        page.wait_for_selector(
+                            "#reception-groups .rec", timeout=15000
+                        )
+                        page.wait_for_timeout(800)
+
+                        def _clip_region(include_details: bool) -> dict[str, float]:
+                            return page.evaluate(
+                                """(includeDetails) => {
+                                    const graphCard = document
+                                        .getElementById('combined-traceroute-graph')
+                                        .closest('.card').getBoundingClientRect();
+                                    const top = graphCard.top + window.scrollY;
+                                    let bottom = graphCard.bottom + window.scrollY;
+                                    if (includeDetails) {
+                                        // The route strip card (left) can be
+                                        // taller than the receptions card
+                                        // (right); include both.
+                                        const stripCard = document
+                                            .querySelector('#route-strip')
+                                            .closest('.card').getBoundingClientRect();
+                                        const recsCard = document
+                                            .getElementById('reception-groups')
+                                            .closest('.card').getBoundingClientRect();
+                                        bottom = Math.max(
+                                            bottom, stripCard.bottom, recsCard.bottom
+                                        ) + window.scrollY;
+                                    }
+                                    return {
+                                        x: 0, y: top,
+                                        width: window.innerWidth,
+                                        height: bottom - top
+                                    };
+                                }""",
+                                include_details,
+                            )
+
+                        # Clip in page coordinates; keep full_page so the
+                        # region can lie anywhere on the (tall) packet page.
+                        screenshot_kwargs["clip"] = _clip_region(
+                            include_details=True
+                        )
+
+                        # Shot 1 – default aggregate view (generic tail below).
+                        dest = out_dir / filename
+                        page.screenshot(path=str(dest), **screenshot_kwargs)
+                        images.append(dest)
+                        captured_here = True
+
+                        # Shot 2 – cone focus on the source node.
+                        clicked = page.evaluate(
+                            """() => {
+                                const src = Array.from(document.querySelectorAll(
+                                    '#combined-traceroute-graph .node-group'
+                                )).find(g => g.__data__ && g.__data__.is_source);
+                                if (!src) return false;
+                                src.dispatchEvent(
+                                    new MouseEvent('click', { bubbles: true })
+                                );
+                                return true;
+                            }"""
+                        )
+                        if clicked:
+                            page.wait_for_timeout(700)
+                            cone_dest = out_dir / "traceroute_graph_cone.jpg"
+                            page.screenshot(path=str(cone_dest), **screenshot_kwargs)
+                            images.append(cone_dest)
+                            _LOG.info("Captured cone-focus shot → %s", cone_dest.name)
+                        else:
+                            _LOG.warning("No source node found – skipping cone shot")
+
+                        # Shot 3 – route trace of a named reception. The
+                        # route strip card scrolls when the chain is long, so
+                        # scroll it to the bottom to frame the gateway chip +
+                        # reception SNR badge.
+                        clicked = page.evaluate(
+                            """() => {
+                                const rows = document.querySelectorAll(
+                                    '#reception-groups .rec'
+                                );
+                                if (!rows.length) return false;
+                                // Prefer a named hearing gateway (the page's
+                                // own fixture gateway has a hex label only).
+                                const target = rows[1] || rows[0];
+                                target.dispatchEvent(
+                                    new MouseEvent('click', { bubbles: true })
+                                );
+                                const body = document
+                                    .querySelector('#route-strip')
+                                    .closest('.card-body');
+                                if (body) body.scrollTop = body.scrollHeight;
+                                return true;
+                            }"""
+                        )
+                        if clicked:
+                            page.wait_for_timeout(700)
+                            # The route strip card grows once a reception is
+                            # traced – re-measure the clip after the trace.
+                            screenshot_kwargs["clip"] = _clip_region(
+                                include_details=True
+                            )
+                            details_dest = out_dir / "traceroute_graph_details.jpg"
+                            page.screenshot(
+                                path=str(details_dest), **screenshot_kwargs
+                            )
+                            images.append(details_dest)
+                            _LOG.info(
+                                "Captured route-trace shot → %s", details_dest.name
+                            )
+                        else:
+                            _LOG.warning("No reception rows – skipping details shot")
+                    except Exception as e:
+                        _LOG.warning(f"Packet graph setup failed: {e}")
+
             except Exception:  # noqa: BLE001
                 pass  # Continue with screenshot even if special handling fails
 
-            dest = out_dir / filename
-            page.screenshot(path=str(dest), **screenshot_kwargs)
-            images.append(dest)
+            if not captured_here:
+                dest = out_dir / filename
+                page.screenshot(path=str(dest), **screenshot_kwargs)
+                images.append(dest)
 
         browser.close()
 
@@ -1182,7 +1478,7 @@ def main() -> None:  # noqa: D401 (simple function)
     # Step 1 – demo database
     # ------------------------------------------------------------------
     demo_db = out_dir / "demo.db"
-    _build_demo_database(demo_db)
+    packet_graph_url = _build_demo_database(demo_db)
 
     # ------------------------------------------------------------------
     # Step 2 – launch the Flask server
@@ -1204,7 +1500,7 @@ def main() -> None:  # noqa: D401 (simple function)
     # ------------------------------------------------------------------
     # Step 3 – screenshots
     # ------------------------------------------------------------------
-    images = _capture_screenshots(base_url, out_dir)
+    images = _capture_screenshots(base_url, out_dir, packet_graph_url)
 
     # ------------------------------------------------------------------
     # Step 4 – update README
