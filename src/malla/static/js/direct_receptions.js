@@ -2,6 +2,20 @@
  * Direct Receptions Chart Component
  * Handles loading and displaying direct receptions data with interactive charts
  */
+
+/**
+ * Escape untrusted text for Plotly's HTML-like hover/label grammar. Node names
+ * come from the mesh and are attacker-controllable, and the trace name is
+ * interpolated into a `<b>%{fullData.name}</b>` hovertemplate, so encode the
+ * markup delimiters before it reaches Plotly (CWE-79).
+ */
+function escapePlotlyText(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 class DirectReceptionsChart {
     constructor(nodeId) {
         this.nodeId = nodeId;
@@ -194,7 +208,7 @@ class DirectReceptionsChart {
                 y: rssiValues, // default metric is RSSI
                 mode: 'lines+markers',
                 type: 'scatter',
-                name: nodeData.from_node_name,
+                name: escapePlotlyText(nodeData.from_node_name),
                 line: { color: color, width: 2 },
                 marker: { color: color, size: 4 },
                 visible: true,
