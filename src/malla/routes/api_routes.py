@@ -43,6 +43,29 @@ _chat_relay_candidate_cache: dict[
 ] = {}
 
 
+def _clamp_limit(default: int, maximum: int) -> int:
+    """Read and bound the untrusted ``?limit=`` query parameter to [1, maximum].
+
+    ``limit`` is passed through to a SQL ``LIMIT`` clause, where SQLite treats a
+    negative value as "no limit" (returning the entire table) and an oversized
+    value forces the database to materialise an unbounded result set. Clamp it,
+    falling back to ``default`` when the parameter is missing or non-numeric.
+    """
+    raw = request.args.get("limit", default, type=int)
+    if raw is None or raw < 1:
+        return default
+    return min(raw, maximum)
+
+
+def _clamp_page() -> int:
+    """Read the untrusted ``?page=`` parameter, forcing it to be >= 1.
+
+    Guards against a negative ``(page - 1) * limit`` offset.
+    """
+    raw = request.args.get("page", 1, type=int)
+    return raw if raw is not None and raw >= 1 else 1
+
+
 def _prune_chat_relay_candidate_cache(now: float) -> None:
     expired_keys = [
         key
@@ -191,8 +214,8 @@ def api_packets():
     """API endpoint for packet data."""
     logger.info("API packets endpoint accessed")
     try:
-        limit = request.args.get("limit", 100, type=int)
-        page = request.args.get("page", 1, type=int)
+        limit = _clamp_limit(default=100, maximum=1000)
+        page = _clamp_page()
         offset = (page - 1) * limit
 
         # Build filters
@@ -285,8 +308,8 @@ def api_nodes():
     """API endpoint for node data (with optional search)."""
     logger.info("API nodes endpoint accessed")
     try:
-        limit = request.args.get("limit", 100, type=int)
-        page = request.args.get("page", 1, type=int)
+        limit = _clamp_limit(default=100, maximum=10000)
+        page = _clamp_page()
         search = request.args.get("search", "").strip()
         offset = (page - 1) * limit
 
@@ -335,10 +358,9 @@ def api_nodes_search():
     logger.info("API nodes search endpoint accessed")
     try:
         query = request.args.get("q", "").strip()
-        limit = request.args.get("limit", 20, type=int)
+        limit = _clamp_limit(default=20, maximum=100)
 
-        # Limit the search limit to prevent abuse
-        limit = min(limit, 100)
+        # limit is already clamped to [1, 100] by _clamp_limit above
 
         # Check if database tables exist before calling NodeRepository
         db_ready = False
@@ -441,10 +463,9 @@ def api_gateways_search():
     logger.info("API gateways search endpoint accessed")
     try:
         query = request.args.get("q", "").strip()
-        limit = request.args.get("limit", 20, type=int)
+        limit = _clamp_limit(default=20, maximum=100)
 
-        # Limit the search limit to prevent abuse
-        limit = min(limit, 100)
+        # limit is already clamped to [1, 100] by _clamp_limit above
 
         # Get all gateways first
         all_gateways = PacketRepository.get_unique_gateway_ids()
@@ -843,7 +864,7 @@ def api_node_location_history(node_id):
     """API endpoint for node location history."""
     logger.info(f"API node location history endpoint accessed for node {node_id}")
     try:
-        limit = request.args.get("limit", 100, type=int)
+        limit = _clamp_limit(default=100, maximum=2000)
         history = NodeService.get_node_location_history(node_id, limit=limit)
         return safe_jsonify(history)
     except ValueError as e:
@@ -883,7 +904,7 @@ def api_node_direct_receptions(node_id):
     """API endpoint for bidirectional direct receptions (0-hop packets)."""
     logger.info(f"API direct receptions endpoint accessed for node {node_id}")
     try:
-        limit = request.args.get("limit", 1000, type=int)
+        limit = _clamp_limit(default=1000, maximum=5000)
         direction = request.args.get("direction", "received", type=str)
 
         # Validate direction parameter
@@ -923,7 +944,7 @@ def api_node_relay_node_analysis(node_id):
     """
     logger.info(f"API relay node analysis endpoint accessed for node {node_id}")
     try:
-        limit = request.args.get("limit", 50, type=int)
+        limit = _clamp_limit(default=50, maximum=1000)
 
         # Convert node_id using helper to support hex strings or int
         node_id_int = convert_node_id(node_id)
@@ -1337,8 +1358,8 @@ def api_packets_data():
     logger.info("API packets modern endpoint accessed")
     try:
         # Get parameters
-        page = request.args.get("page", type=int, default=1)
-        limit = request.args.get("limit", type=int, default=100)
+        page = _clamp_page()
+        limit = _clamp_limit(default=100, maximum=1000)
         search = request.args.get("search", default="")
         sort_by = request.args.get("sort_by", default="timestamp")
         sort_order = request.args.get("sort_order", default="desc")
@@ -1631,8 +1652,8 @@ def api_nodes_data():
     logger.info("API nodes modern endpoint accessed")
     try:
         # Get parameters
-        page = request.args.get("page", type=int, default=1)
-        limit = request.args.get("limit", type=int, default=100)
+        page = _clamp_page()
+        limit = _clamp_limit(default=100, maximum=10000)
         search = request.args.get("search", default="")
         sort_by = request.args.get("sort_by", default="last_packet_time")
         sort_order = request.args.get("sort_order", default="desc")
@@ -1715,8 +1736,8 @@ def api_traceroute_data():
     logger.info("API traceroute modern endpoint accessed")
     try:
         # Get parameters
-        page = request.args.get("page", type=int, default=1)
-        limit = request.args.get("limit", type=int, default=100)
+        page = _clamp_page()
+        limit = _clamp_limit(default=100, maximum=1000)
         search = request.args.get("search", default="")
         sort_by = request.args.get("sort_by", default="timestamp")
         sort_order = request.args.get("sort_order", default="desc")
