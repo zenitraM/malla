@@ -33,6 +33,7 @@ Data Cleanup:
 import base64
 import hashlib
 import logging
+import os
 import socket
 import sqlite3
 import threading
@@ -90,6 +91,39 @@ logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
+
+# ---------------------------------------------------------------------------
+# Abuse / resource-exhaustion guards
+# ---------------------------------------------------------------------------
+# Reject MQTT payloads larger than this before parsing or persisting them. The
+# largest legitimate ServiceEnvelope observed across 15M+ captured packets is
+# ~1.25 KB, so 4 KB leaves generous headroom while stopping a publisher on the
+# public broker from flooding the DB with oversized blobs (CWE-400/770).
+MAX_MQTT_PAYLOAD_BYTES: int = int(os.environ.get("MALLA_MAX_MQTT_PAYLOAD_BYTES", "4096"))
+
+# Cap the in-memory node cache so a stream of attacker-chosen node/gateway IDs
+# on the public broker cannot grow process memory without bound. Legitimate
+# rosters are a few thousand nodes; once the cache exceeds this size the
+# least-recently-updated entries are evicted (they reload from the DB on demand).
+MAX_NODE_CACHE_SIZE: int = int(os.environ.get("MALLA_MAX_NODE_CACHE_SIZE", "200000"))
+# How many entries to drop when the cache is full, so eviction is amortised
+# rather than scanning on every insert.
+_NODE_CACHE_EVICT_BATCH: int = max(1, MAX_NODE_CACHE_SIZE // 20)
+
+
+def _sanitize_for_log(value: object, limit: int = 200) -> str:
+    """Make untrusted text safe for a single line-oriented log record.
+
+    MQTT topics and decoded message text are attacker-influenced; strip CR/LF
+    and other control characters so a crafted value cannot forge extra log
+    lines or inject terminal escape sequences (CWE-117). Printable Unicode
+    (including CJK names) is preserved.
+    """
+    text = str(value)
+    if len(text) > limit:
+        text = text[:limit] + "…"
+    return "".join(ch if ch.isprintable() else "�" for ch in text)
+
 
 # --- Global Variables ---
 db_lock = threading.Lock()  # Thread lock for database access
@@ -475,6 +509,29 @@ def load_node_cache() -> None:
         logging.info(f"Loaded {len(node_cache)} nodes into cache from database")
 
 
+def _evict_stale_node_cache_entries() -> None:
+    """Drop the least-recently-updated node_cache entries when it is full.
+
+    Bounds process memory against a stream of attacker-chosen node/gateway IDs
+    on the public broker (CWE-400/770). Entries are only a cache of node_info,
+    so an evicted node simply reloads from the DB the next time it is seen.
+    """
+    global node_cache
+    overflow = len(node_cache) - MAX_NODE_CACHE_SIZE
+    if overflow < 0:
+        return
+    drop = overflow + _NODE_CACHE_EVICT_BATCH
+    stale = sorted(
+        node_cache.items(), key=lambda kv: kv[1].get("last_updated", 0.0)
+    )[:drop]
+    for nid, _ in stale:
+        node_cache.pop(nid, None)
+    logging.info(
+        f"node_cache full (> {MAX_NODE_CACHE_SIZE}); evicted {len(stale)} "
+        f"least-recently-updated entries"
+    )
+
+
 def update_node_cache(
     node_id: int,
     hex_id: str | None = None,
@@ -495,6 +552,8 @@ def update_node_cache(
 
     # Update in-memory cache
     if is_new_node:
+        if len(node_cache) >= MAX_NODE_CACHE_SIZE:
+            _evict_stale_node_cache_entries()
         node_cache[node_id] = {
             "hex_id": hex_id,
             "long_name": long_name,
@@ -1034,14 +1093,26 @@ def on_connect(
 
 def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
     """Callback for when a PUBLISH message is received from the server."""
-    logging.debug(f"Received message on topic {msg.topic}: {len(msg.payload)} bytes")
+    # msg.topic is attacker-influenced; sanitise before it ever hits a log line.
+    safe_topic = _sanitize_for_log(msg.topic)
+    logging.debug(f"Received message on topic {safe_topic}: {len(msg.payload)} bytes")
+
+    # Reject oversized payloads before parsing or storing anything. A publisher
+    # on the public broker must not be able to convert one PUBLISH into an
+    # arbitrarily large protobuf parse and a durable DB blob (CWE-400/770).
+    if len(msg.payload) > MAX_MQTT_PAYLOAD_BYTES:
+        logging.warning(
+            f"Dropping oversized MQTT payload on topic {safe_topic}: "
+            f"{len(msg.payload)} bytes > {MAX_MQTT_PAYLOAD_BYTES} limit"
+        )
+        return
 
     # Skip JSON messages - we only want protobuf messages
     if "/json/" in msg.topic:
-        logging.debug(f"Skipping JSON message on topic {msg.topic}")
+        logging.debug(f"Skipping JSON message on topic {safe_topic}")
         return
 
-    logging.debug(f"Processing protobuf message on topic {msg.topic}")
+    logging.debug(f"Processing protobuf message on topic {safe_topic}")
 
     # Always store the raw message data first, regardless of parsing success
     raw_service_envelope_data = msg.payload
@@ -1093,7 +1164,9 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
                     potential_channel = topic_parts[4]
                     if not potential_channel.startswith("!"):
                         channel_name = potential_channel
-                        logging.debug(f"Using channel name from topic: {channel_name}")
+                        logging.debug(
+                            f"Using channel name from topic: {_sanitize_for_log(channel_name)}"
+                        )
             except Exception:
                 pass
 
@@ -1152,7 +1225,7 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
             flags_str = f" ({', '.join(flags)})" if flags else ""
 
             logging.info(
-                f"💬 Text message from {from_node_display} to {to_node_display}{flags_str}: {text_content[:50]}{'...' if len(text_content) > 50 else ''}"
+                f"💬 Text message from {from_node_display} to {to_node_display}{flags_str}: {_sanitize_for_log(text_content, limit=50)}"
             )
             processed_successfully = True
 
@@ -1307,11 +1380,13 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
 
     except UnicodeDecodeError as e:
         parsing_error = f"Unicode decode error: {str(e)}"
-        logging.warning(f"Could not decode payload as UTF-8 on topic {msg.topic}: {e}")
+        logging.warning(
+            f"Could not decode payload as UTF-8 on topic {_sanitize_for_log(msg.topic)}: {e}"
+        )
     except Exception as e:
         parsing_error = f"Parsing error: {str(e)}"
         logging.error(
-            f"Error processing MQTT protobuf message on topic {msg.topic}: {e}"
+            f"Error processing MQTT protobuf message on topic {_sanitize_for_log(msg.topic)}: {e}"
         )
         logging.debug(f"Raw payload length: {len(msg.payload)} bytes")
 
