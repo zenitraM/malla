@@ -99,7 +99,9 @@ logging.basicConfig(
 # largest legitimate ServiceEnvelope observed across 15M+ captured packets is
 # ~1.25 KB, so 4 KB leaves generous headroom while stopping a publisher on the
 # public broker from flooding the DB with oversized blobs (CWE-400/770).
-MAX_MQTT_PAYLOAD_BYTES: int = int(os.environ.get("MALLA_MAX_MQTT_PAYLOAD_BYTES", "4096"))
+MAX_MQTT_PAYLOAD_BYTES: int = int(
+    os.environ.get("MALLA_MAX_MQTT_PAYLOAD_BYTES", "4096")
+)
 
 # Cap the in-memory node cache so a stream of attacker-chosen node/gateway IDs
 # on the public broker cannot grow process memory without bound. Legitimate
@@ -521,9 +523,9 @@ def _evict_stale_node_cache_entries() -> None:
     if overflow < 0:
         return
     drop = overflow + _NODE_CACHE_EVICT_BATCH
-    stale = sorted(
-        node_cache.items(), key=lambda kv: kv[1].get("last_updated", 0.0)
-    )[:drop]
+    stale = sorted(node_cache.items(), key=lambda kv: kv[1].get("last_updated", 0.0))[
+        :drop
+    ]
     for nid, _ in stale:
         node_cache.pop(nid, None)
     logging.info(
@@ -652,7 +654,7 @@ def update_node_cache(
             )
 
             logging.debug(
-                f"Updated existing node in database: {node_id} ({final_hex_id})"
+                f"Updated existing node in database: {node_id} ({_sanitize_for_log(final_hex_id)})"
             )
         else:
             # New node, insert it
@@ -678,7 +680,9 @@ def update_node_cache(
                 ),
             )
 
-            logging.debug(f"Added new node to database: {node_id} ({hex_id})")
+            logging.debug(
+                f"Added new node to database: {node_id} ({_sanitize_for_log(hex_id)})"
+            )
 
         conn.commit()
         conn.close()
@@ -1028,9 +1032,7 @@ def get_node_statistics() -> dict[str, Any]:
         # stall packet ingestion as history grows. This is an upper bound; if row
         # deletion (data retention) is ever enabled it slightly overcounts, which
         # is acceptable for a log line.
-        cursor.execute(
-            "SELECT seq FROM sqlite_sequence WHERE name = 'packet_history'"
-        )
+        cursor.execute("SELECT seq FROM sqlite_sequence WHERE name = 'packet_history'")
         seq_row = cursor.fetchone()
         total_packets = seq_row[0] if seq_row else 0
 
@@ -1128,7 +1130,7 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
         topic_parts = msg.topic.split("/")
         if len(topic_parts) >= 4:
             message_type = topic_parts[3]  # Should be 'e', 'c', 'p', etc.
-            logging.debug(f"Message type from topic: {message_type}")
+            logging.debug(f"Message type from topic: {_sanitize_for_log(message_type)}")
     except Exception:
         pass
 
@@ -1178,7 +1180,7 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
             # If primary channel decryption failed and we have a channel name, try with channel-specific keys
             if not decryption_successful and channel_name:
                 logging.debug(
-                    f"Primary channel decryption failed, trying channel-specific keys for: {channel_name}"
+                    f"Primary channel decryption failed, trying channel-specific keys for: {_sanitize_for_log(channel_name)}"
                 )
                 decryption_successful = try_decrypt_mesh_packet(
                     mesh_packet,
@@ -1187,7 +1189,7 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
 
             if decryption_successful:
                 logging.info(
-                    f"🔓 Successfully decrypted packet from {get_node_display_name(from_node_id_numeric)}"
+                    f"🔓 Successfully decrypted packet from {_sanitize_for_log(get_node_display_name(from_node_id_numeric))}"
                 )
             else:
                 logging.debug(
@@ -1206,9 +1208,11 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
         # Process different packet types
         if mesh_packet.decoded.portnum == portnums_pb2.PortNum.TEXT_MESSAGE_APP:
             text_content = mesh_packet.decoded.payload.decode("utf-8", errors="replace")
-            from_node_display = get_node_display_name(from_node_id_numeric)
+            from_node_display = _sanitize_for_log(
+                get_node_display_name(from_node_id_numeric)
+            )
             to_node_display = (
-                get_node_display_name(to_node_id_numeric)
+                _sanitize_for_log(get_node_display_name(to_node_id_numeric))
                 if to_node_id_numeric != 0 and to_node_id_numeric != 0xFFFFFFFF
                 else "Broadcast"
             )
@@ -1237,7 +1241,9 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
             lon = position_data.longitude_i / 1e7
             alt = position_data.altitude
 
-            from_node_display = get_node_display_name(from_node_id_numeric)
+            from_node_display = _sanitize_for_log(
+                get_node_display_name(from_node_id_numeric)
+            )
             via_mqtt_str = (
                 " (via MQTT)" if getattr(mesh_packet, "via_mqtt", False) else ""
             )
@@ -1284,12 +1290,14 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
                 else None,
             )
 
-            from_node_display = get_node_display_name(from_node_id_numeric)
+            from_node_display = _sanitize_for_log(
+                get_node_display_name(from_node_id_numeric)
+            )
             via_mqtt_str = (
                 " (via MQTT)" if getattr(mesh_packet, "via_mqtt", False) else ""
             )
             logging.info(
-                f"ℹ️ NodeInfo for {node_id_from_payload} from {from_node_display}{via_mqtt_str}: {long_name or short_name or 'No name'}"
+                f"ℹ️ NodeInfo for {_sanitize_for_log(node_id_from_payload)} from {from_node_display}{via_mqtt_str}: {_sanitize_for_log(long_name or short_name or 'No name')}"
             )
             processed_successfully = True
 
@@ -1297,7 +1305,9 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
             telemetry_data = telemetry_pb2.Telemetry()
             telemetry_data.ParseFromString(mesh_packet.decoded.payload)
 
-            from_node_display = get_node_display_name(from_node_id_numeric)
+            from_node_display = _sanitize_for_log(
+                get_node_display_name(from_node_id_numeric)
+            )
             via_mqtt_str = (
                 " (via MQTT)" if getattr(mesh_packet, "via_mqtt", False) else ""
             )
@@ -1341,7 +1351,9 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
 
         elif mesh_packet.decoded.portnum == portnums_pb2.PortNum.MAP_REPORT_APP:
             # Handle MAP_REPORT_APP packets specifically
-            from_node_display = get_node_display_name(from_node_id_numeric)
+            from_node_display = _sanitize_for_log(
+                get_node_display_name(from_node_id_numeric)
+            )
             via_mqtt_str = (
                 " (via MQTT)" if getattr(mesh_packet, "via_mqtt", False) else ""
             )
@@ -1357,7 +1369,9 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
             port_name = get_enum_name(
                 portnums_pb2.PortNum.DESCRIPTOR, mesh_packet.decoded.portnum
             )
-            from_node_display = get_node_display_name(from_node_id_numeric)
+            from_node_display = _sanitize_for_log(
+                get_node_display_name(from_node_id_numeric)
+            )
             via_mqtt_str = (
                 " (via MQTT)" if getattr(mesh_packet, "via_mqtt", False) else ""
             )
@@ -1412,7 +1426,9 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
         elif message_type == "p":
             logging.debug("📍 Processed position message")
         else:
-            logging.debug(f"📦 Processed message type: {message_type}")
+            logging.debug(
+                f"📦 Processed message type: {_sanitize_for_log(message_type)}"
+            )
 
 
 def on_disconnect(
