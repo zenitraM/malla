@@ -1349,13 +1349,26 @@ class NodeRepository:
                         COALESCE(stats.packet_count_24h, 0) as packet_count_24h,
                         COALESCE(gstats.gateway_packet_count_24h, 0) as gateway_packet_count_24h,
                         COALESCE(stats.last_packet_time, ni.last_updated) as last_packet_time,
-                        datetime(COALESCE(stats.last_packet_time, ni.last_updated), 'unixepoch') as last_packet_str
+                        datetime(COALESCE(stats.last_packet_time, ni.last_updated), 'unixepoch') as last_packet_str,
+                        stats.avg_rssi,
+                        stats.avg_snr
                     FROM node_info ni
                     LEFT JOIN (
                         SELECT
                             from_node_id as node_id,
                             COUNT(*) as packet_count_24h,
-                            MAX(timestamp) as last_packet_time
+                            MAX(timestamp) as last_packet_time,
+                            -- RSSI/SNR only mean anything on direct (0-hop)
+                            -- receptions; relayed packets carry the last
+                            -- relay's signal, not this node's.
+                            AVG(CASE WHEN hop_start BETWEEN 0 AND 7
+                                      AND hop_start = hop_limit
+                                      AND {rssi_valid_sql()}
+                                     THEN CAST(rssi AS FLOAT) END) as avg_rssi,
+                            AVG(CASE WHEN hop_start BETWEEN 0 AND 7
+                                      AND hop_start = hop_limit
+                                      AND {snr_valid_sql()}
+                                     THEN CAST(snr AS FLOAT) END) as avg_snr
                         FROM packet_history
                         WHERE timestamp > (strftime('%s', 'now') - 86400)
                         GROUP BY from_node_id
@@ -1396,7 +1409,9 @@ class NodeRepository:
                         0 as packet_count_24h,
                         0 as gateway_packet_count_24h,
                         ni.last_updated as last_packet_time,
-                        datetime(ni.last_updated, 'unixepoch') as last_packet_str
+                        datetime(ni.last_updated, 'unixepoch') as last_packet_str,
+                        NULL as avg_rssi,
+                        NULL as avg_snr
                     FROM node_info ni
                     {where_clause}
                     ORDER BY {order_column} {order_dir}

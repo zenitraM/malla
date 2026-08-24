@@ -1252,22 +1252,43 @@ function populateTopNodesTable(topNodes) {
         const nodeName = node.display_name || `!${node.node_id.toString(16).padStart(8, '0')}`;
         const row = document.createElement('tr');
 
-        let signalClass = 'text-muted';
-        let signalText = 'N/A';
-        if (node.avg_rssi && node.avg_rssi !== 0) {
-            if (node.avg_rssi > -70) {
+        // Averages cover only direct (0-hop) receptions in the last 24h —
+        // relayed packets carry the relay's signal, not this node's.
+        const rssi = Number.isFinite(node.avg_rssi) ? node.avg_rssi : null;
+        const snr = Number.isFinite(node.avg_snr) ? node.avg_snr : null;
+        let signalCell;
+        if (rssi !== null) {
+            let signalClass, quality;
+            if (rssi > -70) {
                 signalClass = 'text-success';
-                signalText = 'Excellent';
-            } else if (node.avg_rssi > -80) {
+                quality = 'Excellent';
+            } else if (rssi > -80) {
                 signalClass = 'text-warning';
-                signalText = 'Good';
-            } else if (node.avg_rssi > -90) {
+                quality = 'Good';
+            } else if (rssi > -90) {
                 signalClass = 'text-info';
-                signalText = 'Fair';
+                quality = 'Fair';
             } else {
                 signalClass = 'text-danger';
-                signalText = 'Poor';
+                quality = 'Poor';
             }
+            let title = `${quality} — avg RSSI of direct receptions (24h)`;
+            if (snr !== null) title += `, SNR ${snr.toFixed(1)} dB`;
+            signalCell = el('span', { className: signalClass, title },
+                `${Math.round(rssi)} dBm`);
+        } else if (snr !== null) {
+            const signalClass = snr >= 5 ? 'text-success'
+                : snr >= 0 ? 'text-warning'
+                : snr >= -5 ? 'text-info' : 'text-danger';
+            signalCell = el('span', {
+                className: signalClass,
+                title: 'Avg SNR of direct receptions (24h); no valid RSSI reported'
+            }, `SNR ${snr.toFixed(1)} dB`);
+        } else {
+            signalCell = el('span', {
+                className: 'text-muted',
+                title: 'No gateway heard this node directly in the last 24h, so there is no signal reading for the node itself'
+            }, 'Relayed only');
         }
 
         row.append(
@@ -1278,7 +1299,7 @@ function populateTopNodesTable(topNodes) {
                 }, nodeName)
             ),
             el('td', null, badge(String(node.packet_count || 0), 'bg-primary')),
-            el('td', null, el('span', { className: signalClass }, signalText))
+            el('td', null, signalCell)
         );
 
         tbody.appendChild(row);
