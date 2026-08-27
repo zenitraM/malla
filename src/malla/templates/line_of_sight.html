@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""/>
+{% include 'components/openfreemap_css.html' %}
 
 <link rel="stylesheet" href="{{ url_for('static', filename='css/node-picker.css') }}">
 <style>
@@ -268,11 +269,9 @@
                 <hr>
                 <p class="mb-2"><strong>Data sources:</strong></p>
                 <ul class="mb-2 small">
-                    <li><strong>DEM Net Elevation API</strong> - <a href="https://elevationapi.com" target="_blank" rel="noopener">elevationapi.com</a></li>
+                    <li><strong>Elevation Tiles</strong> - © <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Mapzen Terrain Tiles (AWS Open Data)</a></li>
                     <li id="demDataSource"></li>
                     <li><strong>Map Tiles</strong> - © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors,
-                        © <a href="https://www.stadiamaps.com/" target="_blank" rel="noopener">Stadia Maps</a>,
-                        © <a href="https://www.stamen.com/" target="_blank" rel="noopener">Stamen Design</a>,
                         © <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a></li>
                     <li><strong>Terrain Data</strong> - SRTM (Shuttle Radar Topography Mission)</li>
                 </ul>
@@ -288,6 +287,10 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""></script>
+{% include 'components/openfreemap_js.html' %}
+<script src="https://unpkg.com/maplibre-contour@0.1.0/dist/index.min.js"></script>
+<script src="{{ url_for('static', filename='js/openfreemap.js') }}?v={{ ASSET_VERSION }}"></script>
+<script src="{{ url_for('static', filename='js/terrain-elevation.js') }}?v={{ ASSET_VERSION }}"></script>
 
 <!-- Chart.js for elevation profiles -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -550,15 +553,11 @@ function checkAnalyzeButton() {
 
 // Initialize map with terrain-aware tiles
 function initializeMap() {
-    map = L.map('line-of-sight-map').setView([40.4168, -3.7038], 6); // Default to Spain
+    map = L.map('line-of-sight-map', {...window.openFreeMapLeafletMapOptions}).setView([40.4168, -3.7038], 6); // Default to Spain
 
-    // Stamen Terrain (via Stadia Maps) - Shows terrain, contours, and elevation
-    L.tileLayer('https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}{r}.{ext}', {
-        minZoom: 0,
-        maxZoom: 18,
-        attribution: '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://www.stamen.com/" target="_blank">Stamen Design</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        ext: 'png'
-    }).addTo(map);
+    // OpenFreeMap vector basemap + WebGL hillshade terrain overlay
+    const overlay = createOpenFreeMapOverlay({ terrain: true });
+    if (overlay) overlay.addTo(map);
 }
 
 // Perform line of sight analysis
@@ -623,16 +622,13 @@ async function performAnalysis() {
     }
 }
 
-// Fetch elevation data from API
+// Fetch elevation data along the path by sampling Mapzen/AWS terrarium DEM tiles
+// client-side (the previous elevationapi.com server API returns HTTP 500).
 async function fetchElevationData(lat1, lon1, lat2, lon2) {
-    const url = `https://api.elevationapi.com/api/Elevation/line/${lat1},${lon1}/${lat2},${lon2}`;
-
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error(`API returned status ${response.status}`);
+    if (!window.TerrainElevation) {
+        throw new Error('Terrain elevation module failed to load');
     }
-
-    return await response.json();
+    return window.TerrainElevation.samplePath({ lat1, lon1, lat2, lon2 });
 }
 
 // Calculate Fresnel zone radius
@@ -965,14 +961,20 @@ function updateMap(fromNode, toNode, geoPoints, obstacles) {
         maxZoom: 13  // Limit maximum zoom to prevent zooming in too close
     };
 
-    map.fitBounds(bounds, fitBoundsOptions);
+    // Skip zero-area bounds (single point along the line): fitBounds on them computes
+    // an infinite zoom and can crash ('Invalid LatLng (NaN, NaN)')
+    if (bounds.isValid() && !bounds.getNorthEast().equals(bounds.getSouthWest())) {
+        map.fitBounds(bounds, fitBoundsOptions);
+    }
 
 
     // Force map to invalidate size and refit bounds (fixes rendering issues)
     setTimeout(() => {
         map.invalidateSize();
         // Reapply the bounds after invalidateSize to ensure correct view
-        map.fitBounds(bounds, fitBoundsOptions);
+        if (bounds.isValid() && !bounds.getNorthEast().equals(bounds.getSouthWest())) {
+            map.fitBounds(bounds, fitBoundsOptions);
+        }
     }, 100);
 
     // Initialize hover marker (hidden by default)

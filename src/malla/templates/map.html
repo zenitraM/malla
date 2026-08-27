@@ -9,6 +9,7 @@
 <!-- Leaflet MarkerCluster CSS -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+{% include 'components/openfreemap_css.html' %}
 {% endblock %}
 
 {% block content %}
@@ -414,6 +415,8 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!-- Leaflet MarkerCluster JS -->
 <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+{% include 'components/openfreemap_js.html' %}
+<script src="{{ url_for('static', filename='js/openfreemap.js') }}?v={{ ASSET_VERSION }}"></script>
 
 <script>
 let map;
@@ -437,22 +440,14 @@ let allNodes = [];
 let linkData = [];
 let firstDisplay = true; // prevent recenter after initial load
 let currentHopDepth = 1; // max hop depth to display around selected node
+let currentOverlay = null;
 
 // Update map theme based on current theme setting
 function updateMapTheme() {
-    if (!map || !lightTileLayer || !darkTileLayer) return;
-
-    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
-    const newTileLayer = isDark ? darkTileLayer : lightTileLayer;
-
-    // Remove current tile layer if it exists
-    if (currentTileLayer) {
-        map.removeLayer(currentTileLayer);
-    }
-
-    // Add new tile layer
-    newTileLayer.addTo(map);
-    currentTileLayer = newTileLayer;
+    if (!map) return;
+    if (currentOverlay) { map.removeLayer(currentOverlay); currentOverlay = null; }
+    const overlay = createOpenFreeMapOverlay();
+    if (overlay) { overlay.addTo(map); currentOverlay = overlay; }
 }
 
 // Initialize the page
@@ -672,26 +667,10 @@ function initializeInterface() {
     });
 }
 
-// Map tile layers for different themes
-let lightTileLayer, darkTileLayer, currentTileLayer;
-
 // Initialize the map
 function initMap() {
     // Create map centered on a default location (will be updated when data loads)
-    map = L.map('map').setView([40.0, -95.0], 4);
-
-    // Create light and dark tile layers
-    lightTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 20
-    });
-
-    darkTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 20
-    });
+    map = L.map('map', {...window.openFreeMapLeafletMapOptions}).setView([40.0, -95.0], 4);
 
     // Add appropriate tile layer based on current theme
     updateMapTheme();
@@ -1340,10 +1319,14 @@ function fitMapToNodes() {
         }
     }
 
-    map.fitBounds(bounds, {
-        paddingTopLeft: paddingTopLeft,
-        paddingBottomRight: paddingBottomRight,
-    });
+    // Skip zero-area bounds (single node, or all nodes at identical coordinates):
+    // fitBounds on them computes an infinite zoom and can crash ('Invalid LatLng (NaN, NaN)')
+    if (bounds.isValid() && !bounds.getNorthEast().equals(bounds.getSouthWest())) {
+        map.fitBounds(bounds, {
+            paddingTopLeft: paddingTopLeft,
+            paddingBottomRight: paddingBottomRight,
+        });
+    }
 }
 
 function toggleTracerouteLinks() {

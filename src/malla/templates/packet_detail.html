@@ -6,6 +6,7 @@
 {% block extra_css %}
 <!-- Leaflet CSS -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+{% include 'components/openfreemap_css.html' %}
 <style>
     .card-metric {
         text-align: center;
@@ -888,6 +889,8 @@
 {% block extra_js %}
 <!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+{% include 'components/openfreemap_js.html' %}
+<script src="{{ url_for('static', filename='js/openfreemap.js') }}?v={{ ASSET_VERSION }}"></script>
 <!-- D3.js for graph visualisation -->
 <script src="https://d3js.org/d3.v7.min.js"></script>
 
@@ -1178,23 +1181,14 @@ async function loadTracerouteMap(routeNodes) {
         }
 
         // Initialize map
-        const map = L.map('traceroute-map').setView([
+        const map = L.map('traceroute-map', {...window.openFreeMapLeafletMapOptions}).setView([
             routeLocations[0].latitude,
             routeLocations[0].longitude
         ], 10);
 
-        // Add tile layer
-        // Add theme-appropriate tile layer
-        const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
-        const tileUrl = isDark
-            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-            : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-
-        L.tileLayer(tileUrl, {
-            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-            subdomains: 'abcd',
-            maxZoom: 20
-        }).addTo(map);
+        // Add OpenFreeMap vector basemap (WebGL)
+        const overlay = createOpenFreeMapOverlay();
+        if (overlay) overlay.addTo(map);
 
         // Add markers and route line
         const routeCoords = [];
@@ -1276,9 +1270,12 @@ async function loadTracerouteMap(routeNodes) {
             }
         }
 
-        // Fit map to show all markers
+        // Fit map to show all markers (skip zero-area bounds: a single-point route makes
+        // fitBounds compute an infinite zoom, which crashes with "Invalid LatLng (NaN, NaN)")
         const bounds = L.latLngBounds(routeCoords);
-        map.fitBounds(bounds, { padding: [20, 20] });
+        if (bounds.isValid() && !bounds.getNorthEast().equals(bounds.getSouthWest())) {
+            map.fitBounds(bounds, { padding: [20, 20] });
+        }
 
     } catch (error) {
         console.error('Error loading traceroute map:', error);
@@ -1371,23 +1368,14 @@ async function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocation
         }
 
         // Initialize map
-        const map = L.map('receptions-map').setView([
+        const map = L.map('receptions-map', {...window.openFreeMapLeafletMapOptions}).setView([
             gatewayMapData[0].latitude,
             gatewayMapData[0].longitude
         ], 10);
 
-        // Add tile layer
-        // Add theme-appropriate tile layer
-        const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
-        const tileUrl = isDark
-            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-            : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-
-        L.tileLayer(tileUrl, {
-            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-            subdomains: 'abcd',
-            maxZoom: 20
-        }).addTo(map);
+        // Add OpenFreeMap vector basemap (WebGL)
+        const overlay = createOpenFreeMapOverlay();
+        if (overlay) overlay.addTo(map);
 
         // Add markers for each gateway
         gatewayMapData.forEach((gateway, index) => {
@@ -1521,9 +1509,13 @@ async function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocation
             }
         }
 
-        // Fit map to show all markers (including relay candidates)
+        // Fit map to show all markers (including relay candidates) (skip zero-area bounds:
+        // a single identical-coordinate set makes fitBounds compute an infinite zoom,
+        // which crashes with "Invalid LatLng (NaN, NaN)")
         const bounds = L.latLngBounds(coords);
-        map.fitBounds(bounds, { padding: [20, 20] });
+        if (bounds.isValid() && !bounds.getNorthEast().equals(bounds.getSouthWest())) {
+            map.fitBounds(bounds, { padding: [20, 20] });
+        }
 
     } catch (error) {
         console.error('Error loading reception map:', error);
