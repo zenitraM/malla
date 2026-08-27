@@ -91,6 +91,7 @@ def browser_type_launch_args():
             "--disable-gpu",
             "--disable-web-security",
             "--disable-features=VizDisplayCompositor",
+            "--enable-unsafe-swiftshader",
         ],
     }
 

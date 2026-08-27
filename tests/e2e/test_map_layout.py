@@ -30,6 +30,11 @@ class TestMapLayout:
         # Verify no error state
         expect(page.locator("#mapError")).to_be_hidden()
 
+        # WebGL vector basemap overlay must have mounted (canvas exists even before tiles load)
+        expect(page.locator(".leaflet-gl-layer canvas")).to_be_visible(
+            timeout=DEFAULT_TIMEOUT
+        )
+
     @pytest.mark.e2e
     def test_map_loads_node_data(self, page: Page, test_server_url):
         """Test that the map loads and displays node data."""

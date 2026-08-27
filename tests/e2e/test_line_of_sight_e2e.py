@@ -155,6 +155,12 @@ class TestLineOfSightE2E:
         map_container = page.locator("#line-of-sight-map")
         expect(map_container).to_be_attached()
 
+        # WebGL vector basemap overlay must have mounted (map sits in a container that is
+        # hidden until an analysis runs, so assert attached rather than visible)
+        expect(
+            page.locator("#line-of-sight-map .leaflet-gl-layer canvas")
+        ).to_be_attached()
+
     def test_line_of_sight_attribution_present(self, page: Page, test_server_url):
         """Test that proper attribution is displayed."""
         page.goto(f"{test_server_url}/line-of-sight")
@@ -167,8 +173,8 @@ class TestLineOfSightE2E:
 
         # The attribution box content should contain the required text even if hidden
         attribution_html = attribution.inner_html()
-        assert "DEM Net Elevation API" in attribution_html
-        assert "elevationapi.com" in attribution_html
+        assert "Mapzen" in attribution_html
+        assert "Open Data" in attribution_html
         assert "OpenStreetMap" in attribution_html
 
     def test_line_of_sight_from_tools_menu(self, page: Page, test_server_url):
