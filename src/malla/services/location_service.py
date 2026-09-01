@@ -135,7 +135,6 @@ class LocationService:
                     hours=hours,
                     include_indirect=False,
                     filters=network_filters,
-                    limit_packets=2000,
                 )
         except Exception as e:
             logger.warning(f"Failed to get network topology data: {e}")
@@ -386,7 +385,6 @@ class LocationService:
                     hours=hours,
                     include_indirect=False,
                     filters=network_filters,
-                    limit_packets=2000,
                 )
 
             # Convert network links to map-compatible format
