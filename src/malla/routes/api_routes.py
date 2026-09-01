@@ -22,7 +22,7 @@ from ..services.analytics_service import AnalyticsService
 from ..services.location_service import LocationService
 from ..services.meshtastic_service import MeshtasticService
 from ..services.node_service import NodeService
-from ..services.traceroute_service import TracerouteService
+from ..services.traceroute_service import DEFAULT_GRAPH_PACKET_LIMIT, TracerouteService
 from ..utils.node_utils import (
     convert_node_id,
     get_bulk_node_names,
@@ -41,6 +41,12 @@ CHAT_RELAY_CANDIDATE_LOOKUP_LIMIT = 256
 _chat_relay_candidate_cache: dict[
     tuple[int, int], tuple[float, list[dict[str, Any]]]
 ] = {}
+
+# TTL cache for the set of node ids involved in traceroute RF hops (including
+# intermediate route nodes). Refreshed by the /traceroute-hops/nodes endpoint;
+# the protobuf payload parsing it replaces is too expensive to repeat per request.
+_HOP_NODES_CACHE_TTL_SECONDS = 300
+_hop_nodes_cache: tuple[float, frozenset[int]] | None = None
 
 
 def _clamp_limit(default: int, maximum: int) -> int:
@@ -1035,42 +1041,113 @@ def api_traceroute_hops_nodes():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Get nodes that have been involved in traceroutes (either as source or destination)
-        query = """
-            SELECT DISTINCT
-                ni.node_id,
-                ni.long_name,
-                ni.short_name,
-                ni.hw_model,
-                printf('!%08x', ni.node_id) as hex_id
-            FROM node_info ni
-            WHERE ni.node_id IN (
-                SELECT DISTINCT from_node_id FROM packet_history
-                WHERE portnum_name = 'TRACEROUTE_APP' AND from_node_id IS NOT NULL
-                UNION
-                SELECT DISTINCT to_node_id FROM packet_history
-                WHERE portnum_name = 'TRACEROUTE_APP' AND to_node_id IS NOT NULL
-            )
-            ORDER BY ni.long_name, ni.short_name
-        """
+        # Collect all nodes involved in recent traceroutes: initiators, targets
+        # and intermediate route nodes. Route arrays live inside raw_payload
+        # blobs so they cannot be extracted in SQL; parse them in Python using
+        # the same 7-day window as the hop/link analysis endpoints so every
+        # listed node can actually be analyzed (and so map "View History"
+        # links resolve for hop-only nodes). The parse is expensive, so the
+        # resulting id set is cached briefly.
+        global _hop_nodes_cache
+        now = time.time()
+        if (
+            _hop_nodes_cache is not None
+            and now - _hop_nodes_cache[0] < _HOP_NODES_CACHE_TTL_SECONDS
+        ):
+            hop_node_ids = set(_hop_nodes_cache[1])
+        else:
+            from datetime import datetime, timedelta
 
-        cursor.execute(query)
-        nodes_data = [dict(row) for row in cursor.fetchall()]
+            window_end = datetime.now()
+            window_start = window_end - timedelta(days=7)
+            cursor.execute(
+                f"""
+                SELECT
+                    id, from_node_id, to_node_id, raw_payload
+                FROM packet_history
+                WHERE portnum_name = 'TRACEROUTE_APP'
+                  AND processed_successfully = 1
+                  AND raw_payload IS NOT NULL
+                  AND timestamp >= ? AND timestamp <= ?
+                ORDER BY timestamp DESC
+                LIMIT {DEFAULT_GRAPH_PACKET_LIMIT}
+                """,
+                (window_start.timestamp(), window_end.timestamp()),
+            )
+
+            BROADCAST_NODE_ID = 4294967295  # 0xFFFFFFFF
+            hop_node_ids = set()
+            for packet in cursor.fetchall():
+                # RF hop endpoints are consecutive nodes of the sequence
+                # from -> route... -> to (and the same for the return path),
+                # so the union of all those node ids is exactly the set of
+                # nodes that can appear as a hop endpoint.
+                route_data = parse_traceroute_payload(packet["raw_payload"])
+                packet_node_ids = [
+                    packet["from_node_id"],
+                    packet["to_node_id"],
+                    *route_data["route_nodes"],
+                    *route_data["route_back"],
+                ]
+                for hop_node_id in packet_node_ids:
+                    if hop_node_id is not None and hop_node_id != BROADCAST_NODE_ID:
+                        hop_node_ids.add(hop_node_id)
+
+            _hop_nodes_cache = (now, frozenset(hop_node_ids))
+
+        # Fetch node info for all involved nodes
+        nodes_data: dict[int, dict[str, Any]] = {}
+        if hop_node_ids:
+            ordered_hop_ids = sorted(hop_node_ids)
+            placeholders = ",".join("?" * len(ordered_hop_ids))
+            cursor.execute(
+                f"""
+                SELECT DISTINCT
+                    ni.node_id,
+                    ni.long_name,
+                    ni.short_name,
+                    ni.hw_model,
+                    printf('!%08x', ni.node_id) as hex_id
+                FROM node_info ni
+                WHERE ni.node_id IN ({placeholders})
+                """,
+                ordered_hop_ids,
+            )
+            for row in cursor.fetchall():
+                nodes_data[row["node_id"]] = dict(row)
+
+            # Nodes without a node_info record still need a pickable entry
+            for hop_node_id in ordered_hop_ids:
+                if hop_node_id not in nodes_data:
+                    nodes_data[hop_node_id] = {
+                        "node_id": hop_node_id,
+                        "long_name": None,
+                        "short_name": None,
+                        "hw_model": None,
+                        "hex_id": f"!{hop_node_id:08x}",
+                    }
+
         conn.close()
         db_time = time.time() - db_start
 
         # Get location data for these nodes only (avoid decoding positions for the whole network)
         location_start = time.time()
-        node_id_list = [n["node_id"] for n in nodes_data]
+        node_id_list = [n["node_id"] for n in nodes_data.values()]
         locations_list = LocationRepository.get_node_locations(
             {"node_ids": node_id_list}
         )
         location_map = {loc["node_id"]: loc for loc in locations_list}
         location_time = time.time() - location_start
 
-        # Combine node info with location data
+        # Combine node info with location data, sorted by display name
         nodes = []
-        for node in nodes_data:
+        ordered_nodes = sorted(
+            nodes_data.values(),
+            key=lambda n: (
+                (n["long_name"] or n["short_name"] or n["hex_id"] or "").lower()
+            ),
+        )
+        for node in ordered_nodes:
             node_id = node["node_id"]
             display_name = node["long_name"] or node["short_name"] or f"!{node_id:08x}"
 

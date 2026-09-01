@@ -354,6 +354,30 @@ class TestChannelsEndpoint:
                 assert isinstance(location["latitude"], int | float)
                 assert isinstance(location["longitude"], int | float)
 
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_traceroute_hops_nodes_includes_intermediate_hops(self, client):
+        """Intermediate hop nodes (never traceroute endpoints) must be listed."""
+        response = client.get("/api/traceroute-hops/nodes")
+        assert response.status_code == 200
+
+        data = response.get_json()
+        node_ids = {n["node_id"] for n in data["nodes"]}
+
+        # These fixture nodes only ever appear inside route arrays
+        # (0x11111111 in two scenarios, 0xCCCCCCCC in the five-hop scenario)
+        assert 0x11111111 in node_ids
+        assert 0xCCCCCCCC in node_ids
+
+        # Broadcast node id must never be listed
+        assert 4294967295 not in node_ids
+
+        # Hop-only entries must still be well-formed with a fallback name
+        hop_node = next(n for n in data["nodes"] if n["node_id"] == 0xCCCCCCCC)
+        assert hop_node["hex_id"] == "!cccccccc"
+        assert hop_node["display_name"]
+        assert isinstance(hop_node["display_name"], str)
+
 
 class TestLocationEndpoints:
     """Test the location API endpoints."""
