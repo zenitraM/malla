@@ -1068,6 +1068,7 @@ def api_traceroute_hops_nodes():
                 WHERE portnum_name = 'TRACEROUTE_APP'
                   AND processed_successfully = 1
                   AND raw_payload IS NOT NULL
+                  AND length(raw_payload) > 0
                   AND timestamp >= ? AND timestamp <= ?
                 ORDER BY timestamp DESC
                 LIMIT {DEFAULT_GRAPH_PACKET_LIMIT}
@@ -1221,6 +1222,7 @@ def api_traceroute_link(node1_id, node2_id):
             "start_time": start_time.timestamp(),
             "end_time": end_time.timestamp(),
             "processed_successfully_only": True,
+            "exclude_empty_payload": True,
         }
 
         all_packets = TracerouteRepository.get_traceroute_packets(

@@ -3370,6 +3370,10 @@ class TracerouteRepository:
             if filters.get("processed_successfully_only"):
                 where_conditions.append("processed_successfully = 1")
 
+            where_conditions.append(
+                "raw_payload IS NOT NULL AND length(raw_payload) > 0"
+            )
+
             where_clause = "WHERE " + " AND ".join(where_conditions)
             query = f"""
                 SELECT
@@ -3574,6 +3578,11 @@ class TracerouteRepository:
 
             if filters.get("processed_successfully_only"):
                 where_conditions.append("processed_successfully = 1")
+
+            if filters.get("exclude_empty_payload"):
+                where_conditions.append(
+                    "raw_payload IS NOT NULL AND length(raw_payload) > 0"
+                )
 
             # Check if route_node filtering is needed
             route_node_filter = filters.get("route_node")

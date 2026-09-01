@@ -301,7 +301,10 @@ class TracerouteService:
 
         try:
             # Get recent successful traceroutes
-            filters = {"processed_successfully_only": True}
+            filters = {
+                "processed_successfully_only": True,
+                "exclude_empty_payload": True,
+            }
             result = TracerouteRepository.get_traceroute_packets(
                 limit=1000,  # Analyze more data
                 filters=filters,
@@ -502,6 +505,7 @@ class TracerouteService:
                 "start_time": start_time_filter.timestamp(),
                 "end_time": end_time.timestamp(),
                 "processed_successfully_only": True,
+                "exclude_empty_payload": True,
             }
 
             result = TracerouteRepository.get_traceroute_packets(

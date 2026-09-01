@@ -192,6 +192,7 @@ class NodeService:
             WHERE portnum_name = 'TRACEROUTE_APP'
             AND processed_successfully = 1
             AND raw_payload IS NOT NULL
+            AND length(raw_payload) > 0
             AND timestamp >= ?
             AND timestamp <= ?
         """
