@@ -1572,6 +1572,90 @@ function createLinkPopupContent(link) {
         losButton.addEventListener('click', () => showLineOfSight(link.from_node_id, link.to_node_id));
     }
 
+    // Build directional / average SNR elements
+    const snrElements = [];
+    const hasForwardSnr = link.forward_avg_snr !== null && link.forward_avg_snr !== undefined;
+    const hasReturnSnr = link.return_avg_snr !== null && link.return_avg_snr !== undefined;
+
+    if (hasForwardSnr && hasReturnSnr) {
+        snrElements.push(
+            el('div', null,
+                el('strong', null, 'Forward SNR:'),
+                textNode(` ${link.forward_avg_snr.toFixed(1)} dB `),
+                el('span', { className: 'text-muted small' }, `(${fromName} → ${toName})`)
+            ),
+            el('div', null,
+                el('strong', null, 'Return SNR:'),
+                textNode(` ${link.return_avg_snr.toFixed(1)} dB `),
+                el('span', { className: 'text-muted small' }, `(${toName} → ${fromName})`)
+            ),
+            link.avg_snr !== null && link.avg_snr !== undefined ? el('div', { className: 'text-muted small' },
+                el('strong', null, 'Combined Avg SNR:'),
+                textNode(` ${link.avg_snr.toFixed(1)} dB`)
+            ) : null
+        );
+    } else if (hasForwardSnr) {
+        snrElements.push(
+            el('div', null,
+                el('strong', null, 'Forward SNR:'),
+                textNode(` ${link.forward_avg_snr.toFixed(1)} dB `),
+                el('span', { className: 'text-muted small' }, `(${fromName} → ${toName})`)
+            )
+        );
+    } else if (hasReturnSnr) {
+        snrElements.push(
+            el('div', null,
+                el('strong', null, 'Return SNR:'),
+                textNode(` ${link.return_avg_snr.toFixed(1)} dB `),
+                el('span', { className: 'text-muted small' }, `(${toName} → ${fromName})`)
+            )
+        );
+    } else if (link.avg_snr !== null && link.avg_snr !== undefined) {
+        snrElements.push(
+            el('div', null, el('strong', null, 'Avg SNR:'), textNode(` ${link.avg_snr.toFixed(1)} dB`))
+        );
+    }
+
+    // Build directional / average RSSI elements
+    const rssiElements = [];
+    const hasForwardRssi = link.forward_avg_rssi !== null && link.forward_avg_rssi !== undefined;
+    const hasReturnRssi = link.return_avg_rssi !== null && link.return_avg_rssi !== undefined;
+
+    if (hasForwardRssi && hasReturnRssi) {
+        rssiElements.push(
+            el('div', null,
+                el('strong', null, 'Forward RSSI:'),
+                textNode(` ${link.forward_avg_rssi.toFixed(0)} dBm `),
+                el('span', { className: 'text-muted small' }, `(${fromName} → ${toName})`)
+            ),
+            el('div', null,
+                el('strong', null, 'Return RSSI:'),
+                textNode(` ${link.return_avg_rssi.toFixed(0)} dBm `),
+                el('span', { className: 'text-muted small' }, `(${toName} → ${fromName})`)
+            )
+        );
+    } else if (hasForwardRssi) {
+        rssiElements.push(
+            el('div', null,
+                el('strong', null, 'Forward RSSI:'),
+                textNode(` ${link.forward_avg_rssi.toFixed(0)} dBm `),
+                el('span', { className: 'text-muted small' }, `(${fromName} → ${toName})`)
+            )
+        );
+    } else if (hasReturnRssi) {
+        rssiElements.push(
+            el('div', null,
+                el('strong', null, 'Return RSSI:'),
+                textNode(` ${link.return_avg_rssi.toFixed(0)} dBm `),
+                el('span', { className: 'text-muted small' }, `(${toName} → ${fromName})`)
+            )
+        );
+    } else if (link.avg_rssi !== null && link.avg_rssi !== undefined) {
+        rssiElements.push(
+            el('div', null, el('strong', null, 'Avg RSSI:'), textNode(` ${link.avg_rssi.toFixed(0)} dBm`))
+        );
+    }
+
     return el('div', { className: 'traceroute-link-info' },
         el('div', { className: 'fw-bold mb-2' }, link.link_type === 'packet' ? 'Direct Packet Link' : 'Traceroute RF Hop'),
         el('div', null, el('strong', null, 'From:'), textNode(` ${fromName}`)),
@@ -1579,8 +1663,8 @@ function createLinkPopupContent(link) {
         el('div', null, el('strong', null, 'Success Rate:'), textNode(' '), el('span', { className: qualityClass }, `${link.success_rate.toFixed(1)}%`)),
         el('div', null, el('strong', null, 'Attempts:'), textNode(` ${link.total_hops_seen}`)),
         el('div', null, el('strong', null, 'Last Seen:'), textNode(` ${formattedTime}`)),
-        link.avg_snr ? el('div', null, el('strong', null, 'Avg SNR:'), textNode(` ${link.avg_snr.toFixed(1)} dB`)) : null,
-        link.avg_rssi ? el('div', null, el('strong', null, 'Avg RSSI:'), textNode(` ${link.avg_rssi.toFixed(0)} dBm`)) : null,
+        ...snrElements,
+        ...rssiElements,
         el('div', { className: 'mt-2 d-flex gap-1' }, historyButton, losButton)
     );
 }

@@ -408,6 +408,10 @@ class LocationService:
                     "to_node_id": link["target"],
                     "success_rate": success_rate,
                     "avg_snr": link.get("avg_snr"),
+                    "forward_avg_snr": link.get("forward_avg_snr"),
+                    "return_avg_snr": link.get("return_avg_snr"),
+                    "forward_count": link.get("forward_count", 0),
+                    "return_count": link.get("return_count", 0),
                     "age_hours": round(age_hours, 2),
                     "last_seen": link[
                         "last_seen"
@@ -1004,12 +1008,26 @@ class LocationService:
                 # Crude success-rate proxy: scale packet count to 10-100 like traceroute_links
                 success_rate = max(10, min(100, row["packet_count"] * 10))
 
+                is_forward = from_node_id == key[0]
+                row_avg_snr = (
+                    round(row["avg_snr"], 1) if row["avg_snr"] is not None else None
+                )
+                row_avg_rssi = (
+                    round(row["avg_rssi"], 1) if row["avg_rssi"] is not None else None
+                )
+
                 link_payload = {
                     "from_node_id": key[0],
                     "to_node_id": key[1],
                     "success_rate": success_rate,
-                    "avg_snr": row["avg_snr"],
-                    "avg_rssi": row["avg_rssi"],
+                    "avg_snr": row_avg_snr,
+                    "forward_avg_snr": row_avg_snr if is_forward else None,
+                    "return_avg_snr": None if is_forward else row_avg_snr,
+                    "avg_rssi": row_avg_rssi,
+                    "forward_avg_rssi": row_avg_rssi if is_forward else None,
+                    "return_avg_rssi": None if is_forward else row_avg_rssi,
+                    "forward_count": row["packet_count"] if is_forward else 0,
+                    "return_count": 0 if is_forward else row["packet_count"],
                     "age_hours": round(age_hours, 2) if age_hours is not None else None,
                     "last_seen_str": last_seen_str,
                     "is_bidirectional": False,  # will be updated below if we see both directions
@@ -1032,21 +1050,31 @@ class LocationService:
                     ):
                         existing["age_hours"] = round(age_hours, 2)
                         existing["last_seen_str"] = last_seen_str
+                    # Track directional averages and counts
+                    if is_forward:
+                        existing["forward_avg_snr"] = row_avg_snr
+                        existing["forward_avg_rssi"] = row_avg_rssi
+                        existing["forward_count"] = row["packet_count"]
+                    else:
+                        existing["return_avg_snr"] = row_avg_snr
+                        existing["return_avg_rssi"] = row_avg_rssi
+                        existing["return_count"] = row["packet_count"]
+
                     # Merge SNR / RSSI averages (simple mean of means)
-                    if row["avg_snr"] is not None:
+                    if row_avg_snr is not None:
                         if existing["avg_snr"] is None:
-                            existing["avg_snr"] = row["avg_snr"]
+                            existing["avg_snr"] = row_avg_snr
                         else:
-                            existing["avg_snr"] = (
-                                existing["avg_snr"] + row["avg_snr"]
-                            ) / 2.0
-                    if row["avg_rssi"] is not None:
+                            existing["avg_snr"] = round(
+                                (existing["avg_snr"] + row_avg_snr) / 2.0, 1
+                            )
+                    if row_avg_rssi is not None:
                         if existing["avg_rssi"] is None:
-                            existing["avg_rssi"] = row["avg_rssi"]
+                            existing["avg_rssi"] = row_avg_rssi
                         else:
-                            existing["avg_rssi"] = (
-                                existing["avg_rssi"] + row["avg_rssi"]
-                            ) / 2.0
+                            existing["avg_rssi"] = round(
+                                (existing["avg_rssi"] + row_avg_rssi) / 2.0, 1
+                            )
                 else:
                     link_map[key] = link_payload
 

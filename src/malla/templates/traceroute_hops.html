@@ -116,6 +116,7 @@
                             <div class="text-center">
                                 <h3 id="avg-snr" class="text-success">-</h3>
                                 <small class="text-muted">Average SNR (dB)</small>
+                                <div id="directional-snr" class="small text-muted mt-1" style="font-size: 0.75rem;"></div>
                             </div>
                         </div>
                         <div class="col-md-3">
@@ -553,6 +554,22 @@
         // Update summary
         document.getElementById('total-hops').textContent = data.total_attempts;
         document.getElementById('avg-snr').textContent = data.avg_snr ? `${data.avg_snr.toFixed(1)}` : 'N/A';
+        const dirSnrDiv = document.getElementById('directional-snr');
+        if (dirSnrDiv) {
+            dirSnrDiv.replaceChildren();
+            const parts = [];
+            const n1Display = formatNodeIdForDisplay(data.from_node_id);
+            const n2Display = formatNodeIdForDisplay(data.to_node_id);
+            if (data.forward_avg_snr !== null && data.forward_avg_snr !== undefined) {
+                parts.push(el('div', null, `${n1Display} → ${n2Display}: `, el('strong', null, `${data.forward_avg_snr.toFixed(1)} dB`)));
+            }
+            if (data.return_avg_snr !== null && data.return_avg_snr !== undefined) {
+                parts.push(el('div', null, `${n2Display} → ${n1Display}: `, el('strong', null, `${data.return_avg_snr.toFixed(1)} dB`)));
+            }
+            if (parts.length > 0) {
+                appendChildren(dirSnrDiv, ...parts);
+            }
+        }
         document.getElementById('last-seen').textContent = getRelativeTime(data.traceroutes[0]?.timestamp);
 
         // Calculate and display geographic distance

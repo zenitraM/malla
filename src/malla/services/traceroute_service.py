@@ -1154,6 +1154,7 @@ class TracerouteService:
 
                         # Create bidirectional link key (sorted to ensure consistency)
                         link_key = tuple(sorted([hop.from_node_id, hop.to_node_id]))
+                        is_forward = hop.from_node_id == link_key[0]
 
                         # Add/update direct link
                         if link_key not in direct_links:
@@ -1161,6 +1162,8 @@ class TracerouteService:
                                 "source": link_key[0],
                                 "target": link_key[1],
                                 "snr_values": [hop.snr],
+                                "forward_snr_values": [hop.snr] if is_forward else [],
+                                "return_snr_values": [] if is_forward else [hop.snr],
                                 "packet_count": 1,
                                 "last_seen": tr_data["timestamp"],
                                 "last_packet_id": tr_data["id"],
@@ -1169,6 +1172,10 @@ class TracerouteService:
                         else:
                             link = direct_links[link_key]
                             link["snr_values"].append(hop.snr)
+                            if is_forward:
+                                link["forward_snr_values"].append(hop.snr)
+                            else:
+                                link["return_snr_values"].append(hop.snr)
                             link["packet_count"] += 1
                             if tr_data["timestamp"] > link["last_seen"]:
                                 link["last_seen"] = tr_data["timestamp"]
@@ -1249,6 +1256,12 @@ class TracerouteService:
             processed_links = []
             for link_data in direct_links.values():
                 avg_snr = sum(link_data["snr_values"]) / len(link_data["snr_values"])
+                f_snrs = link_data.get("forward_snr_values", [])
+                r_snrs = link_data.get("return_snr_values", [])
+                forward_avg_snr = (
+                    round(sum(f_snrs) / len(f_snrs), 1) if f_snrs else None
+                )
+                return_avg_snr = round(sum(r_snrs) / len(r_snrs), 1) if r_snrs else None
 
                 # Calculate link strength based on SNR and packet count
                 # Higher SNR and more packets = stronger link
@@ -1263,6 +1276,10 @@ class TracerouteService:
                         "target": link_data["target"],
                         "type": "direct",
                         "avg_snr": round(avg_snr, 1),
+                        "forward_avg_snr": forward_avg_snr,
+                        "return_avg_snr": return_avg_snr,
+                        "forward_count": len(f_snrs),
+                        "return_count": len(r_snrs),
                         "packet_count": link_data["packet_count"],
                         "strength": round(strength, 1),
                         "last_seen": link_data["last_seen"],

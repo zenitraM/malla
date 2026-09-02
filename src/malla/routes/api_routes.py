@@ -1237,6 +1237,8 @@ def api_traceroute_link(node1_id, node2_id):
         processed_traceroutes: list[dict[str, Any]] = []
         direction_counts: dict[str, int] = {}
         snr_values: list[float] = []
+        forward_snr_values: list[float] = []
+        return_snr_values: list[float] = []
 
         for packet in all_packets["packets"]:
             try:
@@ -1270,6 +1272,10 @@ def api_traceroute_link(node1_id, node2_id):
 
                     if is_plausible_traceroute_snr(target_hop.snr):
                         snr_values.append(target_hop.snr)
+                        if target_hop.from_node_id == node1_id_int:
+                            forward_snr_values.append(target_hop.snr)
+                        else:
+                            return_snr_values.append(target_hop.snr)
 
                     # Create route_hops structure for UI - include ALL RF hops (forward and return)
                     route_hops = []
@@ -1356,7 +1362,17 @@ def api_traceroute_link(node1_id, node2_id):
 
         # Calculate summary statistics
         total_attempts = len(processed_traceroutes)
-        avg_snr = sum(snr_values) / len(snr_values) if snr_values else None
+        avg_snr = round(sum(snr_values) / len(snr_values), 1) if snr_values else None
+        forward_avg_snr = (
+            round(sum(forward_snr_values) / len(forward_snr_values), 1)
+            if forward_snr_values
+            else None
+        )
+        return_avg_snr = (
+            round(sum(return_snr_values) / len(return_snr_values), 1)
+            if return_snr_values
+            else None
+        )
 
         # Ensure direction_counts has the expected format even when empty
         if not direction_counts:
@@ -1373,6 +1389,10 @@ def api_traceroute_link(node1_id, node2_id):
             "to_node_name": node_names.get(node2_id_int, f"!{node2_id_int:08x}"),
             "total_attempts": total_attempts,
             "avg_snr": avg_snr,
+            "forward_avg_snr": forward_avg_snr,
+            "return_avg_snr": return_avg_snr,
+            "forward_count": len(forward_snr_values),
+            "return_count": len(return_snr_values),
             "direction_counts": direction_counts,
             "traceroutes": processed_traceroutes,
         }
