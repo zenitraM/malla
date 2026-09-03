@@ -9,7 +9,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..database.repositories import LocationRepository
-from ..utils.signal_quality import rssi_valid_sql, snr_valid_sql
+from ..utils.signal_quality import (
+    calculate_estimated_reliability,
+    classify_link_balance,
+    classify_signal_quality,
+    is_plausible_snr,
+    rssi_valid_sql,
+    snr_valid_sql,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -399,26 +406,72 @@ class LocationService:
                 last_seen_dt = datetime.fromtimestamp(link["last_seen"], UTC)
                 last_seen_str = last_seen_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
-                # Calculate success rate (using packet count as proxy)
-                # Higher packet count suggests more reliable link
-                success_rate = min(100, max(10, link["packet_count"] * 10))
+                f_snr = link.get("forward_avg_snr")
+                r_snr = link.get("return_avg_snr")
+                f_cnt = link.get("forward_count", 0)
+                r_cnt = link.get("return_count", 0)
+                total_obs = f_cnt + r_cnt if (f_cnt or r_cnt) else link["packet_count"]
+
+                valid_snrs = [
+                    s for s in (f_snr, r_snr) if s is not None and is_plausible_snr(s)
+                ]
+                worst_snr = (
+                    min(valid_snrs)
+                    if valid_snrs
+                    else (
+                        link.get("avg_snr")
+                        if is_plausible_snr(link.get("avg_snr"))
+                        else None
+                    )
+                )
+
+                link_sf = link.get("channel_id")
+                overall_reliability = calculate_estimated_reliability(
+                    worst_snr, sf=link_sf
+                )
+                forward_reliability = calculate_estimated_reliability(
+                    f_snr, sf=link_sf
+                )
+                return_reliability = calculate_estimated_reliability(
+                    r_snr, sf=link_sf
+                )
+
+                forward_quality = classify_signal_quality(f_snr, sf=link_sf)
+                return_quality = classify_signal_quality(r_snr, sf=link_sf)
+                overall_quality = classify_signal_quality(worst_snr, sf=link_sf)
+
+                link_balance = classify_link_balance(f_snr, r_snr, sf=link_sf)
+                is_bidirectional = bool(f_cnt > 0 and r_cnt > 0)
 
                 traceroute_link = {
                     "from_node_id": link["source"],
                     "to_node_id": link["target"],
-                    "success_rate": success_rate,
+                    "channel_id": link_sf,
+                    "success_rate": overall_reliability
+                    if overall_reliability is not None
+                    else 50.0,
+                    "estimated_reliability": overall_reliability,
+                    "forward_reliability": forward_reliability,
+                    "return_reliability": return_reliability,
+                    "forward_quality": forward_quality,
+                    "return_quality": return_quality,
+                    "overall_quality": overall_quality,
+                    "link_balance": link_balance,
+                    "worst_snr": worst_snr,
                     "avg_snr": link.get("avg_snr"),
-                    "forward_avg_snr": link.get("forward_avg_snr"),
-                    "return_avg_snr": link.get("return_avg_snr"),
-                    "forward_count": link.get("forward_count", 0),
-                    "return_count": link.get("return_count", 0),
+                    "forward_avg_snr": f_snr,
+                    "return_avg_snr": r_snr,
+                    "forward_count": f_cnt,
+                    "return_count": r_cnt,
                     "age_hours": round(age_hours, 2),
                     "last_seen": link[
                         "last_seen"
                     ],  # Raw Unix timestamp for client-side formatting
                     "last_seen_str": last_seen_str,
-                    "is_bidirectional": True,  # Network graph links are bidirectional by design
-                    "total_hops_seen": link["packet_count"],
+                    "is_bidirectional": is_bidirectional,
+                    "total_hops_seen": total_obs,
+                    "total_observations": total_obs,
+                    "strength": link.get("strength"),
                     "last_packet_id": link.get("last_packet_id"),
                 }
 
@@ -950,6 +1003,7 @@ class LocationService:
                 SELECT
                     from_node_id,
                     gateway_id,
+                    MAX(channel_id)        AS channel_id,
                     COUNT(*)               AS packet_count,
                     AVG(CASE WHEN {rssi_valid_sql()} THEN rssi END) AS avg_rssi,
                     AVG(CASE WHEN {snr_valid_sql()} THEN snr END) AS avg_snr,
@@ -1019,6 +1073,7 @@ class LocationService:
                 link_payload = {
                     "from_node_id": key[0],
                     "to_node_id": key[1],
+                    "channel_id": row.get("channel_id"),
                     "success_rate": success_rate,
                     "avg_snr": row_avg_snr,
                     "forward_avg_snr": row_avg_snr if is_forward else None,
@@ -1077,6 +1132,57 @@ class LocationService:
                             )
                 else:
                     link_map[key] = link_payload
+
+            # Calculate physical link reliability, quality, and balance metrics
+            for link_data in link_map.values():
+                f_snr = link_data.get("forward_avg_snr")
+                r_snr = link_data.get("return_avg_snr")
+                valid_snrs = [
+                    s for s in (f_snr, r_snr) if s is not None and is_plausible_snr(s)
+                ]
+                worst_snr = (
+                    min(valid_snrs)
+                    if valid_snrs
+                    else (
+                        link_data.get("avg_snr")
+                        if is_plausible_snr(link_data.get("avg_snr"))
+                        else None
+                    )
+                )
+
+                link_sf = link_data.get("channel_id")
+                overall_reliability = calculate_estimated_reliability(
+                    worst_snr, sf=link_sf
+                )
+                link_data["estimated_reliability"] = overall_reliability
+                link_data["forward_reliability"] = calculate_estimated_reliability(
+                    f_snr, sf=link_sf
+                )
+                link_data["return_reliability"] = calculate_estimated_reliability(
+                    r_snr, sf=link_sf
+                )
+                link_data["forward_quality"] = classify_signal_quality(
+                    f_snr, sf=link_sf
+                )
+                link_data["return_quality"] = classify_signal_quality(
+                    r_snr, sf=link_sf
+                )
+                link_data["overall_quality"] = classify_signal_quality(
+                    worst_snr, sf=link_sf
+                )
+                link_data["link_balance"] = classify_link_balance(
+                    f_snr, r_snr, sf=link_sf
+                )
+                link_data["worst_snr"] = worst_snr
+                link_data["total_observations"] = link_data.get(
+                    "forward_count", 0
+                ) + link_data.get("return_count", 0)
+                obs = link_data["total_observations"] or link_data.get("packet_count", 1)
+                link_data["strength"] = round(
+                    min(8.0, max(1.5, 1.5 + 2.5 * math.log10(max(1, obs)))), 1
+                )
+                if overall_reliability is not None:
+                    link_data["success_rate"] = overall_reliability
 
             logger.info("Generated %d packet-based RF links", len(link_map))
             result = list(link_map.values())

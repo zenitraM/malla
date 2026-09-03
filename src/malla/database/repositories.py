@@ -3375,6 +3375,7 @@ class TracerouteRepository:
                     from_node_id,
                     to_node_id,
                     gateway_id,
+                    channel_id,
                     hop_start,
                     hop_limit,
                     raw_payload

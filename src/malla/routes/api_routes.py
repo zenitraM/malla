@@ -29,7 +29,13 @@ from ..utils.node_utils import (
     get_bulk_node_short_names,
 )
 from ..utils.serialization_utils import convert_bytes_to_base64, sanitize_floats
-from ..utils.signal_quality import is_plausible_traceroute_snr
+from ..utils.signal_quality import (
+    calculate_estimated_reliability,
+    classify_link_balance,
+    classify_signal_quality,
+    is_plausible_snr,
+    is_plausible_traceroute_snr,
+)
 from ..utils.traceroute_utils import parse_traceroute_payload
 
 logger = logging.getLogger(__name__)
@@ -1239,6 +1245,7 @@ def api_traceroute_link(node1_id, node2_id):
         snr_values: list[float] = []
         forward_snr_values: list[float] = []
         return_snr_values: list[float] = []
+        link_channel: str | None = None
 
         for packet in all_packets["packets"]:
             try:
@@ -1262,6 +1269,9 @@ def api_traceroute_link(node1_id, node2_id):
                         break
 
                 if target_hop:
+                    if not link_channel and packet.get("channel_id"):
+                        link_channel = packet.get("channel_id")
+
                     # Determine direction
                     if target_hop.from_node_id == node1_id_int:
                         direction = f"{node_names.get(node1_id_int, f'!{node1_id_int:08x}')} → {node_names.get(node2_id_int, f'!{node2_id_int:08x}')}"
@@ -1374,6 +1384,35 @@ def api_traceroute_link(node1_id, node2_id):
             else None
         )
 
+        valid_snrs = [
+            s
+            for s in (forward_avg_snr, return_avg_snr)
+            if s is not None and is_plausible_snr(s)
+        ]
+        worst_snr = (
+            min(valid_snrs)
+            if valid_snrs
+            else (avg_snr if is_plausible_snr(avg_snr) else None)
+        )
+
+        overall_reliability = calculate_estimated_reliability(
+            worst_snr, sf=link_channel
+        )
+        forward_reliability = calculate_estimated_reliability(
+            forward_avg_snr, sf=link_channel
+        )
+        return_reliability = calculate_estimated_reliability(
+            return_avg_snr, sf=link_channel
+        )
+
+        forward_quality = classify_signal_quality(forward_avg_snr, sf=link_channel)
+        return_quality = classify_signal_quality(return_avg_snr, sf=link_channel)
+        overall_quality = classify_signal_quality(worst_snr, sf=link_channel)
+
+        link_balance = classify_link_balance(
+            forward_avg_snr, return_avg_snr, sf=link_channel
+        )
+
         # Ensure direction_counts has the expected format even when empty
         if not direction_counts:
             # Create default direction labels for the two nodes
@@ -1387,10 +1426,20 @@ def api_traceroute_link(node1_id, node2_id):
             "to_node_id": node2_id_int,
             "from_node_name": node_names.get(node1_id_int, f"!{node1_id_int:08x}"),
             "to_node_name": node_names.get(node2_id_int, f"!{node2_id_int:08x}"),
+            "channel_id": link_channel,
             "total_attempts": total_attempts,
+            "total_observations": len(forward_snr_values) + len(return_snr_values),
             "avg_snr": avg_snr,
             "forward_avg_snr": forward_avg_snr,
             "return_avg_snr": return_avg_snr,
+            "worst_snr": worst_snr,
+            "estimated_reliability": overall_reliability,
+            "forward_reliability": forward_reliability,
+            "return_reliability": return_reliability,
+            "forward_quality": forward_quality,
+            "return_quality": return_quality,
+            "overall_quality": overall_quality,
+            "link_balance": link_balance,
             "forward_count": len(forward_snr_values),
             "return_count": len(return_snr_values),
             "direction_counts": direction_counts,

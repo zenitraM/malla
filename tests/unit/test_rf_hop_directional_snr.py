@@ -81,6 +81,12 @@ class TestRFHopDirectionalSNR:
         # Return: 20 -> 10: -3.0
         assert link["return_avg_snr"] == -3.0
         assert link["return_count"] == 1
+        assert link["worst_snr"] == -3.0
+        assert link["overall_quality"] in ("good", "fair", "marginal")
+        assert link["link_balance"] in ("balanced", "asymmetric_marginal")
+        assert link["estimated_reliability"] is not None
+        # Strength is decoupled: packet_count=2 -> 1.5 + 2.5 * log10(2) ~= 2.3
+        assert 1.5 <= link["strength"] <= 8.0
 
     def test_location_service_get_traceroute_links_exposes_directional_snr(self):
         """Test that get_traceroute_links includes forward_avg_snr and return_avg_snr."""
@@ -110,6 +116,11 @@ class TestRFHopDirectionalSNR:
         assert link["return_avg_snr"] == -3.0
         assert link["forward_count"] == 2
         assert link["return_count"] == 2
+        assert link["worst_snr"] == -3.0
+        assert link["is_bidirectional"] is True
+        assert link["estimated_reliability"] is not None
+        assert link["link_balance"] in ("balanced", "asymmetric_marginal")
+        assert link["total_observations"] == 4
 
     @patch("src.malla.database.connection.get_db_connection")
     def test_location_service_get_packet_links_directional_snr(self, mock_db_conn):
@@ -151,6 +162,9 @@ class TestRFHopDirectionalSNR:
         assert link["is_bidirectional"] is True
         assert link["forward_avg_snr"] == 6.0
         assert link["return_avg_snr"] == -2.0
+        assert link["worst_snr"] == -2.0
+        assert link["estimated_reliability"] is not None
+        assert link["total_observations"] == 8
         assert link["forward_count"] == 5
         assert link["return_count"] == 3
         assert link["forward_avg_rssi"] == -90.0
@@ -256,3 +270,55 @@ class TestRFHopDirectionalSNR:
             assert data["return_count"] == 1
             # (8.0 + 5.0 + 1.0) / 3 = 4.6666... rounded to 1 decimal is 4.7
             assert data["avg_snr"] == 4.7
+
+    def test_dynamic_per_link_spreading_factor_resolution(self):
+        """Test that get_traceroute_links uses the link's channel_id to determine SF thresholds."""
+        # For SNR = -5.0 dB:
+        # On SFNarrow (SF7, demod limit -7.5 dB): margin is +2.5 dB (< 4 dB) -> marginal
+        # On LongFast (SF11, demod limit -17.5 dB): margin is +12.5 dB (>= 10 dB) -> good
+        network_data = {
+            "links": [
+                {
+                    "source": 100,
+                    "target": 200,
+                    "channel_id": "SFNarrow",
+                    "packet_count": 2,
+                    "last_seen": 1000.0,
+                    "avg_snr": -5.0,
+                    "forward_avg_snr": -5.0,
+                    "return_avg_snr": None,
+                    "forward_count": 2,
+                    "return_count": 0,
+                    "last_packet_id": 1,
+                },
+                {
+                    "source": 300,
+                    "target": 400,
+                    "channel_id": "LongFast",
+                    "packet_count": 2,
+                    "last_seen": 1000.0,
+                    "avg_snr": -5.0,
+                    "forward_avg_snr": -5.0,
+                    "return_avg_snr": None,
+                    "forward_count": 2,
+                    "return_count": 0,
+                    "last_packet_id": 2,
+                },
+            ]
+        }
+
+        tr_links = LocationService.get_traceroute_links(network_data=network_data)
+        assert len(tr_links) == 2
+
+        sfnarrow_link = next(lnk for lnk in tr_links if lnk["channel_id"] == "SFNarrow")
+        longfast_link = next(lnk for lnk in tr_links if lnk["channel_id"] == "LongFast")
+
+        # Under SFNarrow (SF7), -5.0 dB is marginal
+        assert sfnarrow_link["forward_quality"] == "marginal"
+        assert sfnarrow_link["overall_quality"] == "marginal"
+        assert sfnarrow_link["estimated_reliability"] == 50.0
+
+        # Under LongFast (SF11), -5.0 dB is good
+        assert longfast_link["forward_quality"] == "good"
+        assert longfast_link["overall_quality"] == "good"
+        assert longfast_link["estimated_reliability"] > 95.0

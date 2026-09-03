@@ -23,7 +23,13 @@ from ..models.traceroute import (
     TraceroutePacket,  # Use the correct TraceroutePacket class
 )
 from ..utils.node_utils import get_bulk_node_names
-from ..utils.signal_quality import is_plausible_traceroute_snr
+from ..utils.signal_quality import (
+    calculate_estimated_reliability,
+    classify_link_balance,
+    classify_signal_quality,
+    is_plausible_snr,
+    is_plausible_traceroute_snr,
+)
 from ..utils.traceroute_utils import parse_traceroute_payload
 
 logger = logging.getLogger(__name__)
@@ -1161,6 +1167,7 @@ class TracerouteService:
                             direct_links[link_key] = {
                                 "source": link_key[0],
                                 "target": link_key[1],
+                                "channel_id": tr_data.get("channel_id"),
                                 "snr_values": [hop.snr],
                                 "forward_snr_values": [hop.snr] if is_forward else [],
                                 "return_snr_values": [] if is_forward else [hop.snr],
@@ -1171,6 +1178,8 @@ class TracerouteService:
                             stats["links_found"] += 1
                         else:
                             link = direct_links[link_key]
+                            if not link.get("channel_id") and tr_data.get("channel_id"):
+                                link["channel_id"] = tr_data.get("channel_id")
                             link["snr_values"].append(hop.snr)
                             if is_forward:
                                 link["forward_snr_values"].append(hop.snr)
@@ -1180,6 +1189,8 @@ class TracerouteService:
                             if tr_data["timestamp"] > link["last_seen"]:
                                 link["last_seen"] = tr_data["timestamp"]
                                 link["last_packet_id"] = tr_data["id"]
+                                if tr_data.get("channel_id"):
+                                    link["channel_id"] = tr_data.get("channel_id")
 
                         # Track connections for nodes
                         nodes[hop.from_node_id]["connections"].add(hop.to_node_id)
@@ -1252,7 +1263,7 @@ class TracerouteService:
                 logger.warning(f"Error fetching location data: {e}")
                 location_map = {}
 
-            # Process direct links - calculate average SNR and strength
+            # Process direct links - calculate average SNR, quality, and observation strength
             processed_links = []
             for link_data in direct_links.values():
                 avg_snr = sum(link_data["snr_values"]) / len(link_data["snr_values"])
@@ -1263,21 +1274,50 @@ class TracerouteService:
                 )
                 return_avg_snr = round(sum(r_snrs) / len(r_snrs), 1) if r_snrs else None
 
-                # Calculate link strength based on SNR and packet count
-                # Higher SNR and more packets = stronger link
+                valid_snrs = [
+                    s
+                    for s in (forward_avg_snr, return_avg_snr)
+                    if s is not None and is_plausible_snr(s)
+                ]
+                worst_snr = (
+                    min(valid_snrs)
+                    if valid_snrs
+                    else (round(avg_snr, 1) if is_plausible_snr(avg_snr) else None)
+                )
+
+                link_sf = link_data.get("channel_id")
+                forward_quality = classify_signal_quality(forward_avg_snr, sf=link_sf)
+                return_quality = classify_signal_quality(return_avg_snr, sf=link_sf)
+                overall_quality = classify_signal_quality(worst_snr, sf=link_sf)
+                link_balance = classify_link_balance(
+                    forward_avg_snr, return_avg_snr, sf=link_sf
+                )
+                estimated_reliability = calculate_estimated_reliability(
+                    worst_snr, sf=link_sf
+                )
+
+                # Decoupled strength: strictly reflects observation volume (packet count)
+                # Maps 1 packet -> 1.5px, 10 packets -> 4.0px, 100 packets -> 6.5px, max 8.0px
                 strength = min(
-                    10,
-                    max(1, (avg_snr + 20) / 5 + math.log10(link_data["packet_count"])),
+                    8.0,
+                    max(1.5, 1.5 + 2.5 * math.log10(max(1, link_data["packet_count"]))),
                 )
 
                 processed_links.append(
                     {
                         "source": link_data["source"],
                         "target": link_data["target"],
+                        "channel_id": link_sf,
                         "type": "direct",
                         "avg_snr": round(avg_snr, 1),
                         "forward_avg_snr": forward_avg_snr,
                         "return_avg_snr": return_avg_snr,
+                        "worst_snr": worst_snr,
+                        "forward_quality": forward_quality,
+                        "return_quality": return_quality,
+                        "overall_quality": overall_quality,
+                        "link_balance": link_balance,
+                        "estimated_reliability": estimated_reliability,
                         "forward_count": len(f_snrs),
                         "return_count": len(r_snrs),
                         "packet_count": link_data["packet_count"],
@@ -1324,6 +1364,8 @@ class TracerouteService:
                 if node_data["snr_count"] > 0:
                     avg_snr = round(node_data["total_snr"] / node_data["snr_count"], 1)
 
+                node_quality = classify_signal_quality(avg_snr)
+
                 # Get location data for this node
                 location = location_map.get(node_data["id"])
 
@@ -1333,6 +1375,7 @@ class TracerouteService:
                     "packet_count": node_data["packet_count"],
                     "connections": node_data["connections"],
                     "avg_snr": avg_snr,
+                    "quality": node_quality,
                     "last_seen": node_data["last_seen"],
                     "size": min(
                         20, max(5, math.log10(node_data["packet_count"] + 1) * 3)
