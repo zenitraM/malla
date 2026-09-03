@@ -54,6 +54,12 @@ class AppConfig:
     # Supports comma-separated list of base64-encoded keys
     default_channel_key: str = "1PG7OiApB1nwvP+rz05pAQ=="
 
+    # LoRa modem preset and spreading factor settings for RF link quality estimation
+    # Supported presets: LongFast, LongSlow, ShortFast, SFNarrow, etc.
+    # If lora_spreading_factor is set, it overrides the preset's default SF (7-12).
+    lora_preset: str = "LongFast"
+    lora_spreading_factor: int | None = None
+
     # Logging
     log_level: str = "INFO"
 
