@@ -1421,39 +1421,56 @@ function drawTracerouteLinksFiltered(filterNodeId = null) {
             return; // Skip if either node doesn't have position
         }
 
-        // Determine link color and style based on success rate and SNR
-        let linkColor = '#999999';
-        let linkWeight = 2;
-        let linkOpacity = 0.6;
+        // Calculate midpoint between fromPos and toPos for split two-half line
+        const midPos = [(fromPos[0] + toPos[0]) / 2, (fromPos[1] + toPos[1]) / 2];
 
-        // If filtering by node, highlight the selected node's links
+        const hasForward = link.forward_avg_snr !== null && link.forward_avg_snr !== undefined;
+        const hasReturn = link.return_avg_snr !== null && link.return_avg_snr !== undefined;
+
+        // Half closest to fromNode = reception at fromNode (Return: toNode -> fromNode)
+        // Half closest to toNode = reception at toNode (Forward: fromNode -> toNode)
+        let colorA = link.return_quality ? getQualityColor(link.return_quality) : (hasReturn ? '#28a745' : '#888888');
+        let colorB = link.forward_quality ? getQualityColor(link.forward_quality) : (hasForward ? '#28a745' : '#888888');
+
+        if (!hasForward && !hasReturn && link.overall_quality) {
+            colorA = getQualityColor(link.overall_quality);
+            colorB = colorA;
+        }
+
+        const dashA = hasReturn ? null : '3, 5';
+        const dashB = hasForward ? null : '3, 5';
+
+        const totalObs = link.total_observations || link.total_hops_seen || ((link.forward_count || 0) + (link.return_count || 0)) || 1;
+        const baseWeight = (link.strength !== undefined && link.strength !== null)
+            ? link.strength
+            : Math.min(8.0, Math.max(1.5, 1.5 + 2.5 * Math.log10(Math.max(1, totalObs))));
+        let linkWeight = baseWeight;
+        let linkOpacity = 0.75;
         if (filterNodeId !== null) {
-            linkWeight = 3; // Make filtered links thicker
-            linkOpacity = 0.9; // Make them more opaque
+            linkWeight = baseWeight + 1.0;
+            linkOpacity = 0.95;
         }
 
-        if (link.success_rate >= 80) {
-            linkColor = '#28a745'; // Green for high success
-        } else if (link.success_rate >= 50) {
-            linkColor = '#ffc107'; // Yellow for medium success
-        } else {
-            linkColor = '#dc3545'; // Red for low success
-        }
-
-        // Create the line
-        const line = L.polyline([fromPos, toPos], {
-            color: linkColor,
+        const segA = L.polyline([fromPos, midPos], {
+            color: colorA,
             weight: linkWeight,
-            opacity: linkOpacity,
-            dashArray: link.success_rate < 50 ? '5, 5' : null // Dashed for unreliable links
+            opacity: hasReturn ? linkOpacity : 0.45,
+            dashArray: dashA
         });
 
-        // Add popup with link information
-        const popupContent = createLinkPopupContent(link);
-        line.bindPopup(popupContent);
+        const segB = L.polyline([midPos, toPos], {
+            color: colorB,
+            weight: linkWeight,
+            opacity: hasForward ? linkOpacity : 0.45,
+            dashArray: dashB
+        });
 
-        line.addTo(map);
-        tracerouteLinks.push(line);
+        const linkGroup = L.featureGroup([segA, segB]);
+        const popupContent = createLinkPopupContent(link);
+        linkGroup.bindPopup(popupContent);
+
+        linkGroup.addTo(map);
+        tracerouteLinks.push(linkGroup);
     });
 }
 
@@ -1497,47 +1514,80 @@ function drawPacketLinksFiltered(filterNodeId = null) {
             return; // Skip if either node doesn't have position
         }
 
-        // Determine link color and style based on success rate and SNR
-        let linkColor = '#999999';
-        let linkWeight = 2;
-        let linkOpacity = 0.6;
+        const midPos = [(fromPos[0] + toPos[0]) / 2, (fromPos[1] + toPos[1]) / 2];
 
-        // If filtering by node, highlight the selected node's links
+        const hasForward = link.forward_avg_snr !== null && link.forward_avg_snr !== undefined;
+        const hasReturn = link.return_avg_snr !== null && link.return_avg_snr !== undefined;
+
+        let colorA = link.return_quality ? getQualityColor(link.return_quality) : (hasReturn ? '#28a745' : '#888888');
+        let colorB = link.forward_quality ? getQualityColor(link.forward_quality) : (hasForward ? '#28a745' : '#888888');
+
+        if (!hasForward && !hasReturn && link.overall_quality) {
+            colorA = getQualityColor(link.overall_quality);
+            colorB = colorA;
+        }
+
+        // Direct packet links get distinctive dash pattern
+        const dashA = hasReturn ? '6, 4' : '2, 5';
+        const dashB = hasForward ? '6, 4' : '2, 5';
+
+        const totalObs = link.total_observations || link.packet_count || 1;
+        const baseWeight = (link.strength !== undefined && link.strength !== null)
+            ? link.strength
+            : Math.min(8.0, Math.max(1.5, 1.5 + 2.5 * Math.log10(Math.max(1, totalObs))));
+        let linkWeight = baseWeight;
+        let linkOpacity = 0.75;
         if (filterNodeId !== null) {
-            linkWeight = 3; // Make filtered links thicker
-            linkOpacity = 0.9; // Make them more opaque
+            linkWeight = baseWeight + 1.0;
+            linkOpacity = 0.95;
         }
 
-        if (link.success_rate >= 80) {
-            linkColor = '#28a745'; // Green for high success
-        } else if (link.success_rate >= 50) {
-            linkColor = '#ffc107'; // Yellow for medium success
-        } else {
-            linkColor = '#dc3545'; // Red for low success
-        }
-
-        // Packet links get dashed style to visually distinguish
-        const isPacket = link.link_type === 'packet';
-
-        const line = L.polyline([fromPos, toPos], {
-            color: linkColor,
+        const segA = L.polyline([fromPos, midPos], {
+            color: colorA,
             weight: linkWeight,
-            opacity: linkOpacity,
-            dashArray: isPacket ? '3, 6' : (link.success_rate < 50 ? '5, 5' : null)
+            opacity: hasReturn ? linkOpacity : 0.45,
+            dashArray: dashA
         });
 
-        // Add popup with link information
-        const popupContent = createLinkPopupContent(link);
-        line.bindPopup(popupContent);
+        const segB = L.polyline([midPos, toPos], {
+            color: colorB,
+            weight: linkWeight,
+            opacity: hasForward ? linkOpacity : 0.45,
+            dashArray: dashB
+        });
 
-        line.addTo(map);
-        packetLinks.push(line);
+        const linkGroup = L.featureGroup([segA, segB]);
+        const popupContent = createLinkPopupContent(link);
+        linkGroup.bindPopup(popupContent);
+
+        linkGroup.addTo(map);
+        packetLinks.push(linkGroup);
     });
 }
 
 // Draw only links connected to a specific node
 function drawFilteredPacketLinks(nodeId) {
     drawPacketLinksFiltered(nodeId);
+}
+
+// Signal quality color lookup
+function getQualityColor(quality) {
+    switch (quality) {
+        case 'good': return '#28a745';
+        case 'fair': return '#ffc107';
+        case 'marginal': return '#dc3545';
+        default: return '#888888';
+    }
+}
+
+// Signal quality Bootstrap badge class lookup
+function getQualityBadgeClass(quality) {
+    switch (quality) {
+        case 'good': return 'bg-success';
+        case 'fair': return 'bg-warning text-dark';
+        case 'marginal': return 'bg-danger';
+        default: return 'bg-secondary';
+    }
 }
 
 // Create popup content for traceroute links
@@ -1547,10 +1597,6 @@ function createLinkPopupContent(link) {
 
     const fromName = fromNode ? fromNode.display_name : `!${link.from_node_id.toString(16).padStart(8, '0')}`;
     const toName = toNode ? toNode.display_name : `!${link.to_node_id.toString(16).padStart(8, '0')}`;
-
-    let qualityClass = 'text-success';
-    if (link.success_rate < 50) qualityClass = 'text-danger';
-    else if (link.success_rate < 80) qualityClass = 'text-warning';
 
     // Format timestamp using timezone preference
     const formattedTime = (typeof formatTimestamp === 'function' && link.last_seen)
@@ -1572,6 +1618,50 @@ function createLinkPopupContent(link) {
         losButton.addEventListener('click', () => showLineOfSight(link.from_node_id, link.to_node_id));
     }
 
+    // Reliability & Link Quality Badge
+    let reliabilityBadge = null;
+    if (link.estimated_reliability !== null && link.estimated_reliability !== undefined) {
+        const qualityName = link.overall_quality ? (link.overall_quality.charAt(0).toUpperCase() + link.overall_quality.slice(1)) : 'Estimated';
+        const badgeClass = getQualityBadgeClass(link.overall_quality || 'unknown');
+        reliabilityBadge = el('span', { className: `badge ${badgeClass} ms-1` }, `${link.estimated_reliability.toFixed(0)}% (${qualityName})`);
+    } else if (link.success_rate !== null && link.success_rate !== undefined) {
+        reliabilityBadge = el('span', { className: 'badge bg-secondary ms-1' }, `${link.success_rate.toFixed(0)}%`);
+    }
+
+    // Practical Asymmetry Alert
+    let balanceAlert = null;
+    if (link.link_balance === 'asymmetric_marginal') {
+        const marginalDir = link.forward_quality === 'marginal'
+            ? `${fromName} → ${toName} marginal`
+            : `${toName} → ${fromName} marginal`;
+        balanceAlert = el('div', { className: 'alert alert-warning py-1 px-2 my-2 small d-flex align-items-center gap-1' },
+            el('strong', null, '⚠️ Asymmetric:'),
+            textNode(` ${marginalDir}`)
+        );
+    } else if (link.link_balance === 'marginal_both') {
+        balanceAlert = el('div', { className: 'alert alert-danger py-1 px-2 my-2 small' },
+            el('strong', null, '⚠️ Fragile:'),
+            textNode(' Both directions marginal')
+        );
+    } else if (link.link_balance === 'unidirectional') {
+        balanceAlert = el('div', { className: 'text-muted small my-1' },
+            el('em', null, 'Single direction observed')
+        );
+    }
+
+    // Observations display
+    const fCount = link.forward_count || 0;
+    const rCount = link.return_count || 0;
+    const totalObs = link.total_observations || link.total_hops_seen || (fCount + rCount);
+    let obsText = `${totalObs}`;
+    if (fCount > 0 && rCount > 0) {
+        obsText = `${totalObs} (${fCount} forward, ${rCount} return)`;
+    } else if (fCount > 0) {
+        obsText = `${totalObs} (${fCount} forward)`;
+    } else if (rCount > 0) {
+        obsText = `${totalObs} (${rCount} return)`;
+    }
+
     // Build directional / average SNR elements
     const snrElements = [];
     const hasForwardSnr = link.forward_avg_snr !== null && link.forward_avg_snr !== undefined;
@@ -1582,11 +1672,13 @@ function createLinkPopupContent(link) {
             el('div', null,
                 el('strong', null, 'Forward SNR:'),
                 textNode(` ${link.forward_avg_snr.toFixed(1)} dB `),
+                link.forward_quality ? el('span', { className: `badge ${getQualityBadgeClass(link.forward_quality)} me-1` }, link.forward_quality) : null,
                 el('span', { className: 'text-muted small' }, `(${fromName} → ${toName})`)
             ),
             el('div', null,
                 el('strong', null, 'Return SNR:'),
                 textNode(` ${link.return_avg_snr.toFixed(1)} dB `),
+                link.return_quality ? el('span', { className: `badge ${getQualityBadgeClass(link.return_quality)} me-1` }, link.return_quality) : null,
                 el('span', { className: 'text-muted small' }, `(${toName} → ${fromName})`)
             ),
             link.avg_snr !== null && link.avg_snr !== undefined ? el('div', { className: 'text-muted small' },
@@ -1599,6 +1691,7 @@ function createLinkPopupContent(link) {
             el('div', null,
                 el('strong', null, 'Forward SNR:'),
                 textNode(` ${link.forward_avg_snr.toFixed(1)} dB `),
+                link.forward_quality ? el('span', { className: `badge ${getQualityBadgeClass(link.forward_quality)} me-1` }, link.forward_quality) : null,
                 el('span', { className: 'text-muted small' }, `(${fromName} → ${toName})`)
             )
         );
@@ -1607,6 +1700,7 @@ function createLinkPopupContent(link) {
             el('div', null,
                 el('strong', null, 'Return SNR:'),
                 textNode(` ${link.return_avg_snr.toFixed(1)} dB `),
+                link.return_quality ? el('span', { className: `badge ${getQualityBadgeClass(link.return_quality)} me-1` }, link.return_quality) : null,
                 el('span', { className: 'text-muted small' }, `(${toName} → ${fromName})`)
             )
         );
@@ -1657,11 +1751,12 @@ function createLinkPopupContent(link) {
     }
 
     return el('div', { className: 'traceroute-link-info' },
-        el('div', { className: 'fw-bold mb-2' }, link.link_type === 'packet' ? 'Direct Packet Link' : 'Traceroute RF Hop'),
+        el('div', { className: 'fw-bold mb-1' }, link.link_type === 'packet' ? 'Direct Packet Link' : 'Traceroute RF Hop'),
+        balanceAlert,
         el('div', null, el('strong', null, 'From:'), textNode(` ${fromName}`)),
         el('div', null, el('strong', null, 'To:'), textNode(` ${toName}`)),
-        el('div', null, el('strong', null, 'Success Rate:'), textNode(' '), el('span', { className: qualityClass }, `${link.success_rate.toFixed(1)}%`)),
-        el('div', null, el('strong', null, 'Attempts:'), textNode(` ${link.total_hops_seen}`)),
+        reliabilityBadge ? el('div', { className: 'mb-1' }, el('strong', null, 'Estimated Reliability:'), reliabilityBadge) : null,
+        el('div', null, el('strong', null, 'Observations:'), textNode(` ${obsText}`)),
         el('div', null, el('strong', null, 'Last Seen:'), textNode(` ${formattedTime}`)),
         ...snrElements,
         ...rssiElements,
