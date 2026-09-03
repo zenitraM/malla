@@ -109,7 +109,7 @@
                         <div class="col-md-3">
                             <div class="text-center">
                                 <h3 id="total-hops" class="text-primary">-</h3>
-                                <small class="text-muted">Total Hops Seen</small>
+                                <small class="text-muted">Total Observations</small>
                             </div>
                         </div>
                         <div class="col-md-3">
@@ -552,7 +552,7 @@
         document.getElementById('results-section').style.display = 'block';
 
         // Update summary
-        document.getElementById('total-hops').textContent = data.total_attempts;
+        document.getElementById('total-hops').textContent = data.total_observations || data.total_attempts;
         document.getElementById('avg-snr').textContent = data.avg_snr ? `${data.avg_snr.toFixed(1)}` : 'N/A';
         const dirSnrDiv = document.getElementById('directional-snr');
         if (dirSnrDiv) {
@@ -561,10 +561,12 @@
             const n1Display = formatNodeIdForDisplay(data.from_node_id);
             const n2Display = formatNodeIdForDisplay(data.to_node_id);
             if (data.forward_avg_snr !== null && data.forward_avg_snr !== undefined) {
-                parts.push(el('div', null, `${n1Display} → ${n2Display}: `, el('strong', null, `${data.forward_avg_snr.toFixed(1)} dB`)));
+                const fQual = data.forward_quality ? ` [${data.forward_quality.toUpperCase()}]` : '';
+                parts.push(el('div', null, `${n1Display} → ${n2Display}: `, el('strong', null, `${data.forward_avg_snr.toFixed(1)} dB`), el('span', { className: 'text-muted small ms-1' }, fQual)));
             }
             if (data.return_avg_snr !== null && data.return_avg_snr !== undefined) {
-                parts.push(el('div', null, `${n2Display} → ${n1Display}: `, el('strong', null, `${data.return_avg_snr.toFixed(1)} dB`)));
+                const rQual = data.return_quality ? ` [${data.return_quality.toUpperCase()}]` : '';
+                parts.push(el('div', null, `${n2Display} → ${n1Display}: `, el('strong', null, `${data.return_avg_snr.toFixed(1)} dB`), el('span', { className: 'text-muted small ms-1' }, rQual)));
             }
             if (parts.length > 0) {
                 appendChildren(dirSnrDiv, ...parts);
@@ -577,7 +579,7 @@
         document.getElementById('geo-distance').textContent = geoDistance;
 
         // Display direction information with proper node formatting
-        displayDirectionInfo(data.direction_counts, data.from_node_id, data.to_node_id);
+        displayDirectionInfo(data, data.from_node_id, data.to_node_id);
 
         // Update charts
         updateSNRChart(data.traceroutes);
@@ -618,9 +620,9 @@
         }
     }
 
-    function displayDirectionInfo(directionCounts, fromNodeId, toNodeId) {
+    function displayDirectionInfo(data, fromNodeId, toNodeId) {
         const directionDiv = document.getElementById('direction-info');
-
+        const directionCounts = (data && data.direction_counts) ? data.direction_counts : {};
         const directions = Object.keys(directionCounts);
         const content = fragment(
             el('strong', 'Link Analysis:'),
@@ -631,12 +633,23 @@
             el('br')
         );
 
-        if (directions.length > 1) {
-            appendChildren(content, badge('Bidirectional Link', 'bg-success signal-badge'));
+        if (data && data.link_balance === 'asymmetric_marginal') {
+            appendChildren(content, badge('⚠️ Asymmetric Link (Marginal Direction)', 'bg-warning text-dark signal-badge me-2'));
+        } else if (data && data.link_balance === 'marginal_both') {
+            appendChildren(content, badge('⚠️ Fragile Link (Both Sides Marginal)', 'bg-danger signal-badge me-2'));
+        } else if (data && data.link_balance === 'balanced') {
+            appendChildren(content, badge('Balanced Two-Way Link', 'bg-success signal-badge me-2'));
+        } else if (directions.length > 1) {
+            appendChildren(content, badge('Bidirectional Link', 'bg-success signal-badge me-2'));
         } else if (directions.length === 1) {
-            appendChildren(content, badge('Unidirectional Link', 'bg-warning signal-badge'));
+            appendChildren(content, badge('Unidirectional Link', 'bg-warning signal-badge me-2'));
         } else {
-            appendChildren(content, badge('No Data', 'bg-secondary signal-badge'));
+            appendChildren(content, badge('No Data', 'bg-secondary signal-badge me-2'));
+        }
+
+        if (data && data.estimated_reliability !== null && data.estimated_reliability !== undefined) {
+            const relBadgeClass = data.overall_quality === 'good' ? 'bg-success' : (data.overall_quality === 'fair' ? 'bg-warning text-dark' : 'bg-danger');
+            appendChildren(content, badge(`Estimated Reliability: ${data.estimated_reliability.toFixed(0)}%`, `${relBadgeClass} signal-badge`));
         }
 
         if (directions.length > 1) {
