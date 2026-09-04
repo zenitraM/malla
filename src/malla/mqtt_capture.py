@@ -409,7 +409,7 @@ def init_database() -> None:
         )
     """)
 
-    ensure_startup_schema(cursor, drop_legacy_indexes=True)
+    schema_changed = ensure_startup_schema(cursor, drop_legacy_indexes=True)
 
     # Backfill primary_channel only when there are actually missing values.
     try:
@@ -455,8 +455,9 @@ def init_database() -> None:
     # Seed query-planner statistics on first run so the planner picks
     # index-based plans instead of full scans on a large packet_history. Runs in
     # a background thread so a cold ANALYZE (~100s on a multi-GB DB) does not
-    # delay packet ingestion or hold the write lock.
-    seed_query_planner_stats_async(DATABASE_FILE)
+    # delay packet ingestion or hold the write lock. Re-run when startup
+    # created new indexes so the planner learns about them.
+    seed_query_planner_stats_async(DATABASE_FILE, force=schema_changed)
 
     logging.info(
         "Database initialized: %s (%.3fs)",

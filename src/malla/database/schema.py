@@ -107,6 +107,26 @@ INDEX_SPECS: tuple[tuple[str, str, str], ...] = (
         "CREATE INDEX IF NOT EXISTS idx_packet_history_chat_channel ON packet_history(portnum_name, channel_id, id DESC) WHERE raw_payload IS NOT NULL AND payload_length > 0",
     ),
     (
+        # Traceroute window scans (hop-node lists, related-nodes, link analysis,
+        # network graph). TRACEROUTE_APP packets are a tiny fraction of
+        # packet_history, but the plain time-leading indexes force a row lookup
+        # for every packet in the time range. On a database whose entire history
+        # fits inside the requested window that degrades to a near-full scan of
+        # millions of rows; this partial index reduces the scan to the ~few
+        # thousand traceroute rows themselves.
+        "idx_packet_history_traceroute_time",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_traceroute_time ON packet_history(timestamp DESC) WHERE portnum_name = 'TRACEROUTE_APP' AND processed_successfully = 1 AND raw_payload IS NOT NULL AND length(raw_payload) > 0",
+    ),
+    (
+        # Packet-link map aggregate: GROUP BY from_node_id, gateway_id over
+        # 0-hop packets with AVG(rssi)/AVG(snr)/MAX(channel_id). Covering those
+        # columns turns the aggregate into an index-only scan in group order.
+        "idx_packet_history_packet_links_cover",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_packet_links_cover ON packet_history(from_node_id, gateway_id, timestamp, rssi, snr, channel_id) WHERE hop_start = hop_limit AND from_node_id IS NOT NULL AND gateway_id IS NOT NULL",
+    ),
+    (
         "idx_node_hex_id",
         "node_info",
         "CREATE INDEX IF NOT EXISTS idx_node_hex_id ON node_info(hex_id)",
@@ -168,7 +188,7 @@ def query_planner_stats_present(cursor: sqlite3.Cursor) -> bool:
     return cursor.fetchone() is not None
 
 
-def ensure_query_planner_stats(cursor: sqlite3.Cursor) -> bool:
+def ensure_query_planner_stats(cursor: sqlite3.Cursor, *, force: bool = False) -> bool:
     """Seed SQLite query-planner statistics if they are missing.
 
     Without ``sqlite_stat1`` the planner guesses index selectivity and can pick
@@ -184,25 +204,32 @@ def ensure_query_planner_stats(cursor: sqlite3.Cursor) -> bool:
 
     Stats are only *seeded* here (when absent). Keeping them fresh as the
     database grows is handled separately by periodic ``PRAGMA optimize`` in the
-    capture daemon.
+    capture daemon. Pass ``force=True`` to refresh stats even when present —
+    needed after adding indexes to an existing database, since stale statistics
+    keep the planner on the old plans.
     """
 
-    if query_planner_stats_present(cursor):
+    if not force and query_planner_stats_present(cursor):
         return False  # stats already present – nothing to do
 
     # analysis_limit bounds the work per index; without it ANALYZE would scan
     # every index in full and could take many minutes on a huge packet_history.
     cursor.execute("PRAGMA analysis_limit=1000")
-    logger.info("Query-planner statistics missing – running bounded ANALYZE")
+    logger.info("Running bounded ANALYZE for query-planner statistics")
     cursor.execute("ANALYZE")
     return True
 
 
 def ensure_startup_schema(
     cursor: sqlite3.Cursor, *, drop_legacy_indexes: bool = False
-) -> None:
-    """Ensure shared schema columns and startup indexes exist."""
+) -> bool:
+    """Ensure shared schema columns and startup indexes exist.
 
+    Returns ``True`` when any index was created (or legacy index dropped), i.e.
+    the query-planner statistics may be stale and should be refreshed.
+    """
+
+    schema_changed = False
     existing_tables = _get_existing_tables(cursor)
     existing_indexes = _get_existing_indexes(cursor)
 
@@ -220,7 +247,11 @@ def ensure_startup_schema(
             continue
         cursor.execute(sql)
         existing_indexes.add(index_name)
+        schema_changed = True
 
     if drop_legacy_indexes and "packet_history" in existing_tables:
         for index_name in LEGACY_INDEX_NAMES:
             cursor.execute(f"DROP INDEX IF EXISTS {index_name}")
+            schema_changed = True
+
+    return schema_changed

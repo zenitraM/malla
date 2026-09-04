@@ -950,7 +950,7 @@ class LocationService:
                     AVG(CASE WHEN {rssi_valid_sql()} THEN rssi END) AS avg_rssi,
                     AVG(CASE WHEN {snr_valid_sql()} THEN snr END) AS avg_snr,
                     MAX(timestamp)         AS last_seen
-                FROM packet_history
+                FROM packet_history INDEXED BY idx_packet_history_packet_links_cover
                 {where_sql}
                 GROUP BY from_node_id, gateway_id
             """

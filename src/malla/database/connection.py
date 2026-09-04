@@ -72,7 +72,9 @@ _stats_seed_lock = threading.Lock()
 _stats_seed_thread: threading.Thread | None = None
 
 
-def seed_query_planner_stats_async(db_path: str | None = None) -> bool:
+def seed_query_planner_stats_async(
+    db_path: str | None = None, *, force: bool = False
+) -> bool:
     """Seed SQLite planner statistics in a background thread if they are missing.
 
     A bounded ANALYZE still reads ~1000 sample rows per index, which can take
@@ -80,7 +82,8 @@ def seed_query_planner_stats_async(db_path: str | None = None) -> bool:
     synchronously at startup would block web request serving or packet
     ingestion for that whole time, so we do it off-thread instead. When stats
     are already present (the common case after the first run) this is a single
-    fast SELECT and no thread is started.
+    fast SELECT and no thread is started — unless ``force`` is set (used after
+    new indexes are created, so the planner learns about them).
 
     Returns ``True`` if a seeding thread was started.
     """
@@ -91,16 +94,17 @@ def seed_query_planner_stats_async(db_path: str | None = None) -> bool:
 
     # Fast pre-check on the calling thread: usually stats already exist and we
     # return immediately without touching threads.
-    try:
-        conn = sqlite3.connect(path, timeout=30.0)
+    if not force:
         try:
-            if query_planner_stats_present(conn.cursor()):
-                return False
-        finally:
-            conn.close()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not check query-planner statistics: %s", exc)
-        return False
+            conn = sqlite3.connect(path, timeout=30.0)
+            try:
+                if query_planner_stats_present(conn.cursor()):
+                    return False
+            finally:
+                conn.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not check query-planner statistics: %s", exc)
+            return False
 
     with _stats_seed_lock:
         if _stats_seed_thread is not None and _stats_seed_thread.is_alive():
@@ -114,7 +118,7 @@ def seed_query_planner_stats_async(db_path: str | None = None) -> bool:
             try:
                 _apply_connection_pragmas(conn.cursor())
                 started = time.time()
-                if ensure_query_planner_stats(conn.cursor()):
+                if ensure_query_planner_stats(conn.cursor(), force=force):
                     conn.commit()
                     logger.info(
                         "Seeded query-planner statistics in %.1fs",
@@ -176,7 +180,7 @@ def init_database() -> None:
 
         # Test a simple query to verify the database is accessible
         cursor = conn.cursor()
-        ensure_startup_schema(cursor)
+        schema_changed = ensure_startup_schema(cursor)
         conn.commit()
         cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
         table_count = cursor.fetchone()[0]
@@ -190,8 +194,9 @@ def init_database() -> None:
         # Seed query-planner statistics on first run so the planner picks
         # index-based plans instead of full scans on a large packet_history.
         # Runs in a background thread so a cold ANALYZE (~100s on a multi-GB DB)
-        # never blocks request serving.
-        seed_query_planner_stats_async(db_path)
+        # never blocks request serving. Also re-run when startup created new
+        # indexes: existing statistics no longer describe the available plans.
+        seed_query_planner_stats_async(db_path, force=schema_changed)
 
         logger.info(
             f"Database connection successful - found {table_count} tables, journal_mode: {journal_mode}"
