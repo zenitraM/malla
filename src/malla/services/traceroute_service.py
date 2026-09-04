@@ -24,6 +24,7 @@ from ..models.traceroute import (
 )
 from ..utils.node_utils import get_bulk_node_names
 from ..utils.signal_quality import (
+    TRACEROUTE_UNKNOWN_SNR,
     calculate_estimated_reliability,
     classify_link_balance,
     classify_signal_quality,
@@ -1161,6 +1162,11 @@ class TracerouteService:
                         # Create bidirectional link key (sorted to ensure consistency)
                         link_key = tuple(sorted([hop.from_node_id, hop.to_node_id]))
                         is_forward = hop.from_node_id == link_key[0]
+                        # The -32.0 sentinel is a real hop with unrecorded SNR:
+                        # keep it out of the directional averages.
+                        directional_snr = (
+                            None if hop.snr == TRACEROUTE_UNKNOWN_SNR else hop.snr
+                        )
 
                         # Add/update direct link
                         if link_key not in direct_links:
@@ -1169,8 +1175,12 @@ class TracerouteService:
                                 "target": link_key[1],
                                 "channel_id": tr_data.get("channel_id"),
                                 "snr_values": [hop.snr],
-                                "forward_snr_values": [hop.snr] if is_forward else [],
-                                "return_snr_values": [] if is_forward else [hop.snr],
+                                "forward_snr_values": [directional_snr]
+                                if is_forward and directional_snr is not None
+                                else [],
+                                "return_snr_values": [directional_snr]
+                                if not is_forward and directional_snr is not None
+                                else [],
                                 "packet_count": 1,
                                 "last_seen": tr_data["timestamp"],
                                 "last_packet_id": tr_data["id"],
@@ -1181,10 +1191,11 @@ class TracerouteService:
                             if not link.get("channel_id") and tr_data.get("channel_id"):
                                 link["channel_id"] = tr_data.get("channel_id")
                             link["snr_values"].append(hop.snr)
-                            if is_forward:
-                                link["forward_snr_values"].append(hop.snr)
-                            else:
-                                link["return_snr_values"].append(hop.snr)
+                            if directional_snr is not None:
+                                if is_forward:
+                                    link["forward_snr_values"].append(directional_snr)
+                                else:
+                                    link["return_snr_values"].append(directional_snr)
                             link["packet_count"] += 1
                             if tr_data["timestamp"] > link["last_seen"]:
                                 link["last_seen"] = tr_data["timestamp"]

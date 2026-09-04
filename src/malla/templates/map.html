@@ -1429,8 +1429,10 @@ function drawTracerouteLinksFiltered(filterNodeId = null) {
 
         // Half closest to fromNode = reception at fromNode (Return: toNode -> fromNode)
         // Half closest to toNode = reception at toNode (Forward: fromNode -> toNode)
-        let colorA = link.return_quality ? getQualityColor(link.return_quality) : (hasReturn ? '#28a745' : '#888888');
-        let colorB = link.forward_quality ? getQualityColor(link.forward_quality) : (hasForward ? '#28a745' : '#888888');
+        // 'unknown' quality (or a missing classification) renders grey via
+        // getQualityColor's default, never green.
+        let colorA = link.return_quality ? getQualityColor(link.return_quality) : '#888888';
+        let colorB = link.forward_quality ? getQualityColor(link.forward_quality) : '#888888';
 
         if (!hasForward && !hasReturn && link.overall_quality) {
             colorA = getQualityColor(link.overall_quality);

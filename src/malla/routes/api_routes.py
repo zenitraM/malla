@@ -30,6 +30,7 @@ from ..utils.node_utils import (
 )
 from ..utils.serialization_utils import convert_bytes_to_base64, sanitize_floats
 from ..utils.signal_quality import (
+    TRACEROUTE_UNKNOWN_SNR,
     calculate_estimated_reliability,
     classify_link_balance,
     classify_signal_quality,
@@ -1255,37 +1256,44 @@ def api_traceroute_link(node1_id, node2_id):
                 # Get RF hops (no need to calculate distances for this analysis)
                 rf_hops = tr_packet.get_rf_hops()
 
-                # Find any RF hop between our two target nodes
-                target_hop = None
-                for hop in rf_hops:
+                # Find all RF hops between our two target nodes
+                matching_hops = [
+                    hop
+                    for hop in rf_hops
                     if (
                         hop.from_node_id == node1_id_int
                         and hop.to_node_id == node2_id_int
-                    ) or (
+                    )
+                    or (
                         hop.from_node_id == node2_id_int
                         and hop.to_node_id == node1_id_int
-                    ):
-                        target_hop = hop
-                        break
+                    )
+                ]
 
-                if target_hop:
+                if matching_hops:
                     if not link_channel and packet.get("channel_id"):
                         link_channel = packet.get("channel_id")
 
-                    # Determine direction
-                    if target_hop.from_node_id == node1_id_int:
-                        direction = f"{node_names.get(node1_id_int, f'!{node1_id_int:08x}')} → {node_names.get(node2_id_int, f'!{node2_id_int:08x}')}"
-                    else:
-                        direction = f"{node_names.get(node2_id_int, f'!{node2_id_int:08x}')} → {node_names.get(node1_id_int, f'!{node1_id_int:08x}')}"
-
-                    direction_counts[direction] = direction_counts.get(direction, 0) + 1
-
-                    if is_plausible_traceroute_snr(target_hop.snr):
-                        snr_values.append(target_hop.snr)
-                        if target_hop.from_node_id == node1_id_int:
-                            forward_snr_values.append(target_hop.snr)
+                    packet_snrs: list[float] = []
+                    for hop in matching_hops:
+                        # Determine direction
+                        if hop.from_node_id == node1_id_int:
+                            direction = f"{node_names.get(node1_id_int, f'!{node1_id_int:08x}')} → {node_names.get(node2_id_int, f'!{node2_id_int:08x}')}"
                         else:
-                            return_snr_values.append(target_hop.snr)
+                            direction = f"{node_names.get(node2_id_int, f'!{node2_id_int:08x}')} → {node_names.get(node1_id_int, f'!{node1_id_int:08x}')}"
+
+                        direction_counts[direction] = direction_counts.get(direction, 0) + 1
+
+                        if is_plausible_traceroute_snr(hop.snr):
+                            # The -32.0 sentinel is a real observation with
+                            # unrecorded SNR: keep it out of the directional averages.
+                            if hop.snr != TRACEROUTE_UNKNOWN_SNR:
+                                snr_values.append(hop.snr)
+                                packet_snrs.append(hop.snr)
+                                if hop.from_node_id == node1_id_int:
+                                    forward_snr_values.append(hop.snr)
+                                else:
+                                    return_snr_values.append(hop.snr)
 
                     # Create route_hops structure for UI - include ALL RF hops (forward and return)
                     route_hops = []
@@ -1337,7 +1345,12 @@ def api_traceroute_link(node1_id, node2_id):
                         except (ValueError, TypeError):
                             pass
 
-                    # Create traceroute entry for UI
+                    # Representative hop SNR for the history entry / chart:
+                    # use the minimum valid SNR among matching hops (excluding no-observation),
+                    # so the weakest direction for this packet is reflected.
+                    entry_hop_snr = min(packet_snrs) if packet_snrs else None
+
+                    # Create traceroute entry for UI (one per packet)
                     traceroute_entry = {
                         "id": packet["id"],
                         "timestamp": packet["timestamp"],
@@ -1350,9 +1363,7 @@ def api_traceroute_link(node1_id, node2_id):
                         "gateway_node_name": gateway_node_name,
                         # Null out garbage SNR so the SNR-over-time chart
                         # (which autoscales over hop_snr) can't be flattened.
-                        "hop_snr": target_hop.snr
-                        if is_plausible_traceroute_snr(target_hop.snr)
-                        else None,
+                        "hop_snr": entry_hop_snr,
                         "route_hops": route_hops,
                         "complete_path_display": tr_packet.format_path_display(
                             "display"
