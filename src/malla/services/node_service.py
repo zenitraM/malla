@@ -12,6 +12,7 @@ from ..database import NodeRepository
 from ..services.location_service import LocationService
 from ..services.traceroute_service import TracerouteService
 from ..utils.node_utils import convert_node_id
+from ..utils.traceroute_utils import get_packet_traceroute_id
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +188,8 @@ class NodeService:
                 gateway_id,
                 hop_start,
                 hop_limit,
-                raw_payload
+                raw_payload,
+                mesh_packet_id
             FROM packet_history
             WHERE portnum_name = 'TRACEROUTE_APP'
             AND processed_successfully = 1
@@ -202,6 +204,7 @@ class NodeService:
 
         # Track nodes with direct RF hops and their connection counts
         related_nodes = {}
+        seen_traceroute_hops: set[tuple[Any, int, int]] = set()
 
         for packet in packets:
             (
@@ -213,6 +216,7 @@ class NodeService:
                 hop_start,
                 hop_limit,
                 raw_payload,
+                mesh_packet_id,
             ) = packet
 
             try:
@@ -226,15 +230,22 @@ class NodeService:
                     "hop_start": hop_start,
                     "hop_limit": hop_limit,
                     "raw_payload": raw_payload,
+                    "mesh_packet_id": mesh_packet_id,
                 }
 
                 tr_packet = TraceroutePacket(packet_data, resolve_names=False)
+                tr_id = get_packet_traceroute_id(packet_data)
 
                 # Get all RF hops (both forward and return)
                 rf_hops = tr_packet.get_rf_hops()
 
                 # Check if any RF hop involves our target node
                 for hop in rf_hops:
+                    hop_tr_key = (tr_id, hop.from_node_id, hop.to_node_id)
+                    if hop_tr_key in seen_traceroute_hops:
+                        continue
+                    seen_traceroute_hops.add(hop_tr_key)
+
                     if hop.from_node_id == node_id_int:
                         # Target node is the sender in this RF hop
                         other_node = hop.to_node_id

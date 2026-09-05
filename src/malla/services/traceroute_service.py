@@ -24,7 +24,10 @@ from ..models.traceroute import (
 )
 from ..utils.node_utils import get_bulk_node_names
 from ..utils.signal_quality import is_plausible_traceroute_snr
-from ..utils.traceroute_utils import parse_traceroute_payload
+from ..utils.traceroute_utils import (
+    get_packet_traceroute_id,
+    parse_traceroute_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -658,6 +661,7 @@ class TracerouteService:
                 cache_hits = 0
                 cache_misses = 0
                 early_filtered = 0
+                seen_traceroute_hops: set[tuple[Any, int, int]] = set()
 
                 for packet in result["packets"]:
                     packet_start = time.time()
@@ -674,6 +678,8 @@ class TracerouteService:
                             packet_data=packet,
                             resolve_names=True,
                         )
+
+                        tr_id = get_packet_traceroute_id(packet)
 
                         # Track cache performance before distance calculation
                         cache_size_before = len(location_cache)
@@ -706,6 +712,11 @@ class TracerouteService:
                                 or 4294967295 in [hop.from_node_id, hop.to_node_id]
                             ):
                                 continue
+
+                            hop_tr_key = (tr_id, hop.from_node_id, hop.to_node_id)
+                            if hop_tr_key in seen_traceroute_hops:
+                                continue
+                            seen_traceroute_hops.add(hop_tr_key)
 
                             # Use a bidirectional key so A<->B == B<->A
                             key = tuple(sorted([hop.from_node_id, hop.to_node_id]))
@@ -1091,6 +1102,8 @@ class TracerouteService:
             nodes = {}  # node_id -> node_data
             direct_links = {}  # (node1, node2) -> link_data
             indirect_connections = {}  # (node1, node2) -> connection_data
+            seen_traceroute_hops: set[tuple[Any, int, int]] = set()
+            seen_traceroute_indirect: set[tuple[Any, tuple[int, int]]] = set()
 
             # Statistics
             stats = {
@@ -1118,6 +1131,8 @@ class TracerouteService:
                     if not rf_hops:
                         continue
 
+                    tr_id = get_packet_traceroute_id(tr_data)
+
                     stats["packets_with_rf_hops"] += 1
                     stats["total_rf_hops"] += len(rf_hops)
 
@@ -1135,6 +1150,20 @@ class TracerouteService:
                             continue
                         if 4294967295 in [hop.from_node_id, hop.to_node_id]:
                             continue
+
+                        link_key = tuple(sorted([hop.from_node_id, hop.to_node_id]))
+                        hop_tr_key = (tr_id, hop.from_node_id, hop.to_node_id)
+                        if hop_tr_key in seen_traceroute_hops:
+                            # Keep recency updated even if this hop was already counted for this traceroute
+                            if (
+                                link_key in direct_links
+                                and tr_data["timestamp"] > direct_links[link_key]["last_seen"]
+                            ):
+                                direct_links[link_key]["last_seen"] = tr_data["timestamp"]
+                                direct_links[link_key]["last_packet_id"] = tr_data["id"]
+                            continue
+                        seen_traceroute_hops.add(hop_tr_key)
+
                         # Add nodes to the graph
                         for node_id, node_name in [
                             (hop.from_node_id, hop.from_node_name),
@@ -1155,9 +1184,6 @@ class TracerouteService:
                             nodes[node_id]["packet_count"] += 1
                             if tr_data["timestamp"] > nodes[node_id]["last_seen"]:
                                 nodes[node_id]["last_seen"] = tr_data["timestamp"]
-
-                        # Create bidirectional link key (sorted to ensure consistency)
-                        link_key = tuple(sorted([hop.from_node_id, hop.to_node_id]))
 
                         # Add/update direct link
                         if link_key not in direct_links:
@@ -1194,32 +1220,42 @@ class TracerouteService:
                         indirect_key = tuple(
                             sorted([first_hop.from_node_id, last_hop.to_node_id])
                         )
+                        indirect_tr_key = (tr_id, indirect_key)
 
                         # Only add if it's not already a direct link
                         if indirect_key not in direct_links:
-                            if indirect_key not in indirect_connections:
-                                path_snrs = [
-                                    h.snr
-                                    for h in rf_hops
-                                    if h.snr and is_plausible_traceroute_snr(h.snr)
-                                ]
-                                indirect_connections[indirect_key] = {
-                                    "source": indirect_key[0],
-                                    "target": indirect_key[1],
-                                    "hop_count": len(rf_hops),
-                                    "path_count": 1,
-                                    "avg_snr": (sum(path_snrs) / len(path_snrs))
-                                    if path_snrs
-                                    else None,
-                                    "last_seen": tr_data["timestamp"],
-                                    "last_packet_id": tr_data["id"],
-                                }
+                            if indirect_tr_key in seen_traceroute_indirect:
+                                if (
+                                    indirect_key in indirect_connections
+                                    and tr_data["timestamp"] > indirect_connections[indirect_key]["last_seen"]
+                                ):
+                                    indirect_connections[indirect_key]["last_seen"] = tr_data["timestamp"]
+                                    indirect_connections[indirect_key]["last_packet_id"] = tr_data["id"]
                             else:
-                                conn = indirect_connections[indirect_key]
-                                conn["path_count"] += 1
-                                if tr_data["timestamp"] > conn["last_seen"]:
-                                    conn["last_seen"] = tr_data["timestamp"]
-                                    conn["last_packet_id"] = tr_data["id"]
+                                seen_traceroute_indirect.add(indirect_tr_key)
+                                if indirect_key not in indirect_connections:
+                                    path_snrs = [
+                                        h.snr
+                                        for h in rf_hops
+                                        if h.snr and is_plausible_traceroute_snr(h.snr)
+                                    ]
+                                    indirect_connections[indirect_key] = {
+                                        "source": indirect_key[0],
+                                        "target": indirect_key[1],
+                                        "hop_count": len(rf_hops),
+                                        "path_count": 1,
+                                        "avg_snr": (sum(path_snrs) / len(path_snrs))
+                                        if path_snrs
+                                        else None,
+                                        "last_seen": tr_data["timestamp"],
+                                        "last_packet_id": tr_data["id"],
+                                    }
+                                else:
+                                    conn = indirect_connections[indirect_key]
+                                    conn["path_count"] += 1
+                                    if tr_data["timestamp"] > conn["last_seen"]:
+                                        conn["last_seen"] = tr_data["timestamp"]
+                                        conn["last_packet_id"] = tr_data["id"]
 
                 except Exception as e:
                     logger.warning(

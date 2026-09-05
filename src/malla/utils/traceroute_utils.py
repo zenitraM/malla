@@ -19,6 +19,35 @@ class RouteData(TypedDict):
     snr_back: list[float]
 
 
+def get_packet_traceroute_id(packet: Any) -> tuple:
+    """
+    Get a unique identifier for the traceroute that this packet belongs to.
+
+    Multiple gateway receptions of the same mesh packet share the same
+    mesh_packet_id, from_node_id, and to_node_id.
+    If mesh_packet_id is not available or 0, fallback to the packet's unique ID.
+    """
+    if hasattr(packet, "packet_data"):
+        data = packet.packet_data
+    elif isinstance(packet, dict):
+        data = packet
+    else:
+        return ("unknown", id(packet))
+
+    mp_id = data.get("mesh_packet_id")
+    from_node = data.get("from_node_id")
+    to_node = data.get("to_node_id")
+    if mp_id and mp_id != 0:
+        return (mp_id, from_node, to_node)
+
+    pkt_id = data.get("id")
+    if pkt_id is not None:
+        return ("packet", pkt_id)
+
+    ts = data.get("timestamp") or 0.0
+    return ("cluster", from_node, to_node, ts)
+
+
 def parse_traceroute_payload(raw_payload: bytes) -> RouteData:
     """
     Parse traceroute payload from raw bytes using protobuf parsing.

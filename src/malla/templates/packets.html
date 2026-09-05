@@ -359,15 +359,15 @@ document.addEventListener('DOMContentLoaded', function() {
                         const gatewayName = row.gateway_name;
                         const gatewayNodeId = row.gateway_node_id;
 
-                        if (value && value.startsWith('!') && gatewayNodeId) {
+                        if (value && typeof value === 'string' && value.startsWith('!') && gatewayNodeId) {
                             const shortName = value.substring(value.length - 4).toUpperCase();
                             return nodeLink(gatewayNodeId, shortName);
                         } else if (gatewayName && gatewayNodeId) {
-                            const parenMatch = gatewayName.match(/\(([^)]+)\)$/);
-                            const shortName = parenMatch ? parenMatch[1] : gatewayName.substring(0, 4).toUpperCase();
+                            const parenMatch = typeof gatewayName === 'string' ? gatewayName.match(/\(([^)]+)\)$/) : null;
+                            const shortName = parenMatch ? parenMatch[1] : (typeof gatewayName === 'string' ? gatewayName.substring(0, 4).toUpperCase() : 'N/A');
                             return nodeLink(gatewayNodeId, shortName);
                         }
-                        return textNode(value || 'N/A');
+                        return textNode((typeof value === 'string' ? value : (value != null ? String(value) : '')) || 'N/A');
                     }
                 }
             },

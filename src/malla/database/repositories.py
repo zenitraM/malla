@@ -3384,7 +3384,8 @@ class TracerouteRepository:
                     gateway_id,
                     hop_start,
                     hop_limit,
-                    raw_payload
+                    raw_payload,
+                    mesh_packet_id
                 FROM packet_history
                 {where_clause}
                 ORDER BY timestamp DESC

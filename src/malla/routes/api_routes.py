@@ -30,7 +30,10 @@ from ..utils.node_utils import (
 )
 from ..utils.serialization_utils import convert_bytes_to_base64, sanitize_floats
 from ..utils.signal_quality import is_plausible_traceroute_snr
-from ..utils.traceroute_utils import parse_traceroute_payload
+from ..utils.traceroute_utils import (
+    get_packet_traceroute_id,
+    parse_traceroute_payload,
+)
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -1226,7 +1229,7 @@ def api_traceroute_link(node1_id, node2_id):
         }
 
         all_packets = TracerouteRepository.get_traceroute_packets(
-            limit=15000, filters=filters
+            limit=DEFAULT_GRAPH_PACKET_LIMIT, filters=filters
         )
 
         # Don't convert bytes to base64 yet - TraceroutePacket needs raw bytes
@@ -1237,41 +1240,54 @@ def api_traceroute_link(node1_id, node2_id):
 
         # Process each packet to find RF hops between our target nodes
         processed_traceroutes: list[dict[str, Any]] = []
+        seen_traceroute_packets: dict[Any, dict[str, Any]] = {}
+        seen_traceroute_hops: set[tuple[Any, int, int]] = set()
         direction_counts: dict[str, int] = {}
         snr_values: list[float] = []
 
         for packet in all_packets["packets"]:
             try:
+                tr_id = get_packet_traceroute_id(packet)
                 # Create TraceroutePacket for analysis
                 tr_packet = TraceroutePacket(packet, resolve_names=True)
 
                 # Get RF hops (no need to calculate distances for this analysis)
                 rf_hops = tr_packet.get_rf_hops()
 
-                # Find any RF hop between our two target nodes
-                target_hop = None
-                for hop in rf_hops:
+                # Find all RF hops between our two target nodes
+                matching_hops = [
+                    hop
+                    for hop in rf_hops
                     if (
                         hop.from_node_id == node1_id_int
                         and hop.to_node_id == node2_id_int
-                    ) or (
+                    )
+                    or (
                         hop.from_node_id == node2_id_int
                         and hop.to_node_id == node1_id_int
-                    ):
-                        target_hop = hop
-                        break
+                    )
+                ]
 
-                if target_hop:
-                    # Determine direction
-                    if target_hop.from_node_id == node1_id_int:
-                        direction = f"{node_names.get(node1_id_int, f'!{node1_id_int:08x}')} → {node_names.get(node2_id_int, f'!{node2_id_int:08x}')}"
-                    else:
-                        direction = f"{node_names.get(node2_id_int, f'!{node2_id_int:08x}')} → {node_names.get(node1_id_int, f'!{node1_id_int:08x}')}"
+                if matching_hops:
+                    packet_snrs: list[float] = []
+                    for hop in matching_hops:
+                        # Multiple gateways can receive the same traceroute: count
+                        # each RF hop once per transmission (per traceroute id).
+                        hop_tr_key = (tr_id, hop.from_node_id, hop.to_node_id)
+                        if hop_tr_key not in seen_traceroute_hops:
+                            seen_traceroute_hops.add(hop_tr_key)
 
-                    direction_counts[direction] = direction_counts.get(direction, 0) + 1
+                            # Determine direction
+                            if hop.from_node_id == node1_id_int:
+                                direction = f"{node_names.get(node1_id_int, f'!{node1_id_int:08x}')} → {node_names.get(node2_id_int, f'!{node2_id_int:08x}')}"
+                            else:
+                                direction = f"{node_names.get(node2_id_int, f'!{node2_id_int:08x}')} → {node_names.get(node1_id_int, f'!{node1_id_int:08x}')}"
 
-                    if is_plausible_traceroute_snr(target_hop.snr):
-                        snr_values.append(target_hop.snr)
+                            direction_counts[direction] = direction_counts.get(direction, 0) + 1
+
+                            if is_plausible_traceroute_snr(hop.snr):
+                                snr_values.append(hop.snr)
+                                packet_snrs.append(hop.snr)
 
                     # Create route_hops structure for UI - include ALL RF hops (forward and return)
                     route_hops = []
@@ -1323,7 +1339,29 @@ def api_traceroute_link(node1_id, node2_id):
                         except (ValueError, TypeError):
                             pass
 
-                    # Create traceroute entry for UI
+                    # Representative hop SNR for the history entry / chart:
+                    # use the minimum valid SNR among matching hops so the weakest
+                    # direction for this packet is reflected.
+                    entry_hop_snr = (
+                        min(packet_snrs)
+                        if packet_snrs
+                        else (
+                            min(
+                                [
+                                    h.snr
+                                    for h in matching_hops
+                                    if is_plausible_traceroute_snr(h.snr)
+                                ]
+                            )
+                            if any(
+                                is_plausible_traceroute_snr(h.snr)
+                                for h in matching_hops
+                            )
+                            else None
+                        )
+                    )
+
+                    # Create traceroute entry for UI (one per unique traceroute)
                     traceroute_entry = {
                         "id": packet["id"],
                         "timestamp": packet["timestamp"],
@@ -1336,16 +1374,25 @@ def api_traceroute_link(node1_id, node2_id):
                         "gateway_node_name": gateway_node_name,
                         # Null out garbage SNR so the SNR-over-time chart
                         # (which autoscales over hop_snr) can't be flattened.
-                        "hop_snr": target_hop.snr
-                        if is_plausible_traceroute_snr(target_hop.snr)
-                        else None,
+                        "hop_snr": entry_hop_snr,
                         "route_hops": route_hops,
                         "complete_path_display": tr_packet.format_path_display(
                             "display"
                         ),
                     }
 
-                    processed_traceroutes.append(traceroute_entry)
+                    if tr_id not in seen_traceroute_packets:
+                        seen_traceroute_packets[tr_id] = traceroute_entry
+                        processed_traceroutes.append(traceroute_entry)
+                    else:
+                        existing_entry = seen_traceroute_packets[tr_id]
+                        if len(route_hops) > len(existing_entry.get("route_hops", [])):
+                            existing_entry["route_hops"] = route_hops
+                            existing_entry["complete_path_display"] = (
+                                traceroute_entry["complete_path_display"]
+                            )
+                            if entry_hop_snr is not None:
+                                existing_entry["hop_snr"] = entry_hop_snr
 
             except Exception as e:
                 logger.warning(
@@ -1358,6 +1405,7 @@ def api_traceroute_link(node1_id, node2_id):
 
         # Calculate summary statistics
         total_attempts = len(processed_traceroutes)
+        total_observations = sum(direction_counts.values())
         avg_snr = sum(snr_values) / len(snr_values) if snr_values else None
 
         # Ensure direction_counts has the expected format even when empty
@@ -1374,6 +1422,7 @@ def api_traceroute_link(node1_id, node2_id):
             "from_node_name": node_names.get(node1_id_int, f"!{node1_id_int:08x}"),
             "to_node_name": node_names.get(node2_id_int, f"!{node2_id_int:08x}"),
             "total_attempts": total_attempts,
+            "total_observations": total_observations,
             "avg_snr": avg_snr,
             "direction_counts": direction_counts,
             "traceroutes": processed_traceroutes,
@@ -1913,7 +1962,9 @@ def api_traceroute_data():
                 node_ids.add(tr["to_node_id"])
             # Check if gateway is a node ID
             gateway_id = tr.get("gateway_id")
-            if gateway_id and gateway_id.startswith("!"):
+            if not gateway_id and tr.get("gateway_count") == 1 and tr.get("gateway_list"):
+                gateway_id = tr.get("gateway_list").strip()
+            if gateway_id and isinstance(gateway_id, str) and gateway_id.startswith("!"):
                 try:
                     gateway_node_id = int(gateway_id[1:], 16)
                     gateway_node_ids.add(gateway_node_id)
@@ -2081,10 +2132,19 @@ def api_traceroute_data():
             if group_packets:
                 response_data["gateway_list"] = tr.get("gateway_list", "")
                 response_data["gateway_count"] = tr.get("gateway_count", 0)
+                if response_data["gateway_count"] == 1 and response_data["gateway_list"]:
+                    single_gw = response_data["gateway_list"].strip()
+                    if single_gw.startswith("!"):
+                        try:
+                            gateway_node_id = int(single_gw[1:], 16)
+                            response_data["gateway_node_id"] = gateway_node_id
+                            response_data["gateway_name"] = node_names.get(gateway_node_id)
+                        except ValueError:
+                            pass
             else:
                 # For individual packets, add gateway node info for frontend links
                 gateway_id = tr.get("gateway_id")
-                if gateway_id and gateway_id.startswith("!"):
+                if gateway_id and isinstance(gateway_id, str) and gateway_id.startswith("!"):
                     try:
                         gateway_node_id = int(gateway_id[1:], 16)
                         response_data["gateway_node_id"] = gateway_node_id
