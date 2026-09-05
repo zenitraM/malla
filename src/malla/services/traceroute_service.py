@@ -32,6 +32,13 @@ _NETWORK_GRAPH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _NETWORK_GRAPH_CACHE_TTL_SECONDS = 60
 _NETWORK_GRAPH_CACHE_MAX_ENTRIES = 32
 
+# Default cap on traceroute packets analyzed per network graph build. The graph
+# advertises a multi-day window (e.g. 168h for the map), so this must be large
+# enough that the newest N packets still span that window; on busy brokers a
+# low cap silently shrinks the analysis to the last few hours and older RF
+# links drop off the map. ~20k packets parse in a couple of seconds.
+DEFAULT_GRAPH_PACKET_LIMIT = 20000
+
 
 def _network_graph_cache_key(
     hours: int,
@@ -1014,7 +1021,7 @@ class TracerouteService:
         min_snr: float = -200.0,
         include_indirect: bool = False,
         filters: dict | None = None,
-        limit_packets: int = 5000,
+        limit_packets: int = DEFAULT_GRAPH_PACKET_LIMIT,
     ) -> dict[str, Any]:
         """
         Extract RF links from traceroute data to build a network connectivity graph.

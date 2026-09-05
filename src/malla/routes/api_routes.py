@@ -764,7 +764,6 @@ def api_locations():
             hours=hours,
             include_indirect=False,
             filters=network_filters,
-            limit_packets=2000,
         )
 
         # 2. Get packet links (used by get_node_locations and returned in response)
