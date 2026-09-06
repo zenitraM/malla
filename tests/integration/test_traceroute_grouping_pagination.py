@@ -251,3 +251,247 @@ class TestTracerouteGroupingPagination:
         assert result["total_count"] == self.NUM_PACKETS
         assert len(result["packets"]) == 5
         assert all(p["is_grouped"] for p in result["packets"])
+
+    def test_stage_two_does_not_leak_filtered_out_gateways(self):
+        """Verify Stage 2 reapplies gateway_id filter and does not leak other gateways."""
+        filters = self._filters()
+        target_gw = "!gw00000001"
+        filters["gateway_id"] = target_gw
+
+        result = TracerouteRepository.get_traceroute_packets(
+            limit=5,
+            offset=0,
+            group_packets=True,
+            filters=filters,
+        )
+
+        assert result["total_count"] == self.NUM_PACKETS
+        assert len(result["packets"]) == 5
+        for pkt in result["packets"]:
+            # Gateway count must be 1 (only target_gw, not all 4 gateways)
+            assert pkt["gateway_count"] == 1
+            assert pkt["gateway_list"] == target_gw
+            assert pkt["gateway_id"] == target_gw
+            # Signal aggregates must match target_gw (gw_idx=1: rssi=-85, snr=3.0)
+            assert pkt["min_rssi"] == -85.0
+            assert pkt["max_rssi"] == -85.0
+            assert pkt["min_snr"] == 3.0
+            assert pkt["max_snr"] == 3.0
+
+
+@pytest.mark.integration
+class TestTraceroutePredicateReapplication:
+    """Test that all original predicates and composite keys are reapplied in Stage 2."""
+
+    COLLISION_ID = 888888
+    NODE_A = 0x11111111
+    NODE_B = 0x22222222
+    NODE_C = 0x33333333
+    NODE_D = 0x44444444
+
+    @pytest.fixture(autouse=True)
+    def _seed_predicates_data(self, app):
+        with app.app_context():
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            base_time = datetime.now().timestamp()
+
+            # 1. Composite key collision: two different node pairs sharing mesh_packet_id
+            cursor.execute(
+                """
+                INSERT INTO packet_history
+                (mesh_packet_id, from_node_id, to_node_id, gateway_id, rssi, snr,
+                 timestamp, hop_limit, hop_start, portnum, portnum_name, topic,
+                 payload_length, raw_payload, processed_successfully, channel_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    self.COLLISION_ID,
+                    self.NODE_A,
+                    self.NODE_B,
+                    "!gw_a",
+                    -70.0,
+                    10.0,
+                    base_time - 10,
+                    3,
+                    3,
+                    70,
+                    "TRACEROUTE_APP",
+                    "msh/2/c/LongFast/!gw_a",
+                    16,
+                    b"payload_pair_ab",
+                    1,
+                    0,
+                ),
+            )
+            cursor.execute(
+                """
+                INSERT INTO packet_history
+                (mesh_packet_id, from_node_id, to_node_id, gateway_id, rssi, snr,
+                 timestamp, hop_limit, hop_start, portnum, portnum_name, topic,
+                 payload_length, raw_payload, processed_successfully, channel_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    self.COLLISION_ID,
+                    self.NODE_C,
+                    self.NODE_D,
+                    "!gw_c",
+                    -90.0,
+                    0.0,
+                    base_time - 15,
+                    3,
+                    3,
+                    70,
+                    "TRACEROUTE_APP",
+                    "msh/2/c/LongFast/!gw_c",
+                    16,
+                    b"payload_pair_cd",
+                    1,
+                    0,
+                ),
+            )
+
+            # 2. Multi-reception packet with different channels, processing statuses, payloads, and times
+            # mesh_packet_id: 777777
+            # Reception 1: valid, channel 0, processed 1, payload b"good_payload", recent time
+            cursor.execute(
+                """
+                INSERT INTO packet_history
+                (mesh_packet_id, from_node_id, to_node_id, gateway_id, rssi, snr,
+                 timestamp, hop_limit, hop_start, portnum, portnum_name, topic,
+                 payload_length, raw_payload, processed_successfully, channel_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    777777,
+                    self.NODE_A,
+                    self.NODE_B,
+                    "!gw_primary",
+                    -65.0,
+                    12.0,
+                    base_time - 20,
+                    3,
+                    3,
+                    70,
+                    "TRACEROUTE_APP",
+                    "msh/2/c/LongFast/!gw_primary",
+                    12,
+                    b"good_payload",
+                    1,
+                    0,
+                ),
+            )
+            # Reception 2: channel 1, processed 0, empty payload, older time (10 days ago)
+            cursor.execute(
+                """
+                INSERT INTO packet_history
+                (mesh_packet_id, from_node_id, to_node_id, gateway_id, rssi, snr,
+                 timestamp, hop_limit, hop_start, portnum, portnum_name, topic,
+                 payload_length, raw_payload, processed_successfully, channel_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    777777,
+                    self.NODE_A,
+                    self.NODE_B,
+                    "!gw_secondary",
+                    -95.0,
+                    -5.0,
+                    base_time - (10 * 86400),
+                    3,
+                    3,
+                    70,
+                    "TRACEROUTE_APP",
+                    "msh/2/c/LongFast/!gw_secondary",
+                    0,
+                    b"",
+                    0,
+                    1,
+                ),
+            )
+
+            conn.commit()
+            conn.close()
+            yield
+
+    def test_composite_key_does_not_mix_colliding_mesh_packet_ids(self):
+        """Receptions from colliding mesh_packet_id on different node pairs must remain separate."""
+        res = TracerouteRepository.get_traceroute_packets(
+            limit=10,
+            offset=0,
+            group_packets=True,
+            filters={"from_node": self.NODE_A, "to_node": self.NODE_B},
+        )
+        assert res["total_count"] == 2  # COLLISION_ID and 777777
+        ab_packet = next(p for p in res["packets"] if p["mesh_packet_id"] == self.COLLISION_ID)
+        assert ab_packet["from_node_id"] == self.NODE_A
+        assert ab_packet["to_node_id"] == self.NODE_B
+        assert ab_packet["gateway_list"] == "!gw_a"
+        assert ab_packet["raw_payload"] == b"payload_pair_ab"
+
+    def test_stage_two_reapplies_primary_channel_filter(self):
+        """When filtered by primary_channel, stage 2 only fetches matching receptions."""
+        res_ch0 = TracerouteRepository.get_traceroute_packets(
+            limit=10,
+            offset=0,
+            group_packets=True,
+            filters={"from_node": self.NODE_A, "primary_channel": "0"},
+        )
+        pkt_ch0 = next(p for p in res_ch0["packets"] if p["mesh_packet_id"] == 777777)
+        assert pkt_ch0["gateway_count"] == 1
+        assert pkt_ch0["gateway_list"] == "!gw_primary"
+        assert str(pkt_ch0["channel_id"]) == "0"
+
+    def test_stage_two_reapplies_processed_successfully_filter(self):
+        """When filtered by processed_successfully_only, failed receptions are excluded from stage 2."""
+        res = TracerouteRepository.get_traceroute_packets(
+            limit=10,
+            offset=0,
+            group_packets=True,
+            filters={"from_node": self.NODE_A, "processed_successfully_only": True},
+        )
+        pkt = next(p for p in res["packets"] if p["mesh_packet_id"] == 777777)
+        assert pkt["gateway_count"] == 1
+        assert pkt["gateway_list"] == "!gw_primary"
+        assert pkt["gateway_id"] == "!gw_primary"
+
+    def test_stage_two_reapplies_exclude_empty_payload(self):
+        """Receptions with empty payload are excluded from stage 2."""
+        res = TracerouteRepository.get_traceroute_packets(
+            limit=10,
+            offset=0,
+            group_packets=True,
+            filters={"from_node": self.NODE_A, "exclude_empty_payload": True},
+        )
+        pkt = next(p for p in res["packets"] if p["mesh_packet_id"] == 777777)
+        assert pkt["gateway_count"] == 1
+        assert pkt["gateway_list"] == "!gw_primary"
+        assert pkt["raw_payload"] == b"good_payload"
+
+    def test_stage_two_reapplies_time_window(self):
+        """Default 7-day time window excludes receptions older than 7 days from stage 2."""
+        res = TracerouteRepository.get_traceroute_packets(
+            limit=10,
+            offset=0,
+            group_packets=True,
+            filters={"from_node": self.NODE_A},
+        )
+        pkt = next(p for p in res["packets"] if p["mesh_packet_id"] == 777777)
+        # The reception from 10 days ago (!gw_secondary) is outside the 7-day window
+        assert pkt["gateway_count"] == 1
+        assert pkt["gateway_list"] == "!gw_primary"
+
+    def test_stage_two_reapplies_search_filter(self):
+        """Search predicate is reapplied in stage 2."""
+        res = TracerouteRepository.get_traceroute_packets(
+            limit=10,
+            offset=0,
+            group_packets=True,
+            filters={"from_node": self.NODE_A},
+            search="!gw_primary",
+        )
+        assert res["total_count"] == 1
+        pkt = res["packets"][0]
+        assert pkt["mesh_packet_id"] == 777777
+        assert pkt["gateway_list"] == "!gw_primary"

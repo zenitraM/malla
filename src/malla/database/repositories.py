@@ -3674,28 +3674,58 @@ class TracerouteRepository:
                             page_group_keys = [
                                 (
                                     r["mesh_packet_id"]
-                                    if isinstance(r, dict)
+                                    if (
+                                        isinstance(r, dict)
+                                        or hasattr(r, "keys")
+                                    )
                                     else r[0],
-                                    r["from_node_id"] if isinstance(r, dict) else r[1],
-                                    r["to_node_id"] if isinstance(r, dict) else r[2],
+                                    r["from_node_id"]
+                                    if (
+                                        isinstance(r, dict)
+                                        or hasattr(r, "keys")
+                                    )
+                                    else r[1],
+                                    r["to_node_id"]
+                                    if (
+                                        isinstance(r, dict)
+                                        or hasattr(r, "keys")
+                                    )
+                                    else r[2],
                                 )
                                 for r in page_group_rows
                             ]
-                            page_mesh_ids = list({key[0] for key in page_group_keys})
-                            placeholders = ",".join("?" for _ in page_mesh_ids)
+
+                            group_values_sql = ", ".join(
+                                ["(?, ?, ?)"] * len(page_group_keys)
+                            )
+                            group_params: list[Any] = []
+                            for k in page_group_keys:
+                                group_params.extend([k[0], k[1], k[2]])
 
                             # Stage 2: Fetch only individual receptions for the current page
+                            # joining using the full composite group key and reapplying original predicates
                             receptions_query = f"""
+                                WITH page_groups(grp_mesh_packet_id, grp_from_node_id, grp_to_node_id) AS (
+                                    VALUES {group_values_sql}
+                                )
                                 SELECT
-                                    id, timestamp, from_node_id, to_node_id, gateway_id,
-                                    channel_id, hop_start, hop_limit, rssi, snr, payload_length, raw_payload,
-                                    processed_successfully, mesh_packet_id,
-                                    datetime(timestamp, 'unixepoch') as timestamp_str
+                                    packet_history.id, packet_history.timestamp, packet_history.from_node_id,
+                                    packet_history.to_node_id, packet_history.gateway_id, packet_history.channel_id,
+                                    packet_history.hop_start, packet_history.hop_limit, packet_history.rssi,
+                                    packet_history.snr, packet_history.payload_length, packet_history.raw_payload,
+                                    packet_history.processed_successfully, packet_history.mesh_packet_id,
+                                    datetime(packet_history.timestamp, 'unixepoch') as timestamp_str
                                 FROM packet_history
-                                WHERE mesh_packet_id IN ({placeholders}) AND portnum_name = 'TRACEROUTE_APP'
-                                ORDER BY timestamp DESC
+                                JOIN page_groups
+                                  ON packet_history.mesh_packet_id = page_groups.grp_mesh_packet_id
+                                 AND packet_history.from_node_id = page_groups.grp_from_node_id
+                                 AND packet_history.to_node_id = page_groups.grp_to_node_id
+                                {where_clause}
+                                ORDER BY packet_history.timestamp DESC
                             """
-                            cursor.execute(receptions_query, page_mesh_ids)
+                            cursor.execute(
+                                receptions_query, group_params + params
+                            )
                             individual_packets = [
                                 dict(row) for row in cursor.fetchall()
                             ]
