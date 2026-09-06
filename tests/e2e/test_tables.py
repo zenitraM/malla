@@ -824,10 +824,8 @@ class TestTables:
         """Test that grouped traceroute table shows at least 1 gateway when grouping is enabled."""
         page.goto(f"{test_server_url}/traceroute")
 
-        # Wait for traceroute data to load by looking for gateway count
-        page.wait_for_selector(
-            ".modern-table tbody tr:has-text('gateway')", timeout=15000
-        )
+        # Wait for traceroute data to load
+        page.wait_for_selector(".modern-table tbody tr", timeout=15000)
 
         # Ensure grouping is enabled
         grouping_checkbox = page.locator("#group_packets")
@@ -835,21 +833,22 @@ class TestTables:
             grouping_checkbox.check()
             apply_button = page.locator("#applyFilters")
             apply_button.click()
-            # Wait for the grouped data to reload with gateway counts
-            page.wait_for_selector(
-                ".modern-table tbody tr:has-text('gateway')", timeout=10000
-            )
+            # Wait for the grouped data to reload
+            page.wait_for_timeout(1500)
+            page.wait_for_selector(".modern-table tbody tr", timeout=10000)
 
-        # Check that gateway counts show at least 1 gateway (not N/A)
+        # Check that gateway cells are populated (not N/A). Grouped rows show
+        # either an "N gateways" badge (multi-gateway group) or the resolved
+        # single gateway as a node link / raw id.
         gateway_cells = page.locator(
             ".modern-table tbody tr td:nth-child(5)"
         )  # Gateway column
 
         valid_gateway_count_found = False
         for i in range(min(5, gateway_cells.count())):
-            gateway_text = gateway_cells.nth(i).inner_text()
-            # Should show "1 gateway", "2 gateways", etc., not "N/A"
-            if gateway_text and "gateway" in gateway_text and gateway_text != "N/A":
+            gateway_text = gateway_cells.nth(i).inner_text().strip()
+            # Should show a gateway (badge, link or raw id), not "N/A" or empty
+            if gateway_text and gateway_text != "N/A":
                 valid_gateway_count_found = True
                 break
 
@@ -1106,8 +1105,8 @@ class TestTables:
         """Test that route data is displayed correctly in both grouped and ungrouped modes."""
         # Test grouped mode (default)
         page.goto(f"{test_server_url}/traceroute")
-        # Wait for traceroute data to load by looking for gateway count
-        page.wait_for_selector("table tbody tr:has-text('gateway')", timeout=15000)
+        # Wait for traceroute data to load
+        page.wait_for_selector("table tbody tr", timeout=15000)
 
         # Verify grouping is enabled
         group_checkbox = page.locator("#group_packets")
