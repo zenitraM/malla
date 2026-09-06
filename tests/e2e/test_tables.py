@@ -824,18 +824,24 @@ class TestTables:
         """Test that grouped traceroute table shows at least 1 gateway when grouping is enabled."""
         page.goto(f"{test_server_url}/traceroute")
 
-        # Wait for traceroute data to load
-        page.wait_for_selector(".modern-table tbody tr", timeout=15000)
-
         # Ensure grouping is enabled
         grouping_checkbox = page.locator("#group_packets")
         if not grouping_checkbox.is_checked():
             grouping_checkbox.check()
             apply_button = page.locator("#applyFilters")
             apply_button.click()
-            # Wait for the grouped data to reload
-            page.wait_for_timeout(1500)
-            page.wait_for_selector(".modern-table tbody tr", timeout=10000)
+
+        # Wait for traceroute data to load with valid gateway cells (not the loading spinner row)
+        page.wait_for_function(
+            """() => {
+                const gatewayCells = document.querySelectorAll('.modern-table tbody tr td:nth-child(5)');
+                return Array.from(gatewayCells).some(cell => {
+                    const text = (cell.textContent || '').trim();
+                    return text && text !== 'N/A' && text.length > 0;
+                });
+            }""",
+            timeout=15000,
+        )
 
         # Check that gateway cells are populated (not N/A). Grouped rows show
         # either an "N gateways" badge (multi-gateway group) or the resolved
@@ -1105,12 +1111,22 @@ class TestTables:
         """Test that route data is displayed correctly in both grouped and ungrouped modes."""
         # Test grouped mode (default)
         page.goto(f"{test_server_url}/traceroute")
-        # Wait for traceroute data to load
-        page.wait_for_selector("table tbody tr", timeout=15000)
 
         # Verify grouping is enabled
         group_checkbox = page.locator("#group_packets")
         assert group_checkbox.is_checked(), "Grouping should be enabled by default"
+
+        # Wait for route data to be present in grouped mode (not the loading spinner row)
+        page.wait_for_function(
+            """() => {
+                const routeCells = document.querySelectorAll('table tbody tr td:nth-child(4)');
+                return Array.from(routeCells).some(cell => {
+                    const text = (cell.textContent || '').trim();
+                    return text && text !== 'No route data' && text.length > 0;
+                });
+            }""",
+            timeout=15000,
+        )
 
         # Count route data entries in grouped mode
         route_cells_grouped = page.locator("table tbody tr td:nth-child(4)")
@@ -1172,7 +1188,7 @@ class TestTables:
     ):
         """Test that gateway and route data are properly formatted without HTML escaping."""
         page.goto(f"{test_server_url}/traceroute")
-        page.wait_for_selector("table tbody tr", timeout=10000)
+        page.wait_for_selector("table tbody tr td:nth-child(5)", timeout=15000)
 
         # Find all rows
         rows = page.locator("table tbody tr")
