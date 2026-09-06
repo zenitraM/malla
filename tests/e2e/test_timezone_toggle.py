@@ -51,7 +51,8 @@ class TestTimezoneToggleE2E:
         )
 
         # Click timezone toggle button
-        page.click("#timezone-toggle")
+        with page.expect_navigation():
+            page.click("#timezone-toggle")
 
         # Wait for page to reload (the toggle should trigger a reload)
         page.wait_for_load_state("load")
@@ -79,7 +80,8 @@ class TestTimezoneToggleE2E:
         )
 
         # Click timezone toggle
-        page.click("#timezone-toggle")
+        with page.expect_navigation():
+            page.click("#timezone-toggle")
 
         # Wait for page reload
         page.wait_for_load_state("load")
@@ -254,7 +256,8 @@ class TestTimezoneToggleE2E:
         assert value == "2025-01-01T12:00", "Datetime input should work correctly"
 
         # Toggle timezone
-        page.click("#timezone-toggle")
+        with page.expect_navigation():
+            page.click("#timezone-toggle")
         page.wait_for_load_state("load")
 
         # Reopen filters and check input still works

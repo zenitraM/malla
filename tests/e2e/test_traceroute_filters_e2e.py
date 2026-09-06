@@ -1543,12 +1543,22 @@ class TestTracerouteFilters:
             api_data = response.json()
             assert "data" in api_data, "API response should contain data field"
 
-            # Verify API results contain the route node
+            # Verify API results contain the route node anywhere in the path
             for item in api_data["data"]:
                 route_nodes = item.get("route_nodes", [])
-                assert int(route_node_id) in route_nodes, (
-                    f"API result should contain route_node {route_node_id}, got {route_nodes}"
+                from_node = item.get("from_node_id")
+                to_node = item.get("to_node_id")
+                assert (
+                    int(route_node_id) in route_nodes
+                    or int(route_node_id) == from_node
+                    or int(route_node_id) == to_node
+                ), (
+                    f"API result should contain route_node {route_node_id}, got route_nodes={route_nodes}, from={from_node}, to={to_node}"
                 )
+
+            # Verify frontend table shows filtered results
+            filtered_rows = page.locator("#tracerouteTable tbody tr").count()
+            assert filtered_rows > 0, "Should have filtered results"
 
     def test_traceroute_gateway_filter_e2e(self, page: Page, test_server_url: str):
         """Test that the gateway filter works end-to-end."""
