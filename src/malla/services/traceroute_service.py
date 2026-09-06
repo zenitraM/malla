@@ -1217,9 +1217,10 @@ class TracerouteService:
                         last_hop = rf_hops[-1]
 
                         # Create indirect connection key
-                        indirect_key = tuple(
-                            sorted([first_hop.from_node_id, last_hop.to_node_id])
+                        key_lo, key_hi = sorted(
+                            [first_hop.from_node_id, last_hop.to_node_id]
                         )
+                        indirect_key = (key_lo, key_hi)
                         indirect_tr_key = (tr_id, indirect_key)
 
                         # Only add if it's not already a direct link
