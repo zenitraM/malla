@@ -238,3 +238,38 @@ class TestNodeRepository:
         """Test get_bulk_node_names with empty list."""
         result = NodeRepository.get_bulk_node_names([])
         assert result == {}
+
+    @pytest.mark.unit
+    @patch("src.malla.database.repositories.get_db_connection")
+    def test_get_nodes_search_by_decimal_id(self, mock_get_db):
+        """Test that get_nodes includes CAST(ni.node_id AS TEXT) in search query."""
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_get_db.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+
+        mock_cursor.fetchone.return_value = {"total": 1}
+        node_row = {
+            "node_id": 554576596,
+            "long_name": "Sierra de Santa Cruz",
+            "short_name": "MA6",
+            "hw_model": "NRF52_PROMICRO_DIY",
+            "role": "ROUTER",
+            "primary_channel": "SFNarrow",
+            "last_updated": 1788550193.0,
+        }
+        mock_cursor.fetchall.return_value = [node_row]
+
+        result = NodeRepository.get_nodes(search="554576596")
+
+        # Verify that count query was executed with search parameter
+        count_call_args = mock_cursor.execute.call_args_list[0]
+        query_sql = count_call_args[0][0]
+        query_params = count_call_args[0][1]
+
+        assert "CAST(ni.node_id AS TEXT) LIKE ?" in query_sql
+        assert "%554576596%" in query_params
+        assert result["total_count"] == 1
+        assert len(result["nodes"]) == 1
+        assert result["nodes"][0]["node_id"] == 554576596
+
