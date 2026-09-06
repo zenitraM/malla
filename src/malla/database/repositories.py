@@ -167,6 +167,7 @@ def _aggregate(
         band.extend(run_band)
     return avg_line, band
 
+
 RELAY_CANDIDATE_CACHE_TTL_SECONDS = 1800
 RELAY_CANDIDATE_CACHE_MAX_ENTRIES = 4096
 _relay_candidate_cache: dict[tuple[int, int], tuple[float, list[dict[str, Any]]]] = {}
@@ -830,7 +831,9 @@ class PacketRepository:
                     "hop_count",
                     "relay_node",
                 }
-                order_column = order_by if order_by in valid_order_columns else "timestamp"
+                order_column = (
+                    order_by if order_by in valid_order_columns else "timestamp"
+                )
                 order_dir_sql = "DESC" if order_dir.lower() == "desc" else "ASC"
 
                 # Main query
@@ -3393,6 +3396,136 @@ class TracerouteRepository:
             raise
 
     @staticmethod
+    def _aggregate_group_packets(
+        packets_in_group: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Aggregate multiple gateway receptions of a single traceroute packet."""
+        packets_in_group.sort(key=lambda x: x["timestamp"], reverse=True)
+        base_packet = packets_in_group[0]
+
+        gateway_ids = [p["gateway_id"] for p in packets_in_group if p.get("gateway_id")]
+        unique_gateways = list(set(gateway_ids))
+
+        rssi_values = [
+            p["rssi"] for p in packets_in_group if is_plausible_rssi(p.get("rssi"))
+        ]
+        snr_values = [
+            p["snr"] for p in packets_in_group if is_plausible_snr(p.get("snr"))
+        ]
+        hop_values = []
+        for p in packets_in_group:
+            if p.get("hop_start") is not None and p.get("hop_limit") is not None:
+                hop_values.append(p["hop_start"] - p["hop_limit"])
+
+        payload_lengths = [
+            p["payload_length"] for p in packets_in_group if p.get("payload_length")
+        ]
+
+        best_payload_packet = max(
+            packets_in_group, key=lambda x: len(x.get("raw_payload") or b"")
+        )
+
+        aggregated = {
+            "id": base_packet["id"],
+            "timestamp": base_packet["timestamp"],
+            "timestamp_str": base_packet.get("timestamp_str"),
+            "from_node_id": base_packet["from_node_id"],
+            "to_node_id": base_packet["to_node_id"],
+            "channel_id": base_packet.get("channel_id"),
+            "mesh_packet_id": base_packet["mesh_packet_id"],
+            "gateway_id": unique_gateways[0] if len(unique_gateways) == 1 else None,
+            "gateway_count": len(unique_gateways),
+            "gateway_list": ",".join(unique_gateways),
+            "reception_count": len(packets_in_group),
+            "processed_successfully": any(
+                p.get("processed_successfully") for p in packets_in_group
+            ),
+            "raw_payload": best_payload_packet.get("raw_payload"),
+            "is_grouped": True,
+        }
+
+        # RSSI aggregation
+        if rssi_values:
+            aggregated["min_rssi"] = min(rssi_values)
+            aggregated["max_rssi"] = max(rssi_values)
+            if aggregated["min_rssi"] == aggregated["max_rssi"]:
+                aggregated["rssi_range"] = f"{aggregated['min_rssi']:.1f} dBm"
+            else:
+                aggregated["rssi_range"] = (
+                    f"{aggregated['min_rssi']:.1f} to {aggregated['max_rssi']:.1f} dBm"
+                )
+            aggregated["rssi"] = aggregated["rssi_range"]
+        else:
+            aggregated["min_rssi"] = None
+            aggregated["max_rssi"] = None
+            aggregated["rssi_range"] = None
+            aggregated["rssi"] = None
+
+        # SNR aggregation
+        if snr_values:
+            aggregated["min_snr"] = min(snr_values)
+            aggregated["max_snr"] = max(snr_values)
+            if aggregated["min_snr"] == aggregated["max_snr"]:
+                aggregated["snr_range"] = f"{aggregated['min_snr']:.2f} dB"
+            else:
+                aggregated["snr_range"] = (
+                    f"{aggregated['min_snr']:.2f} to {aggregated['max_snr']:.2f} dB"
+                )
+            aggregated["snr"] = aggregated["snr_range"]
+        else:
+            aggregated["min_snr"] = None
+            aggregated["max_snr"] = None
+            aggregated["snr_range"] = None
+            aggregated["snr"] = None
+
+        # Hop count aggregation
+        if hop_values:
+            aggregated["min_hops"] = min(hop_values)
+            aggregated["max_hops"] = max(hop_values)
+            if aggregated["min_hops"] == aggregated["max_hops"]:
+                aggregated["hop_range"] = str(aggregated["min_hops"])
+            else:
+                aggregated["hop_range"] = (
+                    f"{aggregated['min_hops']}-{aggregated['max_hops']}"
+                )
+            aggregated["hop_count"] = aggregated["min_hops"]
+        else:
+            aggregated["min_hops"] = None
+            aggregated["max_hops"] = None
+            aggregated["hop_range"] = None
+            aggregated["hop_count"] = None
+
+        # Payload length aggregation
+        if payload_lengths:
+            aggregated["avg_payload_length"] = sum(payload_lengths) / len(
+                payload_lengths
+            )
+        else:
+            aggregated["avg_payload_length"] = None
+
+        aggregated["success"] = aggregated["processed_successfully"]
+        aggregated["route"] = None
+        aggregated["route_display"] = "No route data"
+        if aggregated.get("raw_payload"):
+            try:
+                from ..models.traceroute import TraceroutePacket
+
+                tr_packet = TraceroutePacket(aggregated, resolve_names=True)
+                if tr_packet.route_data.get("route_nodes"):
+                    aggregated["route"] = json.dumps(
+                        tr_packet.route_data["route_nodes"]
+                    )
+                    aggregated["route_display"] = tr_packet.format_path_display(
+                        "display"
+                    )
+            except Exception as e:
+                logger.debug(
+                    f"Failed to parse route for grouped packet {aggregated['id']}: {e}"
+                )
+
+        return aggregated
+
+    @staticmethod
     def get_traceroute_packets(
         limit: int = 100,
         offset: int = 0,
@@ -3478,218 +3611,155 @@ class TracerouteRepository:
 
                 where_clause = "WHERE " + " AND ".join(where_conditions)
 
-                # PERFORMANCE FIX: Skip expensive total count for grouped traceroute queries
-                # The COUNT(DISTINCT ...) query was taking too long on large datasets
-                # Instead, estimate total count based on results (much faster)
-                total_count = None  # Will be estimated after getting results
-
-                # ULTRA-OPTIMIZED: Use much smaller fetch limits for better performance
-                # The original approach was fetching 1k-100k records which is too expensive
-                # Instead, use a more reasonable approach with smaller multipliers
-                if offset == 0:
-                    # For first page, use a smaller multiplier for traceroutes
-                    fetch_limit = min(
-                        limit * 15, 3000
-                    )  # Smaller: 375-3000 instead of 1k-40k
-                else:
-                    # For subsequent pages, use a reasonable multiplier
-                    grouping_ratio = 2.0  # More realistic estimate
-                    estimated_individual_needed = (offset + limit) * grouping_ratio
-
-                    # Cap at much smaller limits for performance
-                    fetch_limit = min(
-                        max(estimated_individual_needed, limit * 8), 8000
-                    )  # Max 8k instead of 100k
-
-                # Fetch individual packets using efficient ORDER BY timestamp DESC LIMIT
-                query = f"""
-                    SELECT
-                        id, timestamp, from_node_id, to_node_id, gateway_id,
-                        channel_id, hop_start, hop_limit, rssi, snr, payload_length, raw_payload,
-                        processed_successfully, mesh_packet_id,
-                        datetime(timestamp, 'unixepoch') as timestamp_str
-                    FROM packet_history
-                    {where_clause}
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                """
-
-                cursor.execute(query, params + [fetch_limit])
-                rows = cursor.fetchall()
-                individual_packets: list[dict[str, Any]] = [dict(row) for row in rows]
-
-                # Group packets in memory by (mesh_packet_id, from_node_id, to_node_id)
-                groups: dict[tuple[Any, Any, Any], list[dict[str, Any]]] = {}
-                for packet in individual_packets:
-                    # Skip if missing required fields
-                    if not packet.get("mesh_packet_id") or not packet.get(
-                        "from_node_id"
-                    ):
-                        continue
-
-                    # Create grouping key
-                    group_key = (
-                        packet["mesh_packet_id"],
-                        packet["from_node_id"],
-                        packet["to_node_id"],
-                    )
-
-                    if group_key not in groups:
-                        groups[group_key] = []
-                    groups[group_key].append(packet)
-
-                # Convert groups to aggregated packets
-                aggregated_packets = []
-                for _group_key, packets_in_group in groups.items():
-                    # Sort by timestamp (newest first) within group
-                    packets_in_group.sort(key=lambda x: x["timestamp"], reverse=True)
-
-                    # Use the first (newest) packet as the base
-                    base_packet = packets_in_group[0]
-
-                    # Calculate aggregations
-                    gateway_ids = [
-                        p["gateway_id"] for p in packets_in_group if p["gateway_id"]
-                    ]
-                    unique_gateways = list(set(gateway_ids))
-
-                    rssi_values = [
-                        p["rssi"]
-                        for p in packets_in_group
-                        if is_plausible_rssi(p["rssi"])
-                    ]
-                    snr_values = [
-                        p["snr"] for p in packets_in_group if is_plausible_snr(p["snr"])
-                    ]
-                    hop_values = []
-                    for p in packets_in_group:
-                        if (
-                            p.get("hop_start") is not None
-                            and p.get("hop_limit") is not None
-                        ):
-                            hop_values.append(p["hop_start"] - p["hop_limit"])
-
-                    payload_lengths = [
-                        p["payload_length"]
-                        for p in packets_in_group
-                        if p["payload_length"]
-                    ]
-
-                    # Find the packet with the longest payload (most complete route data)
-                    best_payload_packet = max(
-                        packets_in_group, key=lambda x: len(x.get("raw_payload", b""))
-                    )
-
-                    # Create aggregated packet
-                    aggregated = {
-                        "id": base_packet["id"],
-                        "timestamp": base_packet["timestamp"],
-                        "timestamp_str": base_packet["timestamp_str"],
-                        "from_node_id": base_packet["from_node_id"],
-                        "to_node_id": base_packet["to_node_id"],
-                        "channel_id": base_packet.get("channel_id"),
-                        "mesh_packet_id": base_packet["mesh_packet_id"],
-                        "gateway_count": len(unique_gateways),
-                        "gateway_list": ",".join(unique_gateways),
-                        "reception_count": len(packets_in_group),
-                        "processed_successfully": any(
-                            p["processed_successfully"] for p in packets_in_group
-                        ),
-                        "raw_payload": best_payload_packet.get("raw_payload"),
-                        "is_grouped": True,
-                    }
-
-                    # RSSI aggregation
-                    if rssi_values:
-                        aggregated["min_rssi"] = min(rssi_values)
-                        aggregated["max_rssi"] = max(rssi_values)
-                        if aggregated["min_rssi"] == aggregated["max_rssi"]:
-                            aggregated["rssi_range"] = (
-                                f"{aggregated['min_rssi']:.1f} dBm"
-                            )
-                        else:
-                            aggregated["rssi_range"] = (
-                                f"{aggregated['min_rssi']:.1f} to {aggregated['max_rssi']:.1f} dBm"
-                            )
-                        aggregated["rssi"] = aggregated["rssi_range"]
-                    else:
-                        aggregated["min_rssi"] = None
-                        aggregated["max_rssi"] = None
-                        aggregated["rssi_range"] = None
-                        aggregated["rssi"] = None
-
-                    # SNR aggregation
-                    if snr_values:
-                        aggregated["min_snr"] = min(snr_values)
-                        aggregated["max_snr"] = max(snr_values)
-                        if aggregated["min_snr"] == aggregated["max_snr"]:
-                            aggregated["snr_range"] = f"{aggregated['min_snr']:.2f} dB"
-                        else:
-                            aggregated["snr_range"] = (
-                                f"{aggregated['min_snr']:.2f} to {aggregated['max_snr']:.2f} dB"
-                            )
-                        aggregated["snr"] = aggregated["snr_range"]
-                    else:
-                        aggregated["min_snr"] = None
-                        aggregated["max_snr"] = None
-                        aggregated["snr_range"] = None
-                        aggregated["snr"] = None
-
-                    # Hop count aggregation
-                    if hop_values:
-                        aggregated["min_hops"] = min(hop_values)
-                        aggregated["max_hops"] = max(hop_values)
-                        if aggregated["min_hops"] == aggregated["max_hops"]:
-                            aggregated["hop_range"] = str(aggregated["min_hops"])
-                        else:
-                            aggregated["hop_range"] = (
-                                f"{aggregated['min_hops']}-{aggregated['max_hops']}"
-                            )
-                        aggregated["hop_count"] = aggregated["min_hops"]
-                    else:
-                        aggregated["min_hops"] = None
-                        aggregated["max_hops"] = None
-                        aggregated["hop_range"] = None
-                        aggregated["hop_count"] = None
-
-                    # Payload length aggregation
-                    if payload_lengths:
-                        aggregated["avg_payload_length"] = sum(payload_lengths) / len(
-                            payload_lengths
+                if not needs_route_filtering:
+                    # TWO-STAGE HIGH-PERFORMANCE SQL GROUPING & PAGINATION
+                    # 1. Total count of unique groups in time window
+                    count_query = f"""
+                        SELECT count(*) as total FROM (
+                            SELECT 1 FROM packet_history
+                            {where_clause}
+                            GROUP BY mesh_packet_id, from_node_id, to_node_id
                         )
+                    """
+                    cursor.execute(count_query, params)
+                    count_row = cursor.fetchone()
+                    total_count = (
+                        count_row["total"]
+                        if count_row
+                        and (isinstance(count_row, dict) or hasattr(count_row, "keys"))
+                        else (count_row[0] if count_row else 0)
+                    )
+
+                    if total_count == 0:
+                        packets = []
                     else:
-                        aggregated["avg_payload_length"] = None
+                        order_column_map = {
+                            "timestamp": "MAX(timestamp)",
+                            "from_node_id": "from_node_id",
+                            "to_node_id": "to_node_id",
+                            "gateway_id": "COUNT(DISTINCT gateway_id)",
+                            "gateway_count": "COUNT(DISTINCT gateway_id)",
+                            "rssi": "MAX(rssi)",
+                            "snr": "MAX(snr)",
+                            "hop_count": "MIN(hop_start - hop_limit)",
+                            "payload_length": "AVG(payload_length)",
+                        }
+                        order_sql = order_column_map.get(order_by, "MAX(timestamp)")
+                        order_dir_sql = "DESC" if order_dir.lower() == "desc" else "ASC"
 
-                    # Success indicator
-                    aggregated["success"] = aggregated["processed_successfully"]
+                        # Stage 1: Get the exact slice of groups for this page
+                        group_slice_query = f"""
+                            SELECT mesh_packet_id, from_node_id, to_node_id
+                            FROM packet_history
+                            {where_clause}
+                            GROUP BY mesh_packet_id, from_node_id, to_node_id
+                            ORDER BY {order_sql} {order_dir_sql}
+                            LIMIT ? OFFSET ?
+                        """
+                        cursor.execute(group_slice_query, params + [limit, offset])
+                        page_group_rows = cursor.fetchall()
 
-                    # Enhanced route display using TraceroutePacket
-                    aggregated["route"] = None
-                    aggregated["route_display"] = "No route data"
-                    if aggregated.get("raw_payload"):
-                        try:
-                            from ..models.traceroute import TraceroutePacket
-
-                            tr_packet = TraceroutePacket(aggregated, resolve_names=True)
-                            if tr_packet.route_data["route_nodes"]:
-                                aggregated["route"] = json.dumps(
-                                    tr_packet.route_data["route_nodes"]
+                        if not page_group_rows:
+                            packets = []
+                        else:
+                            page_group_keys = [
+                                (
+                                    r["mesh_packet_id"]
+                                    if isinstance(r, dict)
+                                    else r[0],
+                                    r["from_node_id"] if isinstance(r, dict) else r[1],
+                                    r["to_node_id"] if isinstance(r, dict) else r[2],
                                 )
-                                # Get enhanced route display with node names
-                                aggregated["route_display"] = (
-                                    tr_packet.format_path_display("display")
+                                for r in page_group_rows
+                            ]
+                            page_mesh_ids = list({key[0] for key in page_group_keys})
+                            placeholders = ",".join("?" for _ in page_mesh_ids)
+
+                            # Stage 2: Fetch only individual receptions for the current page
+                            receptions_query = f"""
+                                SELECT
+                                    id, timestamp, from_node_id, to_node_id, gateway_id,
+                                    channel_id, hop_start, hop_limit, rssi, snr, payload_length, raw_payload,
+                                    processed_successfully, mesh_packet_id,
+                                    datetime(timestamp, 'unixepoch') as timestamp_str
+                                FROM packet_history
+                                WHERE mesh_packet_id IN ({placeholders}) AND portnum_name = 'TRACEROUTE_APP'
+                                ORDER BY timestamp DESC
+                            """
+                            cursor.execute(receptions_query, page_mesh_ids)
+                            individual_packets = [
+                                dict(row) for row in cursor.fetchall()
+                            ]
+
+                            groups: dict[
+                                tuple[Any, Any, Any], list[dict[str, Any]]
+                            ] = {}
+                            for packet in individual_packets:
+                                if not packet.get("mesh_packet_id") or not packet.get(
+                                    "from_node_id"
+                                ):
+                                    continue
+                                g_key = (
+                                    packet["mesh_packet_id"],
+                                    packet["from_node_id"],
+                                    packet["to_node_id"],
                                 )
-                        except Exception as e:
-                            logger.debug(
-                                f"Failed to parse route for grouped packet {aggregated['id']}: {e}"
-                            )
+                                if g_key not in groups:
+                                    groups[g_key] = []
+                                groups[g_key].append(packet)
 
-                    aggregated_packets.append(aggregated)
+                            aggregated_by_key = {
+                                g_key: TracerouteRepository._aggregate_group_packets(
+                                    p_list
+                                )
+                                for g_key, p_list in groups.items()
+                            }
 
-                if needs_route_filtering:
+                            packets = [
+                                aggregated_by_key[key]
+                                for key in page_group_keys
+                                if key in aggregated_by_key
+                            ]
+
+                else:
+                    # Fallback for route_node filter (requires decoding raw_payload protobufs)
+                    fetch_limit = 50000
+                    query = f"""
+                        SELECT
+                            id, timestamp, from_node_id, to_node_id, gateway_id,
+                            channel_id, hop_start, hop_limit, rssi, snr, payload_length, raw_payload,
+                            processed_successfully, mesh_packet_id,
+                            datetime(timestamp, 'unixepoch') as timestamp_str
+                        FROM packet_history
+                        {where_clause}
+                        ORDER BY timestamp DESC
+                        LIMIT ?
+                    """
+                    cursor.execute(query, params + [fetch_limit])
+                    individual_packets = [dict(row) for row in cursor.fetchall()]
+
+                    groups = {}
+                    for packet in individual_packets:
+                        if not packet.get("mesh_packet_id") or not packet.get(
+                            "from_node_id"
+                        ):
+                            continue
+                        g_key = (
+                            packet["mesh_packet_id"],
+                            packet["from_node_id"],
+                            packet["to_node_id"],
+                        )
+                        if g_key not in groups:
+                            groups[g_key] = []
+                        groups[g_key].append(packet)
+
+                    aggregated_packets = [
+                        TracerouteRepository._aggregate_group_packets(p_list)
+                        for p_list in groups.values()
+                    ]
+
                     filtered_packets: list[dict[str, Any]] = []
                     for packet in aggregated_packets:
-                        # Direct match on source/destination
                         if (
                             packet.get("from_node_id") == route_node_filter
                             or packet.get("to_node_id") == route_node_filter
@@ -3697,8 +3767,6 @@ class TracerouteRepository:
                             filtered_packets.append(packet)
                             continue
 
-                        # Attempt to match within the hop route
-                        # Prefer already extracted route information if available
                         route_nodes: list[int] | None = None
                         if packet.get("route"):
                             try:
@@ -3708,7 +3776,6 @@ class TracerouteRepository:
                             except Exception:
                                 route_nodes = None
 
-                        # If not available, fall back to parsing the raw payload
                         if route_nodes is None and packet.get("raw_payload"):
                             try:
                                 from ..models.traceroute import TraceroutePacket as _TRP
@@ -3724,67 +3791,44 @@ class TracerouteRepository:
                         if route_nodes and route_node_filter in route_nodes:
                             filtered_packets.append(packet)
 
-                    aggregated_packets = filtered_packets
-                    # For grouped queries we can now set an accurate total_count
-                    total_count = len(aggregated_packets)
+                    total_count = len(filtered_packets)
 
-                # Apply sorting to aggregated packets
-                reverse_sort = order_dir.lower() == "desc"
-
-                if order_by == "gateway_id" or order_by == "gateway_count":
-                    # Sort by gateway count
-                    aggregated_packets.sort(
-                        key=lambda x: x["gateway_count"], reverse=reverse_sort
-                    )
-                elif order_by == "timestamp":
-                    aggregated_packets.sort(
-                        key=lambda x: x["timestamp"], reverse=reverse_sort
-                    )
-                elif order_by == "from_node_id":
-                    aggregated_packets.sort(
-                        key=lambda x: x.get("from_node_id", 0), reverse=reverse_sort
-                    )
-                elif order_by == "to_node_id":
-                    aggregated_packets.sort(
-                        key=lambda x: x.get("to_node_id", 0), reverse=reverse_sort
-                    )
-                elif order_by == "rssi":
-                    aggregated_packets.sort(
-                        key=lambda x: x.get("min_rssi", -999), reverse=reverse_sort
-                    )
-                elif order_by == "snr":
-                    aggregated_packets.sort(
-                        key=lambda x: x.get("min_snr", -999), reverse=reverse_sort
-                    )
-                elif order_by == "hop_count":
-                    aggregated_packets.sort(
-                        key=lambda x: x.get("min_hops", 999), reverse=reverse_sort
-                    )
-                elif order_by == "payload_length":
-                    aggregated_packets.sort(
-                        key=lambda x: x.get("avg_payload_length", 0),
-                        reverse=reverse_sort,
-                    )
-                else:
-                    # Default to timestamp
-                    aggregated_packets.sort(
-                        key=lambda x: x["timestamp"], reverse=reverse_sort
-                    )
-
-                # Apply pagination
-                packets = aggregated_packets[offset : offset + limit]
-
-                # Handle None total_count for grouped queries
-                if total_count is None:
-                    # Estimate total_count based on results for grouped queries
-                    if len(packets) == limit:
-                        total_count = (
-                            offset + limit + 1
-                        )  # Estimate at least one more page
+                    reverse_sort = order_dir.lower() == "desc"
+                    if order_by in ("gateway_id", "gateway_count"):
+                        filtered_packets.sort(
+                            key=lambda x: x["gateway_count"], reverse=reverse_sort
+                        )
+                    elif order_by == "from_node_id":
+                        filtered_packets.sort(
+                            key=lambda x: x.get("from_node_id", 0), reverse=reverse_sort
+                        )
+                    elif order_by == "to_node_id":
+                        filtered_packets.sort(
+                            key=lambda x: x.get("to_node_id", 0), reverse=reverse_sort
+                        )
+                    elif order_by == "rssi":
+                        filtered_packets.sort(
+                            key=lambda x: x.get("min_rssi", -999), reverse=reverse_sort
+                        )
+                    elif order_by == "snr":
+                        filtered_packets.sort(
+                            key=lambda x: x.get("min_snr", -999), reverse=reverse_sort
+                        )
+                    elif order_by == "hop_count":
+                        filtered_packets.sort(
+                            key=lambda x: x.get("min_hops", 999), reverse=reverse_sort
+                        )
+                    elif order_by == "payload_length":
+                        filtered_packets.sort(
+                            key=lambda x: x.get("avg_payload_length", 0),
+                            reverse=reverse_sort,
+                        )
                     else:
-                        total_count = offset + len(
-                            packets
-                        )  # Exact count for partial page
+                        filtered_packets.sort(
+                            key=lambda x: x["timestamp"], reverse=reverse_sort
+                        )
+
+                    packets = filtered_packets[offset : offset + limit]
 
             else:
                 # Original ungrouped behavior
