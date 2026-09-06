@@ -344,65 +344,79 @@ class TestGatewaySortingAPI:
         mock_conn.cursor.return_value = mock_cursor
 
         # Mock the database query results
-        # First call: total count query (returns count as tuple/row)
-        # Second call: no longer used (removed sample count estimation)
+        # Count query returns the total unique groups (2)
         mock_cursor.fetchone.side_effect = [
             (2,),  # Total count query result
         ]
 
-        # Mock the main query results - individual packets that will be grouped in memory
-        # These represent individual packet records, not pre-grouped results
-        mock_cursor.fetchall.return_value = [
-            # First group: mesh_packet_id="trace123" with 1 gateway
-            {
-                "id": 1,
-                "timestamp": 1000,
-                "from_node_id": 123,
-                "to_node_id": 456,
-                "mesh_packet_id": "trace123",
-                "gateway_id": "!433d0c24",
-                "hop_start": 3,
-                "hop_limit": 1,
-                "rssi": -80,
-                "snr": 5,
-                "payload_length": 50,
-                "processed_successfully": 1,
-                "timestamp_str": "2024-01-01 12:00:00",
-                "raw_payload": b"test",
-            },
-            # Second group: mesh_packet_id="trace456" with 2 gateways (2 individual records)
-            {
-                "id": 2,
-                "timestamp": 2000,
-                "from_node_id": 789,
-                "to_node_id": 456,
-                "mesh_packet_id": "trace456",
-                "gateway_id": "!433d0c24",
-                "hop_start": 4,
-                "hop_limit": 3,
-                "rssi": -75,
-                "snr": 8,
-                "payload_length": 75,
-                "processed_successfully": 1,
-                "timestamp_str": "2024-01-01 12:01:00",
-                "raw_payload": b"test2",
-            },
-            {
-                "id": 3,
-                "timestamp": 2001,
-                "from_node_id": 789,
-                "to_node_id": 456,
-                "mesh_packet_id": "trace456",  # Same mesh_packet_id as above
-                "gateway_id": "!da73e9cc",  # Different gateway
-                "hop_start": 2,
-                "hop_limit": 1,
-                "rssi": -70,
-                "snr": 10,
-                "payload_length": 75,
-                "processed_successfully": 1,
-                "timestamp_str": "2024-01-01 12:01:01",
-                "raw_payload": b"test2_longer",  # Longer payload to test best selection
-            },
+        # In two-stage grouping:
+        # Stage 1: Group slice query returns unique (mesh_packet_id, from_node_id, to_node_id) rows
+        # Stage 2: Receptions query returns individual packet records for the current page
+        mock_cursor.fetchall.side_effect = [
+            [
+                {
+                    "mesh_packet_id": "trace123",
+                    "from_node_id": 123,
+                    "to_node_id": 456,
+                },
+                {
+                    "mesh_packet_id": "trace456",
+                    "from_node_id": 789,
+                    "to_node_id": 456,
+                },
+            ],
+            [
+                # First group: mesh_packet_id="trace123" with 1 gateway
+                {
+                    "id": 1,
+                    "timestamp": 1000,
+                    "from_node_id": 123,
+                    "to_node_id": 456,
+                    "mesh_packet_id": "trace123",
+                    "gateway_id": "!433d0c24",
+                    "hop_start": 3,
+                    "hop_limit": 1,
+                    "rssi": -80,
+                    "snr": 5,
+                    "payload_length": 50,
+                    "processed_successfully": 1,
+                    "timestamp_str": "2024-01-01 12:00:00",
+                    "raw_payload": b"test",
+                },
+                # Second group: mesh_packet_id="trace456" with 2 gateways (2 individual records)
+                {
+                    "id": 2,
+                    "timestamp": 2000,
+                    "from_node_id": 789,
+                    "to_node_id": 456,
+                    "mesh_packet_id": "trace456",
+                    "gateway_id": "!433d0c24",
+                    "hop_start": 4,
+                    "hop_limit": 3,
+                    "rssi": -75,
+                    "snr": 8,
+                    "payload_length": 75,
+                    "processed_successfully": 1,
+                    "timestamp_str": "2024-01-01 12:01:00",
+                    "raw_payload": b"test2",
+                },
+                {
+                    "id": 3,
+                    "timestamp": 2001,
+                    "from_node_id": 789,
+                    "to_node_id": 456,
+                    "mesh_packet_id": "trace456",  # Same mesh_packet_id as above
+                    "gateway_id": "!da73e9cc",  # Different gateway
+                    "hop_start": 2,
+                    "hop_limit": 1,
+                    "rssi": -70,
+                    "snr": 10,
+                    "payload_length": 75,
+                    "processed_successfully": 1,
+                    "timestamp_str": "2024-01-01 12:01:01",
+                    "raw_payload": b"test2_longer",  # Longer payload to test best selection
+                },
+            ],
         ]
 
         with patch(
