@@ -19,6 +19,18 @@ class RouteData(TypedDict):
     snr_back: list[float]
 
 
+def decode_traceroute_payload(raw_payload: bytes) -> RouteData:
+    """Decode RouteDiscovery, raising on malformed payloads instead of hiding them."""
+    route_discovery = mesh_pb2.RouteDiscovery()
+    route_discovery.ParseFromString(raw_payload)
+    return RouteData(
+        route_nodes=list(route_discovery.route),
+        snr_towards=[snr / 4.0 for snr in route_discovery.snr_towards],
+        route_back=list(route_discovery.route_back),
+        snr_back=[snr / 4.0 for snr in route_discovery.snr_back],
+    )
+
+
 def parse_traceroute_payload(raw_payload: bytes) -> RouteData:
     """
     Parse traceroute payload from raw bytes using protobuf parsing.
@@ -44,18 +56,7 @@ def parse_traceroute_payload(raw_payload: bytes) -> RouteData:
         return RouteData(route_nodes=[], snr_towards=[], route_back=[], snr_back=[])
 
     try:
-        # Try protobuf parsing
-        route_discovery = mesh_pb2.RouteDiscovery()
-        route_discovery.ParseFromString(raw_payload)
-
-        result = RouteData(
-            route_nodes=[int(node_id) for node_id in route_discovery.route],
-            # Convert SNR from scaled integer to actual dB (divide by 4)
-            snr_towards=[float(snr) / 4.0 for snr in route_discovery.snr_towards],
-            route_back=[int(node_id) for node_id in route_discovery.route_back],
-            # Convert SNR from scaled integer to actual dB (divide by 4)
-            snr_back=[float(snr) / 4.0 for snr in route_discovery.snr_back],
-        )
+        result = decode_traceroute_payload(raw_payload)
 
         logger.debug(
             f"Protobuf parsing successful: {len(result['route_nodes'])} nodes, "
