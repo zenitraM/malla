@@ -38,6 +38,7 @@ import socket
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -59,6 +60,7 @@ from malla.config import get_config  # Import here to avoid circular import issu
 
 from .database.connection import seed_query_planner_stats_async
 from .database.schema import ensure_startup_schema
+from .database.traceroutes import write_traceroute
 
 # Load the singleton configuration once at module import time.  This ensures the
 # capture tool honours the same YAML + optional environment override mechanism
@@ -846,10 +848,10 @@ def log_packet_to_database(
     relay_node = getattr(mesh_packet, "relay_node", None) if mesh_packet else None
     tx_after = getattr(mesh_packet, "tx_after", None) if mesh_packet else None
 
-    with db_lock:
-        conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
+    with db_lock, closing(sqlite3.connect(DATABASE_FILE, timeout=30.0)) as conn, conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
 
         cursor.execute(
             """
@@ -894,8 +896,21 @@ def log_packet_to_database(
             ),
         )
 
-        conn.commit()
-        conn.close()
+        if portnum == portnums_pb2.PortNum.TRACEROUTE_APP:
+            write_traceroute(
+                cursor,
+                {
+                    "id": cursor.lastrowid,
+                    "timestamp": current_time,
+                    "mesh_packet_id": mesh_packet_id,
+                    "from_node_id": from_node_id,
+                    "to_node_id": to_node_id,
+                    "channel_id": channel_id,
+                    "hop_start": hop_start,
+                    "hop_limit": hop_limit,
+                    "raw_payload": raw_payload,
+                },
+            )
 
 
 def get_packet_history(
@@ -945,6 +960,7 @@ def cleanup_old_data() -> None:
         conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
 
         try:
             # Delete old packet history records
