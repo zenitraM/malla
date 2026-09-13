@@ -186,7 +186,10 @@ class LocationService:
                 }
             )
 
-        # Get direct packet links to include in neighbor data
+        # Track latest direct packet reception timestamp per node
+        packet_last_seen: dict[int, float] = {}
+
+        # Process packet links to add to neighbor details
         try:
             # Use pre-computed packet links if provided, otherwise fetch them
             if packet_links is None:
@@ -206,6 +209,12 @@ class LocationService:
                 from_node_id = link["from_node_id"]
                 to_node_id = link["to_node_id"]
                 packet_count = link.get("total_hops_seen", 0)
+                link_ts = link.get("last_seen")
+                if link_ts:
+                    if from_node_id not in packet_last_seen or link_ts > packet_last_seen[from_node_id]:
+                        packet_last_seen[from_node_id] = link_ts
+                    if to_node_id not in packet_last_seen or link_ts > packet_last_seen[to_node_id]:
+                        packet_last_seen[to_node_id] = link_ts
 
                 # Initialize neighbor tracking if not already present
                 if from_node_id not in neighbor_counts:
@@ -280,17 +289,32 @@ class LocationService:
         for location in locations:
             node_id = location["node_id"]
 
-            # Calculate age in hours
-            age_hours = (current_time - location["timestamp"]) / 3600
-
-            # Format timestamp string
-            timestamp_dt = datetime.fromtimestamp(location["timestamp"], UTC)
-            timestamp_str = timestamp_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
-
             # Get network data for this node
             network_node = network_nodes.get(node_id, {})
             direct_neighbors = neighbor_counts.get(node_id, 0)
             neighbors = neighbor_details.get(node_id, [])
+
+            network_last_seen = network_node.get("last_seen")
+            pkt_last_seen = packet_last_seen.get(node_id)
+
+            # Unified active timestamp: node is active if it broadcast position,
+            # participated in a traceroute RF hop, or exchanged direct packets.
+            active_candidates = [location["timestamp"]]
+            if network_last_seen:
+                active_candidates.append(network_last_seen)
+            if pkt_last_seen:
+                active_candidates.append(pkt_last_seen)
+            active_timestamp = max(active_candidates)
+
+            # Calculate age in hours relative to the latest active timestamp
+            age_hours = (current_time - active_timestamp) / 3600
+
+            # Format timestamp strings
+            timestamp_dt = datetime.fromtimestamp(active_timestamp, UTC)
+            timestamp_str = timestamp_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+            pos_dt = datetime.fromtimestamp(location["timestamp"], UTC)
+            pos_str = pos_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
             enhanced_location = {
                 # Original location data
@@ -305,7 +329,9 @@ class LocationService:
                 "latitude": location["latitude"],
                 "longitude": location["longitude"],
                 "altitude": location["altitude"],
-                "timestamp": location["timestamp"],
+                "timestamp": active_timestamp,
+                "position_timestamp": location["timestamp"],
+                "position_timestamp_str": pos_str,
                 # Enhanced fields for map display
                 "age_hours": round(age_hours, 2),
                 "timestamp_str": timestamp_str,
@@ -317,7 +343,8 @@ class LocationService:
                 # Network analysis data
                 "packet_count": network_node.get("packet_count", 0),
                 "avg_snr": network_node.get("avg_snr"),
-                "last_seen_network": network_node.get("last_seen"),
+                "last_seen_network": network_last_seen,
+                "last_seen_packet": pkt_last_seen,
             }
 
             enhanced_locations.append(enhanced_location)

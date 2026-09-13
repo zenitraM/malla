@@ -1543,12 +1543,20 @@ class TestTracerouteFilters:
             api_data = response.json()
             assert "data" in api_data, "API response should contain data field"
 
-            # Verify API results contain the route node
+            # Verify API results contain the route node anywhere in the path
             for item in api_data["data"]:
                 route_nodes = item.get("route_nodes", [])
-                assert int(route_node_id) in route_nodes, (
-                    f"API result should contain route_node {route_node_id}, got {route_nodes}"
+                all_path_nodes = set(route_nodes) | {
+                    item.get("from_node_id"),
+                    item.get("to_node_id"),
+                }
+                assert int(route_node_id) in all_path_nodes, (
+                    f"API result should contain route_node {route_node_id} anywhere in route path, got {all_path_nodes}"
                 )
+
+            # Verify frontend table shows filtered results
+            filtered_rows = page.locator("#tracerouteTable tbody tr").count()
+            assert filtered_rows > 0, "Should have filtered results"
 
     def test_traceroute_gateway_filter_e2e(self, page: Page, test_server_url: str):
         """Test that the gateway filter works end-to-end."""
@@ -2209,4 +2217,24 @@ class TestTracerouteFilters:
         """)
         assert has_methods, "URL manager should have required methods"
 
-        assert has_methods, "URL manager should have required methods"
+    def test_traceroute_pagination_visibility(
+        self, page: Page, test_server_url: str
+    ):
+        """Test that pagination controls remain visible in viewport."""
+        page.set_viewport_size({"width": 1280, "height": 800})
+        page.goto(f"{test_server_url}/traceroute")
+
+        # Wait for table to load
+        page.wait_for_selector("#tracerouteTable .modern-pagination", timeout=10000)
+
+        # Verify pagination is fully inside the viewport
+        pagination_locator = page.locator("#tracerouteTable .modern-pagination")
+        expect(pagination_locator).to_be_visible()
+        pag_box = pagination_locator.bounding_box()
+        assert pag_box is not None
+        assert pag_box["y"] + pag_box["height"] <= 800.5, (
+            f"Pagination bottom ({pag_box['y'] + pag_box['height']}) must not exceed viewport height (800)"
+        )
+
+        # Verify pagination navigation buttons exist and are visible
+        expect(page.locator(".pagination-btn").first).to_be_visible()

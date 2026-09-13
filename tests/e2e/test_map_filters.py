@@ -88,8 +88,9 @@ class TestMapFilters:
         assert len(location_requests) == 0, "Role filtering should be client-side only"
 
     @pytest.mark.e2e
-    def test_client_side_age_filtering(self, page: Page, test_server_url):
-        """Test that age filtering works on client-side without server requests."""
+    def test_age_filter_triggers_window_reload(self, page: Page, test_server_url):
+        """Age filtering reloads /api/locations so the server aggregates links
+        over the selected window instead of showing multi-day totals."""
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
@@ -116,9 +117,14 @@ class TestMapFilters:
         # Wait for filtering to complete
         page.wait_for_timeout(2000)
 
-        # Check that no new API requests were made to /api/locations
-        location_requests = [req for req in requests if "/api/locations" in req]
-        assert len(location_requests) == 0, "Age filtering should be client-side only"
+        # A new /api/locations request carrying the 1-hour window must have
+        # been made so link metrics are recomputed server-side
+        location_requests = [
+            req for req in requests if "/api/locations" in req and "start_time=" in req
+        ]
+        assert len(location_requests) >= 1, (
+            "Age filtering must reload /api/locations with a start_time parameter"
+        )
 
         # Verify filtering worked
         filtered_count = page.locator("#nodeCount").text_content()
@@ -129,13 +135,13 @@ class TestMapFilters:
 
     @pytest.mark.e2e
     def test_filter_reset_functionality(self, page: Page, test_server_url):
-        """Test that filters can be reset to show all data."""
+        """Test that filters can be reset and re-applied to show the same data."""
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
         page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
-        # Get initial counts
+        # Get initial counts (default max age is 24 hours)
         initial_node_count = page.locator("#nodeCount").text_content()
         initial_link_count = page.locator("#statsLinks").text_content()
 
@@ -150,13 +156,18 @@ class TestMapFilters:
         apply_button.click()
         page.wait_for_timeout(2000)
 
-        # Reset filters
+        # Reset filters (No Limit covers the full 14-day server window)
         age_filter.select_option("")
         role_filter.select_option("")
         apply_button.click()
         page.wait_for_timeout(2000)
 
-        # Verify counts return to initial values
+        # Re-apply the original 24-hour window; counts should return to the
+        # initial values now that the same aggregation window is loaded
+        age_filter.select_option("24")
+        apply_button.click()
+        page.wait_for_timeout(2000)
+
         final_node_count = page.locator("#nodeCount").text_content()
         final_link_count = page.locator("#statsLinks").text_content()
 
