@@ -6,6 +6,7 @@ scattered across templates, APIs, and utility functions. It provides a consisten
 interface for analyzing traceroute packets and extracting path information.
 """
 
+import json
 import logging
 import math
 from dataclasses import dataclass
@@ -105,6 +106,17 @@ class TraceroutePacket:
         self.to_node_name: str | None = None
 
         # Parse (or accept pre-parsed) traceroute payload
+        if pre_parsed_route_data is None:
+            try:
+                pre_parsed_route_data = RouteData(
+                    route_nodes=json.loads(packet_data["route_nodes_json"]),
+                    snr_towards=json.loads(packet_data["snr_towards_json"]),
+                    route_back=json.loads(packet_data["route_back_json"]),
+                    snr_back=json.loads(packet_data["snr_back_json"]),
+                )
+            except (KeyError, TypeError, json.JSONDecodeError):
+                pass
+
         if pre_parsed_route_data is not None:
             self.route_data = pre_parsed_route_data
         else:

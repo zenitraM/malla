@@ -4,6 +4,39 @@ Geographic utility functions for Meshtastic Mesh Health Web UI
 
 import math
 
+# Positions within this radius of (0, 0) are treated as firmware garbage.
+# (0, 0) lies in the Atlantic Ocean ~600 km from the nearest coast, so real
+# nodes are never affected. Firmware bugs emit near-zero coordinates (e.g.
+# 0.00012, -0.003) instead of exactly (0, 0), which dodge simple == 0 checks.
+NULL_ISLAND_RADIUS_KM = 50.0
+
+
+def is_valid_position(latitude: float | None, longitude: float | None) -> bool:
+    """
+    Check whether decoded coordinates represent a plausible real location.
+
+    Rejects missing values, non-finite numbers, out-of-range coordinates, and
+    positions near "null island" (0, 0) produced by firmware bugs.
+
+    Args:
+        latitude: Latitude in decimal degrees (or None if unset)
+        longitude: Longitude in decimal degrees (or None if unset)
+
+    Returns:
+        True if the position is plausible and safe to use.
+    """
+    if latitude is None or longitude is None:
+        return False
+    if not (math.isfinite(latitude) and math.isfinite(longitude)):
+        return False
+    if not -90.0 <= latitude <= 90.0:
+        return False
+    if not -180.0 <= longitude <= 180.0:
+        return False
+    if calculate_distance(latitude, longitude, 0.0, 0.0) < NULL_ISLAND_RADIUS_KM:
+        return False
+    return True
+
 
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """

@@ -79,17 +79,20 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
         has_envelope_col = PacketRepository.has_raw_service_envelope_column(cursor)
 
         # Get the main packet information
-        env_col = ", raw_service_envelope" if has_envelope_col else ""
+        env_col = ", p.raw_service_envelope" if has_envelope_col else ""
         cursor.execute(
             f"""
             SELECT
-                id, timestamp, from_node_id, to_node_id, portnum, portnum_name,
-                gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_limit, hop_start,
-                payload_length, processed_successfully, raw_payload,
-                via_mqtt, want_ack, priority, delayed, channel_index, rx_time,
-                pki_encrypted, next_hop, relay_node, tx_after{env_col}
-            FROM packet_history
-            WHERE id = ?
+                p.id, p.timestamp, p.from_node_id, p.to_node_id, p.portnum, p.portnum_name,
+                p.gateway_id, p.channel_id, p.mesh_packet_id, p.rssi, p.snr, p.hop_limit, p.hop_start,
+                p.payload_length, p.processed_successfully, p.raw_payload,
+                p.via_mqtt, p.want_ack, p.priority, p.delayed, p.channel_index, p.rx_time,
+                p.pki_encrypted, p.next_hop, p.relay_node, p.tx_after{env_col},
+                r.route_nodes_json, r.snr_towards_json, r.route_back_json, r.snr_back_json,
+                r.parse_status, r.parse_error
+            FROM packet_history p
+            LEFT JOIN traceroute_routes r ON r.packet_id = p.id
+            WHERE p.id = ?
         """,
             (packet_id,),
         )
@@ -167,14 +170,17 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
             cursor.execute(
                 """
                 SELECT
-                    id, timestamp, gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
-                    payload_length, processed_successfully,
-                    raw_payload, from_node_id, to_node_id, portnum, portnum_name, relay_node,
-                    mesh_packet_id
-                FROM packet_history
-                WHERE mesh_packet_id = ?
-                AND id != ?
-                ORDER BY timestamp ASC
+                    p.id, p.timestamp, p.gateway_id, p.channel_id, p.rssi, p.snr, p.hop_limit, p.hop_start,
+                    p.payload_length, p.processed_successfully,
+                    p.raw_payload, p.from_node_id, p.to_node_id, p.portnum, p.portnum_name, p.relay_node,
+                    p.mesh_packet_id,
+                    r.route_nodes_json, r.snr_towards_json, r.route_back_json, r.snr_back_json,
+                    r.parse_status, r.parse_error
+                FROM packet_history p
+                LEFT JOIN traceroute_routes r ON r.packet_id = p.id
+                WHERE p.mesh_packet_id = ?
+                AND p.id != ?
+                ORDER BY p.timestamp ASC
             """,
                 (packet["mesh_packet_id"], packet_id),
             )
@@ -188,16 +194,19 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
             cursor.execute(
                 """
                 SELECT
-                    id, timestamp, gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
-                    payload_length, processed_successfully,
-                    raw_payload, from_node_id, to_node_id, portnum, portnum_name, relay_node,
-                    mesh_packet_id
-                FROM packet_history
-                WHERE from_node_id = ?
-                AND timestamp BETWEEN ? AND ?
-                AND portnum = ?
-                AND id != ?
-                ORDER BY timestamp ASC
+                    p.id, p.timestamp, p.gateway_id, p.channel_id, p.rssi, p.snr, p.hop_limit, p.hop_start,
+                    p.payload_length, p.processed_successfully,
+                    p.raw_payload, p.from_node_id, p.to_node_id, p.portnum, p.portnum_name, p.relay_node,
+                    p.mesh_packet_id,
+                    r.route_nodes_json, r.snr_towards_json, r.route_back_json, r.snr_back_json,
+                    r.parse_status, r.parse_error
+                FROM packet_history p
+                LEFT JOIN traceroute_routes r ON r.packet_id = p.id
+                WHERE p.from_node_id = ?
+                AND p.timestamp BETWEEN ? AND ?
+                AND p.portnum = ?
+                AND p.id != ?
+                ORDER BY p.timestamp ASC
             """,
                 (
                     packet["from_node_id"],
@@ -520,6 +529,80 @@ def decode_packet_payload(packet: dict[str, Any]) -> dict[str, Any] | None:
             "text": None,
             "error": None,
         }
+
+        # For TRACEROUTE_APP: use pre-parsed route data from traceroute_routes if available
+        if packet.get("portnum_name") == "TRACEROUTE_APP":
+            parse_status = packet.get("parse_status")
+            if parse_status == "invalid_payload":
+                payload_info["decoded"] = False
+                payload_info["error"] = packet.get("parse_error") or "Invalid traceroute payload"
+                return payload_info
+
+            if packet.get("route_nodes_json") is not None:
+                try:
+                    tr_packet = TraceroutePacket(packet, resolve_names=True)
+                    tr_packet.calculate_hop_distances(calculate_for_all_paths=True)
+                    forward_hops_with_distances = (
+                        tr_packet.get_display_hops_with_distances()
+                    )
+                    return_hops_with_distances = (
+                        tr_packet.get_return_hops_with_distances()
+                    )
+
+                    payload_info["decoded"] = True
+                    payload_info["data"] = {
+                        "route_nodes": tr_packet.route_data["route_nodes"],
+                        "snr_towards": tr_packet.route_data["snr_towards"],
+                        "route_back": tr_packet.route_data["route_back"],
+                        "snr_back": tr_packet.route_data["snr_back"],
+                        "route_node_names": {},
+                        "traceroute_packet": tr_packet,
+                        "has_return_path": tr_packet.has_return_path(),
+                        "is_complete": tr_packet.is_complete(),
+                        "forward_path_display": tr_packet.format_path_display("display"),
+                        "return_path_display": tr_packet.format_path_display("return")
+                        if tr_packet.has_return_path()
+                        else None,
+                        "actual_rf_path_display": tr_packet.format_path_display("actual_rf"),
+                        "forward_hops": forward_hops_with_distances,
+                        "return_hops": return_hops_with_distances,
+                        "total_forward_distance": sum(
+                            hop.distance_meters
+                            for hop in forward_hops_with_distances
+                            if hop.distance_meters is not None
+                        )
+                        if forward_hops_with_distances
+                        else None,
+                        "total_return_distance": sum(
+                            hop.distance_meters
+                            for hop in return_hops_with_distances
+                            if hop.distance_meters is not None
+                        )
+                        if return_hops_with_distances
+                        else None,
+                        "parse_status": parse_status,
+                        "parse_error": packet.get("parse_error"),
+                    }
+
+                    all_route_nodes = set()
+                    if tr_packet.route_data["route_nodes"]:
+                        all_route_nodes.update(tr_packet.route_data["route_nodes"])
+                    if tr_packet.route_data["route_back"]:
+                        all_route_nodes.update(tr_packet.route_data["route_back"])
+                    if packet.get("from_node_id"):
+                        all_route_nodes.add(packet["from_node_id"])
+                    if packet.get("to_node_id"):
+                        all_route_nodes.add(packet["to_node_id"])
+
+                    if all_route_nodes:
+                        route_node_names = get_bulk_node_names(list(all_route_nodes))
+                        payload_info["data"]["route_node_names"] = route_node_names
+
+                    return payload_info
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to decode traceroute using materialized data for packet {packet.get('id')}: {e}"
+                    )
 
         # Use the new generic protobuf decoding system
         decoded_payload = decode_protobuf_payload(packet)
