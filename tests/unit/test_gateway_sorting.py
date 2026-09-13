@@ -337,77 +337,12 @@ class TestGatewaySortingAPI:
         assert packets[2]["mesh_packet_id"] == "abc123"
 
     def test_traceroute_repository_gateway_sorting_asc(self):
-        """Test that TracerouteRepository sorts by gateway_count in ascending order when requested."""
-        # Mock database connection and cursor
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_conn.cursor.return_value = mock_cursor
-
-        # Mock the database query results
-        # First call: total count query (returns count as tuple/row)
-        # Second call: no longer used (removed sample count estimation)
-        mock_cursor.fetchone.side_effect = [
-            (2,),  # Total count query result
-        ]
-
-        # Mock the main query results - individual packets that will be grouped in memory
-        # These represent individual packet records, not pre-grouped results
-        mock_cursor.fetchall.return_value = [
-            # First group: mesh_packet_id="trace123" with 1 gateway
-            {
-                "id": 1,
-                "timestamp": 1000,
-                "from_node_id": 123,
-                "to_node_id": 456,
-                "mesh_packet_id": "trace123",
-                "gateway_id": "!433d0c24",
-                "hop_start": 3,
-                "hop_limit": 1,
-                "rssi": -80,
-                "snr": 5,
-                "payload_length": 50,
-                "processed_successfully": 1,
-                "timestamp_str": "2024-01-01 12:00:00",
-                "raw_payload": b"test",
-            },
-            # Second group: mesh_packet_id="trace456" with 2 gateways (2 individual records)
-            {
-                "id": 2,
-                "timestamp": 2000,
-                "from_node_id": 789,
-                "to_node_id": 456,
-                "mesh_packet_id": "trace456",
-                "gateway_id": "!433d0c24",
-                "hop_start": 4,
-                "hop_limit": 3,
-                "rssi": -75,
-                "snr": 8,
-                "payload_length": 75,
-                "processed_successfully": 1,
-                "timestamp_str": "2024-01-01 12:01:00",
-                "raw_payload": b"test2",
-            },
-            {
-                "id": 3,
-                "timestamp": 2001,
-                "from_node_id": 789,
-                "to_node_id": 456,
-                "mesh_packet_id": "trace456",  # Same mesh_packet_id as above
-                "gateway_id": "!da73e9cc",  # Different gateway
-                "hop_start": 2,
-                "hop_limit": 1,
-                "rssi": -70,
-                "snr": 10,
-                "payload_length": 75,
-                "processed_successfully": 1,
-                "timestamp_str": "2024-01-01 12:01:01",
-                "raw_payload": b"test2_longer",  # Longer payload to test best selection
-            },
-        ]
-
+        """The public repository delegates grouped sorting to the saved-row reader."""
+        expected = {"packets": [], "total_count": 0}
         with patch(
-            "src.malla.database.repositories.get_db_connection", return_value=mock_conn
-        ):
+            "src.malla.database.traceroute_read_repository.get_traceroute_packets",
+            return_value=expected,
+        ) as reader:
             result = TracerouteRepository.get_traceroute_packets(
                 limit=10,
                 offset=0,
@@ -416,32 +351,16 @@ class TestGatewaySortingAPI:
                 group_packets=True,
             )
 
-        # Verify results are correctly grouped and sorted by gateway count
-        packets = result["packets"]
-        assert len(packets) == 2
-
-        # First packet should have 1 gateway (ascending order)
-        assert packets[0]["gateway_count"] == 1
-        assert packets[0]["mesh_packet_id"] == "trace123"
-        assert packets[0]["gateway_list"] == "!433d0c24"
-
-        # Second packet should have 2 gateways
-        assert packets[1]["gateway_count"] == 2
-        assert packets[1]["mesh_packet_id"] == "trace456"
-        # Gateway list order may vary due to set() usage, so check both gateways are present
-        gateway_list = packets[1]["gateway_list"]
-        assert "!433d0c24" in gateway_list
-        assert "!da73e9cc" in gateway_list
-        assert gateway_list.count(",") == 1  # Exactly 2 gateways
-
-        # Verify aggregation worked correctly for the second group
-        assert packets[1]["min_rssi"] == -75
-        assert packets[1]["max_rssi"] == -70
-        assert packets[1]["min_snr"] == 8
-        assert packets[1]["max_snr"] == 10
-
-        # Verify best payload was selected (longest one)
-        assert packets[1]["raw_payload"] == b"test2_longer"
+        assert result is expected
+        reader.assert_called_once_with(
+            limit=10,
+            offset=0,
+            filters=None,
+            order_by="gateway_id",
+            order_dir="asc",
+            search=None,
+            group_packets=True,
+        )
 
 
 class TestGatewaySortingDataFormat:
