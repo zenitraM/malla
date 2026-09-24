@@ -3,6 +3,8 @@
 import logging
 import sqlite3
 
+from ..fingerprint import ensure_node_fingerprint_table
+
 logger = logging.getLogger(__name__)
 
 
@@ -128,6 +130,16 @@ LEGACY_INDEX_NAMES: tuple[str, ...] = (
 # time), so each (tz_offset, day) is computed once and reused forever; only the
 # current day is recomputed live. Without this, the "All" range re-aggregates
 # the entire multi-million-row packet_history on every view.
+# Small key/value store for one-off maintenance state (e.g. "the firmware
+# fingerprint backfill already covered history up to time T").
+MALLA_META_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS malla_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at REAL NOT NULL
+    )
+"""
+
 ACTIVITY_ROLLUP_TABLE_SQL = """
     CREATE TABLE IF NOT EXISTS activity_daily_rollup (
         tz_offset_minutes INTEGER NOT NULL,
@@ -207,6 +219,9 @@ def ensure_startup_schema(
     existing_indexes = _get_existing_indexes(cursor)
 
     cursor.execute(ACTIVITY_ROLLUP_TABLE_SQL)
+    for column in ensure_node_fingerprint_table(cursor):
+        logger.info("Added %s column to node_fingerprint table", column)
+    cursor.execute(MALLA_META_TABLE_SQL)
 
     if "node_info" in existing_tables:
         cursor.execute("PRAGMA table_info(node_info)")
@@ -214,6 +229,13 @@ def ensure_startup_schema(
         if "primary_channel" not in node_info_columns:
             cursor.execute("ALTER TABLE node_info ADD COLUMN primary_channel TEXT")
             logger.info("Added primary_channel column to node_info table")
+        # Same-device lookups (firmware 2.8 re-keys node numbers) go through
+        # the MAC; very old databases predate the column, so guard on it.
+        if "mac_address" in node_info_columns:
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_node_mac_address ON node_info(mac_address) "
+                "WHERE mac_address IS NOT NULL AND mac_address != ''"
+            )
 
     for index_name, table_name, sql in INDEX_SPECS:
         if table_name not in existing_tables or index_name in existing_indexes:

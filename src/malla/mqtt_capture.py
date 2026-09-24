@@ -43,6 +43,7 @@ from typing import Any
 import paho.mqtt.client as mqtt
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.ciphers.aead import AESCCM
 from meshtastic import (
     config_pb2,
     mesh_pb2,
@@ -59,6 +60,14 @@ from malla.config import get_config  # Import here to avoid circular import issu
 
 from .database.connection import seed_query_planner_stats_async
 from .database.schema import ensure_startup_schema
+from .fingerprint import (
+    NODE_FINGERPRINT_UPSERT_SQL,
+    FirmwareEvidence,
+    evidence_row,
+    observe_map_report,
+    observe_packet,
+    observe_user,
+)
 
 # Load the singleton configuration once at module import time.  This ensures the
 # capture tool honours the same YAML + optional environment override mechanism
@@ -84,6 +93,7 @@ DECRYPTION_KEYS: list[str] = _cfg.get_decryption_keys()
 
 # Data retention settings
 DATA_RETENTION_HOURS: int = _cfg.data_retention_hours
+FINGERPRINT_BACKFILL_DAYS: int = int(_cfg.fingerprint_backfill_days or 0)
 
 # Logging configuration – falls back to INFO if an invalid level was supplied
 LOG_LEVEL = _cfg.log_level.upper()
@@ -212,8 +222,57 @@ def decrypt_packet(
         return b""
 
 
+# Firmware 2.8.1 channels with ``use_aead`` encrypt with AES-CCM instead of
+# AES-CTR: 12-byte tag appended to the ciphertext, 13-byte nonce
+# [packet id (8, LE)][from node (4, LE)][0], and the sender/destination ids as
+# associated data. The tag makes a wrong key fail loudly, so it is safe to try
+# CCM before CTR on every packet.
+AEAD_TAG_SIZE = 12
+
+
+def decrypt_packet_ccm(
+    encrypted_payload: bytes,
+    packet_id: int,
+    sender_id: int,
+    dest_id: int,
+    key: bytes,
+) -> bytes:
+    """Decrypt an AES-CCM (``use_aead``) payload; empty bytes if the tag fails."""
+    if len(encrypted_payload) <= AEAD_TAG_SIZE or len(key) not in (16, 32):
+        return b""
+    try:
+        nonce = (
+            (packet_id & 0xFFFFFFFFFFFFFFFF).to_bytes(8, "little")
+            + (sender_id & 0xFFFFFFFF).to_bytes(4, "little")
+            + b"\x00"
+        )
+        aad = (sender_id & 0xFFFFFFFF).to_bytes(4, "little") + (
+            dest_id & 0xFFFFFFFF
+        ).to_bytes(4, "little")
+        return AESCCM(key, tag_length=AEAD_TAG_SIZE).decrypt(
+            nonce, bytes(encrypted_payload), aad
+        )
+    except Exception:  # noqa: BLE001 - InvalidTag or bad lengths: not our key
+        return b""
+
+
+def _parse_decrypted_data(decrypted_payload: bytes) -> Any | None:
+    """Parse plaintext as ``Data``; None if it does not look like one."""
+    try:
+        decoded_data = mesh_pb2.Data()
+        decoded_data.ParseFromString(decrypted_payload)
+    except Exception:  # noqa: BLE001
+        return None
+    if decoded_data.portnum == portnums_pb2.PortNum.UNKNOWN_APP:
+        return None
+    return decoded_data
+
+
 def try_decrypt_mesh_packet(
-    mesh_packet: Any, channel_name: str = "", keys_base64: list[str] | None = None
+    mesh_packet: Any,
+    channel_name: str = "",
+    keys_base64: list[str] | None = None,
+    info: dict[str, Any] | None = None,
 ) -> bool:
     """
     Try to decrypt an encrypted MeshPacket and update it with decoded content.
@@ -224,6 +283,8 @@ def try_decrypt_mesh_packet(
         mesh_packet: The MeshPacket protobuf object
         channel_name: Channel name for key derivation (empty for primary channel)
         keys_base64: List of base64-encoded encryption keys to try (uses DECRYPTION_KEYS if None)
+        info: Optional dict that receives ``method`` ("ccm" for AES-CCM
+            ``use_aead`` channels, "ctr" otherwise) on success
 
     Returns:
         bool: True if decryption was successful and packet was updated
@@ -264,42 +325,41 @@ def try_decrypt_mesh_packet(
             # Derive the decryption key
             key = derive_key_from_channel_name(channel_name, key_base64)
 
-            # Decrypt the payload
-            decrypted_payload = decrypt_packet(
-                encrypted_payload, packet_id, sender_id, key
+            # AES-CCM first: it authenticates, so a hit is never a false
+            # positive and a miss costs one small AES operation.
+            dest_id = getattr(mesh_packet, "to", 0)
+            ccm_plain = decrypt_packet_ccm(
+                encrypted_payload, packet_id, sender_id, dest_id, key
             )
-
-            if not decrypted_payload:
-                logging.debug(
-                    f"Decryption with key {key_index + 1} returned empty payload"
+            decoded_data = _parse_decrypted_data(ccm_plain) if ccm_plain else None
+            method = "ccm"
+            if decoded_data is None:
+                decrypted_payload = decrypt_packet(
+                    encrypted_payload, packet_id, sender_id, key
                 )
-                continue
-
-            # Try to parse the decrypted payload as a Data protobuf
-            try:
-                decoded_data = mesh_pb2.Data()
-                decoded_data.ParseFromString(decrypted_payload)
-
-                # Validate that we got a valid portnum (not UNKNOWN_APP)
-                if decoded_data.portnum == portnums_pb2.PortNum.UNKNOWN_APP:
+                if not decrypted_payload:
                     logging.debug(
-                        f"Key {key_index + 1} produced UNKNOWN_APP portnum, trying next key"
+                        f"Decryption with key {key_index + 1} returned empty payload"
                     )
                     continue
-
-                # Update the mesh packet with decoded data
-                mesh_packet.decoded.CopyFrom(decoded_data)
-
-                logging.info(
-                    f"✅ Successfully decrypted packet {packet_id} from {sender_id} with key {key_index + 1}/{len(keys_to_try)}: {portnums_pb2.PortNum.Name(decoded_data.portnum)}"
-                )
-                return True
-
-            except Exception as parse_error:
+                decoded_data = _parse_decrypted_data(decrypted_payload)
+                method = "ctr"
+            if decoded_data is None:
                 logging.debug(
-                    f"Failed to parse decrypted payload with key {key_index + 1} as Data protobuf: {parse_error}"
+                    f"Key {key_index + 1} did not yield a valid Data payload, trying next key"
                 )
                 continue
+
+            # Update the mesh packet with decoded data
+            mesh_packet.decoded.CopyFrom(decoded_data)
+            if info is not None:
+                info["method"] = method
+
+            logging.info(
+                f"✅ Successfully decrypted packet {packet_id} from {sender_id} with key {key_index + 1}/{len(keys_to_try)}"
+                f"{' (AEAD)' if method == 'ccm' else ''}: {get_enum_name(portnums_pb2.PortNum.DESCRIPTOR, decoded_data.portnum)}"
+            )
+            return True
 
         logging.debug(
             f"Failed to decrypt packet with any of the {len(keys_to_try)} provided keys"
@@ -312,6 +372,33 @@ def try_decrypt_mesh_packet(
 
 
 # --- Database Functions ---
+def rename_unknown_hardware_models(cursor: sqlite3.Cursor) -> int:
+    """Replace ``UNKNOWN_<n>`` hw_model values that the current protobufs can name.
+
+    ``get_enum_name`` falls back to ``UNKNOWN_<n>`` when a node reports a
+    hardware model newer than the bundled protobufs. After a protobuf upgrade
+    those rows would only fix themselves on the node's next NodeInfo; this
+    names them right away. Returns the number of rows updated.
+    """
+    cursor.execute(
+        "SELECT DISTINCT hw_model FROM node_info WHERE hw_model LIKE 'UNKNOWN\\_%' ESCAPE '\\'"
+    )
+    renamed = 0
+    for (hw_model,) in cursor.fetchall():
+        suffix = hw_model[len("UNKNOWN_") :]
+        if not suffix.isdigit():
+            continue
+        value = mesh_pb2.HardwareModel.DESCRIPTOR.values_by_number.get(int(suffix))
+        if value is None or value.name == "UNSET":
+            continue
+        cursor.execute(
+            "UPDATE node_info SET hw_model = ? WHERE hw_model = ?",
+            (value.name, hw_model),
+        )
+        renamed += cursor.rowcount
+    return renamed
+
+
 def init_database() -> None:
     """Initialize SQLite database with required tables."""
     init_start = time.time()
@@ -410,6 +497,17 @@ def init_database() -> None:
     """)
 
     ensure_startup_schema(cursor, drop_legacy_indexes=True)
+
+    # Hardware models captured before the bundled protobufs knew them were
+    # stored as UNKNOWN_<n>; give them their name once it resolves.
+    try:
+        renamed = rename_unknown_hardware_models(cursor)
+        if renamed:
+            logging.info(
+                "Named %s node_info hardware models that were UNKNOWN_<n>", renamed
+            )
+    except Exception as e:  # noqa: BLE001
+        logging.warning(f"Could not rename UNKNOWN_<n> hardware models: {e}")
 
     # Backfill primary_channel only when there are actually missing values.
     try:
@@ -688,6 +786,145 @@ def update_node_cache(
         conn.close()
 
 
+# ---------------------------------------------------------------------------
+# Firmware fingerprinting
+# ---------------------------------------------------------------------------
+# Every packet a node sends reveals a little about its firmware (see
+# malla.fingerprint). Observations are accumulated in memory as deltas on the
+# MQTT thread and merged into the node_fingerprint table by the main loop
+# (once a minute, and on shutdown), so ingestion never pays an extra write.
+
+FINGERPRINT_FLUSH_INTERVAL_SECONDS: float = float(
+    os.environ.get("MALLA_FINGERPRINT_FLUSH_SECONDS", "30")
+)
+_fingerprint_pending: dict[int, FirmwareEvidence] = {}
+_fingerprint_lock = threading.Lock()
+_fingerprint_last_flush: float = time.time()
+
+
+def record_fingerprint_packet(
+    service_envelope: Any, mesh_packet: Any, aead: bool = False
+) -> None:
+    """Fold one parsed (and possibly decrypted) MeshPacket into the evidence."""
+    try:
+        from_node_id = getattr(mesh_packet, "from", 0) or 0
+        if from_node_id <= 0 or from_node_id == 0xFFFFFFFF:
+            return
+        decoded = mesh_packet.decoded
+        portnum = decoded.portnum
+        data_bytes = None
+        if portnum != portnums_pb2.PortNum.UNKNOWN_APP:
+            # Serialise the decoded Data so unknown fields (e.g. the 2.8
+            # xeddsa_signature the bundled protobufs may not know) are kept.
+            data_bytes = decoded.SerializeToString()
+
+        with _fingerprint_lock:
+            ev = _fingerprint_pending.setdefault(from_node_id, FirmwareEvidence())
+            observe_packet(
+                ev,
+                from_node_id,
+                to_node_id=getattr(mesh_packet, "to", None),
+                hop_start=getattr(mesh_packet, "hop_start", None),
+                hop_limit=getattr(mesh_packet, "hop_limit", None),
+                relay_node=getattr(mesh_packet, "relay_node", None),
+                data_bytes=data_bytes,
+                portnum=portnum if data_bytes else None,
+                telemetry_bytes=decoded.payload
+                if portnum == portnums_pb2.PortNum.TELEMETRY_APP
+                else None,
+                aead=aead,
+            )
+            if portnum == portnums_pb2.PortNum.NODEINFO_APP:
+                user = mesh_pb2.User()
+                user.ParseFromString(decoded.payload)
+                observe_user(ev, from_node_id, user)
+            elif portnum == portnums_pb2.PortNum.MAP_REPORT_APP:
+                report = mqtt_pb2.MapReport()
+                report.ParseFromString(decoded.payload)
+                observe_map_report(ev, report, time.time())
+    except Exception as e:  # noqa: BLE001 - fingerprinting must never break ingestion
+        logging.debug(f"Fingerprint observation skipped: {e}")
+
+
+def _run_fingerprint_backfill(until: float) -> None:
+    from .fingerprint_backfill import backfill
+
+    try:
+        stats = backfill(
+            DATABASE_FILE,
+            days=FINGERPRINT_BACKFILL_DAYS,
+            until=until,
+            keys=list(DECRYPTION_KEYS),
+            lock=db_lock,
+        )
+        logging.info(f"Firmware fingerprint backfill finished: {stats}")
+    except Exception as e:  # noqa: BLE001
+        logging.warning(f"Firmware fingerprint backfill failed: {e}")
+
+
+def start_fingerprint_backfill_if_needed() -> threading.Thread | None:
+    """First start after the feature is installed: fingerprint stored history.
+
+    Runs in a daemon thread so ingestion starts immediately. The completion
+    marker written by the backfill makes later starts a no-op; an interrupted
+    run leaves no marker and simply repeats next time.
+    """
+    from .fingerprint_backfill import read_backfill_marker
+
+    if FINGERPRINT_BACKFILL_DAYS <= 0:
+        logging.info("Firmware fingerprint backfill disabled by configuration")
+        return None
+    marker = read_backfill_marker(DATABASE_FILE)
+    if marker is not None:
+        logging.debug(
+            "Firmware fingerprint backfill already covered history up to %s",
+            time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(marker)),
+        )
+        return None
+    until = time.time()
+    logging.info(
+        f"Starting one-off firmware fingerprint backfill "
+        f"({FINGERPRINT_BACKFILL_DAYS} days of history) in the background"
+    )
+    thread = threading.Thread(
+        target=_run_fingerprint_backfill,
+        args=(until,),
+        name="fingerprint-backfill",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
+def flush_fingerprints(force: bool = False) -> int:
+    """Merge pending evidence into node_fingerprint. Returns rows written."""
+    global _fingerprint_last_flush
+    now = time.time()
+    if not force and now - _fingerprint_last_flush < FINGERPRINT_FLUSH_INTERVAL_SECONDS:
+        return 0
+    with _fingerprint_lock:
+        rows = [evidence_row(nid, ev, now) for nid, ev in _fingerprint_pending.items()]
+        _fingerprint_pending.clear()
+        _fingerprint_last_flush = now
+    if not rows:
+        return 0
+    try:
+        with db_lock:
+            conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
+            try:
+                conn.executemany(NODE_FINGERPRINT_UPSERT_SQL, rows)
+                conn.commit()
+            finally:
+                conn.close()
+        logging.debug(f"Flushed firmware fingerprints for {len(rows)} nodes")
+        return len(rows)
+    except Exception as e:  # noqa: BLE001
+        logging.warning(
+            f"Could not flush firmware fingerprints ({len(rows)} nodes): {e}"
+        )
+        return 0
+
+
 def hex_id_to_numeric(hex_id: str) -> int | None:
     """Convert hex node ID (like '!abcdef12') to numeric ID."""
     if not hex_id or not isinstance(hex_id, str):
@@ -839,7 +1076,9 @@ def log_packet_to_database(
     want_ack = getattr(mesh_packet, "want_ack", None) if mesh_packet else None
     priority = getattr(mesh_packet, "priority", None) if mesh_packet else None
     delayed = getattr(mesh_packet, "delayed", None) if mesh_packet else None
-    channel_index = getattr(mesh_packet, "channel_index", None) if mesh_packet else None
+    # MeshPacket.channel carries the channel hash on the wire (the field is
+    # named "channel", not "channel_index"; the latter was always NULL).
+    channel_index = getattr(mesh_packet, "channel", None) if mesh_packet else None
     rx_time = getattr(mesh_packet, "rx_time", None) if mesh_packet else None
     pki_encrypted = getattr(mesh_packet, "pki_encrypted", None) if mesh_packet else None
     next_hop = getattr(mesh_packet, "next_hop", None) if mesh_packet else None
@@ -1155,6 +1394,7 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
             and mesh_packet.encrypted
         )
 
+        decryption_info: dict[str, Any] = {}
         if is_encrypted_packet:
             logging.debug(
                 f"Attempting to decrypt UNKNOWN_APP packet {mesh_packet.id} from {from_node_id_numeric}"
@@ -1177,7 +1417,7 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
 
             # Try decryption with primary channel keys (most common case)
             decryption_successful = try_decrypt_mesh_packet(
-                mesh_packet, channel_name=""
+                mesh_packet, channel_name="", info=decryption_info
             )
 
             # If primary channel decryption failed and we have a channel name, try with channel-specific keys
@@ -1188,6 +1428,7 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
                 decryption_successful = try_decrypt_mesh_packet(
                     mesh_packet,
                     channel_name=channel_name,
+                    info=decryption_info,
                 )
 
             if decryption_successful:
@@ -1207,6 +1448,12 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
                 update_node_cache(
                     node_id=gateway_numeric_id, hex_id=service_envelope.gateway_id
                 )
+
+        record_fingerprint_packet(
+            service_envelope,
+            mesh_packet,
+            aead=bool(is_encrypted_packet) and decryption_info.get("method") == "ccm",
+        )
 
         # Process different packet types
         if mesh_packet.decoded.portnum == portnums_pb2.PortNum.TEXT_MESSAGE_APP:
@@ -1500,6 +1747,10 @@ def main() -> None:
         "Node cache load step finished in %.3fs", time.time() - startup_step_start
     )
 
+    # Packets from here on are fingerprinted live; history before this point
+    # is covered once by the background backfill.
+    start_fingerprint_backfill_if_needed()
+
     # Initialize MQTT Client
     mqtt_client = mqtt.Client(
         CallbackAPIVersion.VERSION2, client_id=MQTT_CLIENT_ID or ""
@@ -1560,6 +1811,7 @@ def main() -> None:
         last_optimize = time.time()
         while True:
             time.sleep(60)  # Print stats every minute
+            flush_fingerprints()
             stats = get_node_statistics()
             logging.info(
                 f"Stats: {stats['total_nodes']} nodes, {stats['total_packets']} packets, {stats['active_nodes_24h']} active (24h)"
@@ -1596,6 +1848,8 @@ def main() -> None:
             cleanup_thread.join(timeout=5)
             if cleanup_thread.is_alive():
                 logging.warning("Cleanup thread did not finish gracefully")
+
+        flush_fingerprints(force=True)
 
         logging.info("Stopping MQTT client loop...")
         mqtt_client.loop_stop()

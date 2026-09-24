@@ -340,6 +340,48 @@
         </div>
     </div>
 
+    <!-- Firmware Versions Row -->
+    <div class="row mb-4">
+        <div class="col-12 mb-4">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <h5 class="card-title mb-0"><i class="bi bi-cpu"></i> <span id="distributionTitle">Firmware Versions</span></h5>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Distribution" id="distributionModeButtons">
+                        <button type="button" class="btn btn-outline-secondary" data-mode="firmware">Firmware</button>
+                        <button type="button" class="btn btn-outline-secondary" data-mode="hardware">Hardware</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="firmwareDistributionChartLoading" class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                    <!-- Nodes heard in the last 7 days. Firmware mode: bucketed by
+                         the exact version they report (MapReport) or the band their
+                         on-air fingerprint implies, newest first. Hardware mode: the
+                         most common hardware models. -->
+                    <div id="firmwareDistributionChart" style="display: none;">
+                        <div class="d-flex justify-content-between align-items-baseline">
+                            <span class="small fw-semibold">Nodes heard in the last 7 days</span>
+                            <span>
+                                <span id="firmwareDistributionCaption" class="small text-body-secondary"></span>
+                                <a href="#" id="firmwareDistributionExpand" class="small ms-2" style="display: none;"></a>
+                            </span>
+                        </div>
+                        <div id="firmwareDistributionCanvasWrap" style="height: 220px;">
+                            <canvas id="firmwareDistributionCanvas"></canvas>
+                        </div>
+                    </div>
+                    <div id="firmwareDistributionEmpty" class="text-center text-muted py-4" style="display: none;">
+                        <i class="bi bi-cpu" style="font-size: 3rem;"></i>
+                        <p class="mt-2" id="firmwareDistributionEmptyText">No firmware evidence yet</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Top Active Nodes Row -->
     <div class="row mb-4">
         <div class="col-12">
@@ -544,6 +586,225 @@ function getDefaultChartOptions() {
     };
 }
 
+// ---------------------------------------------------------------------------
+// Fleet distribution card: firmware versions (one bar per proven band,
+// newest first, reported vs estimated stacked) or hardware models (most
+// common first). Both modes share the canvas; the toggle is remembered.
+// ---------------------------------------------------------------------------
+let distributionMode = localStorage.getItem('mallaDistributionMode') || 'firmware';
+// Hardware mode lists the top models by default; "Show all" lists every model.
+let hardwareShowAll = false;
+const HARDWARE_TOP = 12;
+const distributionData = { firmware: null, hardware: null, hardwareAll: null };
+
+function distributionSlot(mode) {
+    return mode === 'hardware' && hardwareShowAll ? 'hardwareAll' : mode;
+}
+
+function distributionEndpoint(mode) {
+    if (mode === 'hardware') {
+        return `/api/hardware-distribution?days=7&top=${hardwareShowAll ? 500 : HARDWARE_TOP}`;
+    }
+    return '/api/firmware-distribution?days=7';
+}
+
+function syncDistributionMode() {
+    document.querySelectorAll('#distributionModeButtons button[data-mode]').forEach(button => {
+        button.classList.toggle('active', button.dataset.mode === distributionMode);
+    });
+    const title = document.getElementById('distributionTitle');
+    if (title) title.textContent = distributionMode === 'hardware' ? 'Hardware Models' : 'Firmware Versions';
+}
+
+async function loadDistribution(mode) {
+    if (mode !== 'hardware') mode = 'firmware';
+    distributionMode = mode;
+    localStorage.setItem('mallaDistributionMode', mode);
+    syncDistributionMode();
+    const slot = distributionSlot(mode);
+    if (distributionData[slot]) {
+        createDistributionChart(mode, distributionData[slot]);
+        return;
+    }
+    const loading = document.getElementById('firmwareDistributionChartLoading');
+    const chartEl = document.getElementById('firmwareDistributionChart');
+    const emptyEl = document.getElementById('firmwareDistributionEmpty');
+    if (loading) loading.style.display = 'block';
+    if (chartEl) chartEl.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'none';
+    try {
+        const response = await fetch(distributionEndpoint(mode));
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        distributionData[slot] = await response.json();
+        if (distributionMode === mode && distributionSlot(mode) === slot) {
+            createDistributionChart(mode, distributionData[slot]);
+        }
+    } catch (error) {
+        console.error(`Error loading ${mode} distribution:`, error);
+        hideLoadingSpinner('firmwareDistributionChart');
+    }
+}
+
+// Kept for callers/tests that know the original name.
+function loadFirmwareDistribution() {
+    return loadDistribution(distributionMode);
+}
+
+function createDistributionChart(mode, data) {
+    hideLoadingSpinner('firmwareDistributionChart');
+    const ctx = document.getElementById('firmwareDistributionCanvas');
+    if (!ctx) return;
+    const isHardware = mode === 'hardware';
+    const buckets = (data && data.buckets) || [];
+    const chartEl = document.getElementById('firmwareDistributionChart');
+    const emptyEl = document.getElementById('firmwareDistributionEmpty');
+    const emptyText = document.getElementById('firmwareDistributionEmptyText');
+    if (chartInstances.firmwareDistributionChart) {
+        chartInstances.firmwareDistributionChart.destroy();
+        delete chartInstances.firmwareDistributionChart;
+    }
+    if (!buckets.length) {
+        if (chartEl) chartEl.style.display = 'none';
+        if (emptyText) emptyText.textContent = isHardware ? 'No hardware data yet' : 'No firmware evidence yet';
+        if (emptyEl) emptyEl.style.display = 'block';
+        return;
+    }
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (chartEl) chartEl.style.display = 'block';
+
+    const colors = getChartColors();
+    const total = data.total_nodes || buckets.reduce((sum, b) => sum + b.count, 0);
+
+    const wrap = document.getElementById('firmwareDistributionCanvasWrap');
+    if (wrap) wrap.style.height = `${Math.max(150, 26 * buckets.length + (isHardware ? 16 : 40))}px`;
+
+    const caption = document.getElementById('firmwareDistributionCaption');
+    const expand = document.getElementById('firmwareDistributionExpand');
+    if (caption && total) {
+        if (isHardware) {
+            const shown = buckets.filter(b => b.kind === 'hardware').length;
+            const models = data.models || shown;
+            caption.textContent = `${total.toLocaleString()} nodes · ${shown} of ${models} models`;
+            if (expand) {
+                // Offer the switch only when it changes something.
+                const collapsible = models > HARDWARE_TOP;
+                expand.style.display = collapsible ? '' : 'none';
+                expand.textContent = hardwareShowAll ? `Top ${HARDWARE_TOP} only` : `Show all ${models} models`;
+            }
+        } else {
+            const known = buckets.reduce((sum, b) => sum + (b.reported || 0) + (b.estimated || 0), 0);
+            caption.textContent = `${total.toLocaleString()} nodes · ${(100 * known / total).toFixed(0)}% classified`;
+            if (expand) expand.style.display = 'none';
+        }
+    }
+
+    // Firmware: one stacked bar per version segment (reported vs estimated).
+    // Hardware: one bar per model, muted for the Other/Unknown rows.
+    const mutedColor = hexToRgba(colors.secondary, 0.45);
+    const datasets = isHardware
+        ? [{
+            label: 'nodes',
+            data: buckets.map(b => b.count),
+            backgroundColor: buckets.map(b => b.kind === 'hardware' ? colors.primary : mutedColor),
+            maxBarThickness: 18
+        }]
+        : [
+            { key: 'reported',  label: 'reported',     color: colors.success },
+            { key: 'estimated', label: 'estimated',    color: colors.primary },
+            { key: 'other',     label: 'unclassified', color: mutedColor },
+        ].map(s => ({
+            label: s.label,
+            data: buckets.map(b => b[s.key] || 0),
+            backgroundColor: s.color,
+            maxBarThickness: 18
+        }));
+
+    // Node count and share printed just past the end of each bar.
+    const barTotalsPlugin = {
+        id: 'firmwareBarTotals',
+        afterDatasetsDraw(chart) {
+            const { ctx: c, chartArea } = chart;
+            const lastMeta = chart.getDatasetMeta(chart.data.datasets.length - 1);
+            if (!lastMeta || !lastMeta.data) return;
+            c.save();
+            c.textBaseline = 'middle';
+            c.textAlign = 'left';
+            buckets.forEach((b, i) => {
+                // Right edge of the stack = max x over all datasets for this row.
+                let end = chartArea.left;
+                chart.data.datasets.forEach((_, di) => {
+                    const el = chart.getDatasetMeta(di).data[i];
+                    if (el && el.x > end) end = el.x;
+                });
+                const y = lastMeta.data[i] ? lastMeta.data[i].y : null;
+                if (y === null) return;
+                const pct = total ? (100 * b.count / total).toFixed(b.count / total < 0.1 ? 1 : 0) : '0';
+                const x = Math.min(end, chartArea.right) + 6;
+                const countText = b.count.toLocaleString();
+                c.font = '600 11px ' + (Chart.defaults.font.family || 'sans-serif');
+                c.fillStyle = colors.textColor;
+                c.fillText(countText, x, y);
+                const countWidth = c.measureText(countText).width;
+                c.font = '400 11px ' + (Chart.defaults.font.family || 'sans-serif');
+                c.fillStyle = colors.mutedTextColor;
+                c.fillText(`  ${pct}%`, x + countWidth, y);
+            });
+            c.restore();
+        }
+    };
+    const maxCount = Math.max(...buckets.map(b => b.count), 1);
+
+    chartInstances.firmwareDistributionChart = new Chart(ctx, {
+        type: 'bar',
+        plugins: [barTotalsPlugin],
+        data: { labels: buckets.map(b => b.label), datasets },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: { padding: { right: 8 } },
+            plugins: {
+                legend: {
+                    display: !isHardware,
+                    position: 'bottom',
+                    labels: { color: colors.mutedTextColor, boxWidth: 10, usePointStyle: true }
+                },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => buckets[items[0].dataIndex].label,
+                        label: (item) => {
+                            const value = item.raw || 0;
+                            if (!value) return null;
+                            return isHardware ? null : `${item.dataset.label}: ${value.toLocaleString()}`;
+                        },
+                        footer: (items) => {
+                            const count = buckets[items[0].dataIndex].count;
+                            const pct = total ? (100 * count / total).toFixed(1) : '0';
+                            return `${count.toLocaleString()} nodes (${pct}%)`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    beginAtZero: true,
+                    // leave room for the count label after the longest bar
+                    suggestedMax: Math.ceil(maxCount * 1.2),
+                    grid: { color: colors.gridColor },
+                    border: { display: false },
+                    ticks: { color: colors.mutedTextColor, maxTicksLimit: 6, precision: 0 }
+                },
+                y: {
+                    stacked: true,
+                    grid: { display: false },
+                    ticks: { color: colors.textColor, autoSkip: false }
+                }
+            }
+        }
+    });
+}
+
 // Update all charts when theme changes
 function updateChartsForTheme() {
     if (analyticsData) {
@@ -560,6 +821,9 @@ function updateChartsForTheme() {
         createHopDistributionChart(analyticsData.hop_distribution);
         createPacketTypesChart(analyticsData.packet_types);
     }
+    if (distributionData[distributionSlot(distributionMode)]) {
+        createDistributionChart(distributionMode, distributionData[distributionSlot(distributionMode)]);
+    }
     if (timelineData) {
         renderTimelinePanels();
     }
@@ -569,6 +833,24 @@ function updateChartsForTheme() {
 document.addEventListener('DOMContentLoaded', function () {
     // Load analytics data asynchronously
     loadAnalyticsData();
+    loadDistribution(distributionMode);
+    const expandLink = document.getElementById('firmwareDistributionExpand');
+    if (expandLink) {
+        expandLink.addEventListener('click', function (event) {
+            event.preventDefault();
+            hardwareShowAll = !hardwareShowAll;
+            loadDistribution('hardware');
+        });
+    }
+    const modeButtons = document.getElementById('distributionModeButtons');
+    if (modeButtons) {
+        modeButtons.addEventListener('click', function (event) {
+            const button = event.target.closest('button[data-mode]');
+            if (button && button.dataset.mode !== distributionMode) {
+                loadDistribution(button.dataset.mode);
+            }
+        });
+    }
 
     // Activity timeline: restore the last-used range and wire the selector
     loadActivityTimeline(timelineRange);

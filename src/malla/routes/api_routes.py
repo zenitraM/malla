@@ -195,6 +195,31 @@ def api_analytics():
         return jsonify({"error": str(e)}), 500
 
 
+@api_bp.route("/firmware-distribution")
+def api_firmware_distribution():
+    """Dashboard: firmware version buckets of nodes heard in the last N days."""
+    try:
+        days = request.args.get("days", default=7, type=int) or 7
+        return safe_jsonify(NodeRepository.get_firmware_distribution(days=days))
+    except Exception as e:
+        logger.error(f"Error in API firmware distribution: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/hardware-distribution")
+def api_hardware_distribution():
+    """Dashboard: hardware models of nodes heard in the last N days."""
+    try:
+        days = request.args.get("days", default=7, type=int) or 7
+        top = request.args.get("top", default=12, type=int) or 12
+        return safe_jsonify(
+            NodeRepository.get_hardware_distribution(days=days, top=top)
+        )
+    except Exception as e:
+        logger.error(f"Error in API hardware distribution: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @api_bp.route("/activity-timeline")
 def api_activity_timeline():
     """API endpoint for the dashboard activity timeline (24h / 7d / 30d / all)."""
@@ -853,6 +878,16 @@ def api_node_info(node_id):
 
         if not node_info:
             return jsonify({"error": "Node not found"}), 404
+
+        # The hover card shows a Firmware row whenever firmware_version is set.
+        verdict = NodeRepository.get_firmware_estimate(
+            node_id_int,
+            role=node_info.get("role"),
+            hw_model=node_info.get("hw_model"),
+        )
+        if verdict["source"] != "none":
+            node_info["firmware_version"] = verdict["label"]
+            node_info["firmware_source"] = verdict["source"]
 
         # Format the response to match what the frontend expects
         return jsonify({"node": node_info})
@@ -1789,6 +1824,11 @@ def api_nodes_data():
                     "last_packet_time": node.get("last_packet_time"),
                     "packet_count_24h": node.get("packet_count_24h", 0),
                     "status": status,
+                    "firmware_label": node.get("firmware_label", "Unknown"),
+                    "firmware_source": node.get("firmware_source", "none"),
+                    "firmware_reasons": node.get("firmware_reasons", []),
+                    "firmware_evidence": node.get("firmware_evidence", []),
+                    "firmware_reported_version": node.get("firmware_reported_version"),
                 }
             )
 

@@ -6,6 +6,7 @@ This module provides data access layer with business logic for different entitie
 
 import json
 import logging
+import sqlite3
 import time
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -14,6 +15,12 @@ from meshtastic import mesh_pb2, telemetry_pb2
 from meshtastic.protobuf import mqtt_pb2
 
 from ..config import get_config
+from ..fingerprint import (
+    EVIDENCE_COLUMNS,
+    FirmwareEvidence,
+    estimate,
+    summarize_distribution,
+)
 from ..utils.decryption import try_decrypt_mesh_packet
 from ..utils.formatting import format_time_ago
 from ..utils.node_utils import convert_node_id, get_bulk_node_short_names
@@ -167,6 +174,7 @@ def _aggregate(
         band.extend(run_band)
     return avg_line, band
 
+
 RELAY_CANDIDATE_CACHE_TTL_SECONDS = 1800
 RELAY_CANDIDATE_CACHE_MAX_ENTRIES = 4096
 _relay_candidate_cache: dict[tuple[int, int], tuple[float, list[dict[str, Any]]]] = {}
@@ -223,6 +231,9 @@ def _store_relay_candidates(
 # view, so a short TTL cache keeps the common case O(1) while the numbers stay
 # fresh to within a few seconds. Keyed by gateway_id (None => site-wide).
 DASHBOARD_STATS_CACHE_TTL_SECONDS = 30
+FIRMWARE_DISTRIBUTION_CACHE_TTL_SECONDS = 300
+_firmware_distribution_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+_hardware_distribution_cache: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}
 _dashboard_stats_cache: dict[str | None, tuple[float, dict[str, Any]]] = {}
 
 
@@ -830,7 +841,9 @@ class PacketRepository:
                     "hop_count",
                     "relay_node",
                 }
-                order_column = order_by if order_by in valid_order_columns else "timestamp"
+                order_column = (
+                    order_by if order_by in valid_order_columns else "timestamp"
+                )
                 order_dir_sql = "DESC" if order_dir.lower() == "desc" else "ASC"
 
                 # Main query
@@ -1351,8 +1364,22 @@ class NodeRepository:
                         COALESCE(stats.last_packet_time, ni.last_updated) as last_packet_time,
                         datetime(COALESCE(stats.last_packet_time, ni.last_updated), 'unixepoch') as last_packet_str,
                         stats.avg_rssi,
-                        stats.avg_snr
+                        stats.avg_snr,
+                        nf.nodeinfo_count,
+                        nf.has_public_key,
+                        nf.has_unmessagable_field,
+                        nf.id_from_public_key,
+                        nf.mac_mismatch,
+                        nf.relay_self_count,
+                        nf.relay_none_count,
+                        nf.xeddsa_signed_count,
+                        nf.hop_start_zero_count,
+                        nf.hop_start_set_count,
+                        nf.hop_start_mask,
+                        nf.firmware_version,
+                        nf.firmware_version_at
                     FROM node_info ni
+                    LEFT JOIN node_fingerprint nf ON nf.node_id = ni.node_id
                     LEFT JOIN (
                         SELECT
                             from_node_id as node_id,
@@ -1411,8 +1438,22 @@ class NodeRepository:
                         ni.last_updated as last_packet_time,
                         datetime(ni.last_updated, 'unixepoch') as last_packet_str,
                         NULL as avg_rssi,
-                        NULL as avg_snr
+                        NULL as avg_snr,
+                        nf.nodeinfo_count,
+                        nf.has_public_key,
+                        nf.has_unmessagable_field,
+                        nf.id_from_public_key,
+                        nf.mac_mismatch,
+                        nf.relay_self_count,
+                        nf.relay_none_count,
+                        nf.xeddsa_signed_count,
+                        nf.hop_start_zero_count,
+                        nf.hop_start_set_count,
+                        nf.hop_start_mask,
+                        nf.firmware_version,
+                        nf.firmware_version_at
                     FROM node_info ni
+                    LEFT JOIN node_fingerprint nf ON nf.node_id = ni.node_id
                     {where_clause}
                     ORDER BY {order_column} {order_dir}
                     LIMIT ? OFFSET ?
@@ -1422,6 +1463,8 @@ class NodeRepository:
             query_params = params + [limit, offset]
             cursor.execute(query, query_params)
             nodes = [dict(row) for row in cursor.fetchall()]
+            for node in nodes:
+                NodeRepository._attach_firmware_estimate(node)
 
             conn.close()
 
@@ -1435,6 +1478,245 @@ class NodeRepository:
         except Exception as e:
             logger.error(f"Error getting nodes: {e}")
             raise
+
+    @staticmethod
+    def _attach_firmware_estimate(node: dict[str, Any]) -> None:
+        """Replace raw node_fingerprint columns on *node* with a verdict."""
+        evidence = FirmwareEvidence.from_row(node)
+        verdict = estimate(
+            evidence, role=node.get("role"), hw_model=node.get("hw_model")
+        )
+        for column in EVIDENCE_COLUMNS:
+            node.pop(column, None)
+        node["firmware_label"] = verdict["label"]
+        node["firmware_source"] = verdict["source"]
+        node["firmware_reasons"] = verdict["reasons"]
+        node["firmware_evidence"] = verdict["evidence"]
+        node["firmware_reported_version"] = verdict["reported_version"]
+
+    @staticmethod
+    def get_node_fingerprint(node_id: int) -> dict[str, Any] | None:
+        """Raw accumulated fingerprint evidence for a node, if any."""
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM node_fingerprint WHERE node_id = ?", (node_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except sqlite3.OperationalError as e:
+            # Databases written before the table existed simply have no evidence.
+            logger.debug(f"node_fingerprint unavailable: {e}")
+            return None
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get_firmware_estimate(
+        node_id: int, role: str | None = None, hw_model: str | None = None
+    ) -> dict[str, Any]:
+        """Firmware verdict (exact reported version or fingerprint band)."""
+        row = NodeRepository.get_node_fingerprint(node_id)
+        return estimate(FirmwareEvidence.from_row(row), role=role, hw_model=hw_model)
+
+    @staticmethod
+    def get_firmware_distribution(days: int = 7) -> dict[str, Any]:
+        """How many recently-heard nodes fall into each firmware bucket.
+
+        "Recently heard" is any node that sent a packet in the last ``days``
+        days (the same covering index get_stats uses for nodes_seen_7d).
+        Verdicts are computed in Python from node_fingerprint, so this is
+        cached for a few minutes like the other dashboard aggregates.
+        """
+        days = max(1, min(int(days), 90))
+        now = time.time()
+        cached = _firmware_distribution_cache.get(days)
+        if (
+            cached is not None
+            and now - cached[0] <= FIRMWARE_DISTRIBUTION_CACHE_TTL_SECONDS
+        ):
+            return dict(cached[1])
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            fp_columns = ", ".join(f"nf.{c}" for c in EVIDENCE_COLUMNS)
+            cursor.execute(
+                f"""
+                SELECT ni.role, ni.hw_model, {fp_columns}
+                FROM (
+                    SELECT DISTINCT from_node_id AS node_id
+                    FROM packet_history
+                    WHERE timestamp > ? AND from_node_id IS NOT NULL
+                ) seen
+                LEFT JOIN node_info ni ON ni.node_id = seen.node_id
+                LEFT JOIN node_fingerprint nf ON nf.node_id = seen.node_id
+                """,
+                (now - days * 86400,),
+            )
+            rows = cursor.fetchall()
+        except sqlite3.OperationalError as e:
+            logger.debug(f"firmware distribution unavailable: {e}")
+            rows = []
+        finally:
+            conn.close()
+
+        verdicts = [
+            estimate(
+                FirmwareEvidence.from_row(row),
+                role=row["role"],
+                hw_model=row["hw_model"],
+                now=now,
+            )
+            for row in rows
+        ]
+        result = {
+            "days": days,
+            "total_nodes": len(verdicts),
+            "buckets": summarize_distribution(verdicts),
+        }
+        _firmware_distribution_cache[days] = (now, dict(result))
+        return result
+
+    @staticmethod
+    def get_hardware_distribution(days: int = 7, top: int = 12) -> dict[str, Any]:
+        """Hardware models of nodes heard in the last ``days`` days, most common first.
+
+        The dashboard shows this next to the firmware distribution. Models past
+        the ``top`` most common are folded into one "Other" bucket so the chart
+        stays readable; nodes that never sent a NodeInfo count as Unknown.
+        """
+        days = max(1, min(int(days), 90))
+        top = max(1, min(int(top), 500))
+        now = time.time()
+        cached = _hardware_distribution_cache.get((days, top))
+        if (
+            cached is not None
+            and now - cached[0] <= FIRMWARE_DISTRIBUTION_CACHE_TTL_SECONDS
+        ):
+            return dict(cached[1])
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT COALESCE(NULLIF(ni.hw_model, ''), 'Unknown') AS hw_model,
+                       COUNT(*) AS count
+                FROM (
+                    SELECT DISTINCT from_node_id AS node_id
+                    FROM packet_history
+                    WHERE timestamp > ? AND from_node_id IS NOT NULL
+                ) seen
+                LEFT JOIN node_info ni ON ni.node_id = seen.node_id
+                GROUP BY hw_model
+                ORDER BY count DESC, hw_model ASC
+                """,
+                (now - days * 86400,),
+            )
+            rows = [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+        known = [r for r in rows if r["hw_model"] != "Unknown"]
+        unknown = sum(r["count"] for r in rows if r["hw_model"] == "Unknown")
+        buckets: list[dict[str, Any]] = [
+            {"label": r["hw_model"], "count": r["count"], "kind": "hardware"}
+            for r in known[:top]
+        ]
+        rest = known[top:]
+        if rest:
+            buckets.append(
+                {
+                    "label": f"Other ({len(rest)} models)",
+                    "count": sum(r["count"] for r in rest),
+                    "kind": "other",
+                }
+            )
+        if unknown:
+            buckets.append({"label": "Unknown", "count": unknown, "kind": "unknown"})
+        result = {
+            "days": days,
+            "total_nodes": sum(r["count"] for r in rows),
+            "models": len(known),
+            "buckets": buckets,
+        }
+        _hardware_distribution_cache[(days, top)] = (now, dict(result))
+        return result
+
+    @staticmethod
+    def get_same_mac_nodes(node_id: int) -> list[dict[str, Any]]:
+        """Other node numbers that announced the same hardware MAC address.
+
+        Firmware 2.8 derives the node number from the public key instead of
+        the MAC, so one radio shows up under a new id after upgrading (and
+        again whenever it re-keys). The MAC it reports in NodeInfo does not
+        change, which is what ties the identities together.
+        """
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT mac_address, first_seen FROM node_info WHERE node_id = ?",
+                (node_id,),
+            )
+            me = cursor.fetchone()
+            if not me or not me["mac_address"]:
+                return []
+            mac = str(me["mac_address"]).strip().lower()
+            # Empty and all-zero MACs are placeholders, not identities.
+            if not mac or not set(mac) - set("0:-"):
+                return []
+            cursor.execute(
+                """
+                SELECT
+                    node_id,
+                    printf('!%08x', node_id) AS hex_id,
+                    long_name,
+                    short_name,
+                    hw_model,
+                    role,
+                    first_seen,
+                    last_updated
+                FROM node_info
+                WHERE lower(mac_address) = ? AND node_id != ?
+                ORDER BY last_updated DESC
+                LIMIT 20
+                """,
+                (mac, node_id),
+            )
+            my_first_seen = me["first_seen"] or 0
+            siblings = []
+            for row in cursor.fetchall():
+                sibling = dict(row)
+                sibling["node_name"] = (
+                    sibling["long_name"] or sibling["short_name"] or sibling["hex_id"]
+                )
+                sibling["relation"] = (
+                    "newer" if (sibling["first_seen"] or 0) > my_first_seen else "older"
+                )
+                sibling["first_seen_str"] = (
+                    datetime.fromtimestamp(sibling["first_seen"], UTC).strftime(
+                        "%Y-%m-%d"
+                    )
+                    if sibling["first_seen"]
+                    else None
+                )
+                sibling["last_updated_str"] = (
+                    datetime.fromtimestamp(sibling["last_updated"], UTC).strftime(
+                        "%Y-%m-%d"
+                    )
+                    if sibling["last_updated"]
+                    else None
+                )
+                siblings.append(sibling)
+            return siblings
+        except sqlite3.OperationalError as e:
+            logger.debug(f"same-MAC lookup unavailable: {e}")
+            return []
+        finally:
+            conn.close()
 
     @staticmethod
     def get_node_details(node_id: int) -> dict[str, Any] | None:
@@ -1495,7 +1777,8 @@ class NodeRepository:
                     short_name,
                     hw_model,
                     role,
-                    primary_channel
+                    primary_channel,
+                    mac_address
                 FROM node_info
                 WHERE node_id = ?
                 """,
@@ -1520,7 +1803,12 @@ class NodeRepository:
                     "short_name": node_info_row["short_name"],
                     "hw_model": node_info_row["hw_model"],
                     "role": node_info_row["role"],
-                    "primary_channel": node_info_row.get("primary_channel"),
+                    "primary_channel": node_info_row["primary_channel"]
+                    if "primary_channel" in node_info_row.keys()
+                    else None,
+                    "mac_address": node_info_row["mac_address"]
+                    if "mac_address" in node_info_row.keys()
+                    else None,
                     "total_packets": 0,
                     "last_seen": None,
                     "first_seen": None,
@@ -1561,6 +1849,9 @@ class NodeRepository:
                 "role": node_info_row["role"] if node_info_row else None,
                 "primary_channel": node_info_row["primary_channel"]
                 if node_info_row and "primary_channel" in node_info_row.keys()
+                else None,
+                "mac_address": node_info_row["mac_address"]
+                if node_info_row and "mac_address" in node_info_row.keys()
                 else None,
                 "total_packets": node_stats_row["total_packets"],
                 "last_seen": last_seen.strftime("%Y-%m-%d %H:%M:%S UTC"),
