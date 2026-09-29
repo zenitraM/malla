@@ -38,6 +38,7 @@ import socket
 import sqlite3
 import threading
 import time
+from contextlib import nullcontext
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -57,8 +58,8 @@ from paho.mqtt.enums import CallbackAPIVersion
 # ---------------------------------------------------------------------------
 from malla.config import get_config  # Import here to avoid circular import issues
 
-from .database.connection import seed_query_planner_stats_async
-from .database.schema import ensure_startup_schema
+from .ingest_buffer import IngestBuffer
+from .migrations import MIGRATIONS, MigrationResult, Phase, Status, run_migrations
 
 # Load the singleton configuration once at module import time.  This ensures the
 # capture tool honours the same YAML + optional environment override mechanism
@@ -134,6 +135,10 @@ node_cache: dict[
 ] = {}  # In-memory cache: {node_id_numeric: {'hex_id': '!abc123', 'long_name': 'Name', 'short_name': 'Short', 'last_updated': timestamp}}
 cleanup_thread: threading.Thread | None = None  # Background thread for data cleanup
 stop_cleanup = threading.Event()  # Event to signal cleanup thread to stop
+
+# Packets received between the MQTT connect and the end of the write-locking
+# migrations queue here instead of being dropped (see on_message).
+ingest_buffer = IngestBuffer()
 
 
 # --- Decryption Functions ---
@@ -312,18 +317,29 @@ def try_decrypt_mesh_packet(
 
 
 # --- Database Functions ---
-def init_database() -> None:
-    """Initialize SQLite database with required tables."""
-    init_start = time.time()
-    conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+# ---------------------------------------------------------------------------
+# Database migrations
+# ---------------------------------------------------------------------------
+# Every schema or data change lives in malla.migrations as a named, idempotent
+# step tagged with a phase that says when it may run relative to ingestion:
+#
+#   SCHEMA    cheap DDL (tables, columns) - must finish before the first write
+#   BLOCKING  write-locking DDL (index builds) - runs with ingestion paused
+#   DERIVED   data work over stored rows - safe in the background
+#
+# main() applies SCHEMA before connecting so the ingest path can always write,
+# connects next so nothing published while BLOCKING runs is lost (payloads queue
+# in ingest_buffer), then lets DERIVED run in the background.
 
-    # Configure SQLite for better concurrency and large-database performance.
-    # cache_size is negative so SQLite reads it as KiB (64 MiB) rather than a
-    # page count. mmap is intentionally left off: with continuous writes,
-    # memory-mapped readers can report "database disk image is malformed"
-    # during WAL checkpoints.
+
+def _configure_connection(conn: sqlite3.Connection) -> None:
+    """Apply the SQLite tuning pragmas shared by the capture's connections.
+
+    cache_size is negative so SQLite reads it as KiB (64 MiB) rather than a page
+    count. mmap is intentionally left off: with continuous writes, memory-mapped
+    readers can report "database disk image is malformed" during WAL checkpoints.
+    """
+    cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA synchronous=NORMAL")
     cursor.execute("PRAGMA busy_timeout=30000")
@@ -332,137 +348,64 @@ def init_database() -> None:
     cursor.execute("PRAGMA temp_store=MEMORY")
     cursor.execute("PRAGMA analysis_limit=1000")  # bound ANALYZE / optimize work
 
-    # Table for packet history
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS packet_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp REAL NOT NULL,
-            topic TEXT NOT NULL,
-            from_node_id INTEGER,
-            to_node_id INTEGER,
-            portnum INTEGER,
-            portnum_name TEXT,
-            gateway_id TEXT,
-            channel_id TEXT,
-            mesh_packet_id INTEGER,
-            rssi INTEGER,
-            snr REAL,
-            hop_limit INTEGER,
-            hop_start INTEGER,
-            payload_length INTEGER,
-            raw_payload BLOB,
-            processed_successfully BOOLEAN DEFAULT TRUE,
-            message_type TEXT,
-            raw_service_envelope BLOB,
-            parsing_error TEXT
-        )
-    """)
 
-    cursor.execute("PRAGMA table_info(packet_history)")
-    packet_history_columns = {row[1] for row in cursor.fetchall()}
-
-    # Add mesh_packet_id column if it doesn't exist (for existing databases)
-    if "mesh_packet_id" not in packet_history_columns:
-        cursor.execute("ALTER TABLE packet_history ADD COLUMN mesh_packet_id INTEGER")
-        logging.info("Added mesh_packet_id column to packet_history table")
-        packet_history_columns.add("mesh_packet_id")
-
-    # Add new MeshPacket fields if they don't exist (for existing databases)
-    new_columns = [
-        ("via_mqtt", "BOOLEAN"),
-        ("want_ack", "BOOLEAN"),
-        ("priority", "INTEGER"),
-        ("delayed", "INTEGER"),
-        ("channel_index", "INTEGER"),
-        ("rx_time", "INTEGER"),
-        ("pki_encrypted", "BOOLEAN"),
-        ("next_hop", "INTEGER"),
-        ("relay_node", "INTEGER"),
-        ("tx_after", "INTEGER"),
-        ("message_type", "TEXT"),
-        ("raw_service_envelope", "BLOB"),
-        ("parsing_error", "TEXT"),
-    ]
-
-    for column_name, column_type in new_columns:
-        if column_name not in packet_history_columns:
-            cursor.execute(
-                f"ALTER TABLE packet_history ADD COLUMN {column_name} {column_type}"
-            )
-            logging.info(f"Added {column_name} column to packet_history table")
-            packet_history_columns.add(column_name)
-
-    # Table for node information cache
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS node_info (
-            node_id INTEGER PRIMARY KEY,
-            hex_id TEXT,
-            long_name TEXT,
-            short_name TEXT,
-            hw_model TEXT,
-            role TEXT,
-            primary_channel TEXT,
-            is_licensed BOOLEAN,
-            mac_address TEXT,
-            first_seen REAL NOT NULL,
-            last_updated REAL NOT NULL
-        )
-    """)
-
-    ensure_startup_schema(cursor, drop_legacy_indexes=True)
-
-    # Backfill primary_channel only when there are actually missing values.
-    try:
-        cursor.execute(
-            "SELECT COUNT(*) FROM node_info WHERE primary_channel IS NULL OR primary_channel = ''"
-        )
-        missing_primary_channel_count = cursor.fetchone()[0]
-        if missing_primary_channel_count > 0:
-            cursor.execute(
-                """
-                UPDATE node_info
-                SET primary_channel = (
-                    SELECT ph.channel_id
-                    FROM packet_history ph
-                    WHERE ph.from_node_id = node_info.node_id
-                      AND ph.portnum_name = 'NODEINFO_APP'
-                      AND ph.channel_id IS NOT NULL AND ph.channel_id != ''
-                    ORDER BY ph.timestamp DESC
-                    LIMIT 1
-                )
-                WHERE (primary_channel IS NULL OR primary_channel = '')
-                  AND EXISTS (
-                    SELECT 1
-                    FROM packet_history ph
-                    WHERE ph.from_node_id = node_info.node_id
-                      AND ph.portnum_name = 'NODEINFO_APP'
-                      AND ph.channel_id IS NOT NULL AND ph.channel_id != ''
-                  )
-            """
-            )
-            logging.info(
-                "Backfilled primary_channel values for %s nodes",
-                cursor.rowcount,
-            )
+def _log_migration_results(results: list[MigrationResult]) -> None:
+    for result in results:
+        if result.status is Status.FAILED:
+            logging.error("Migration %s failed: %s", result.name, result.detail)
+        elif result.status is Status.APPLIED:
+            logging.info("Migration %s applied in %.2fs", result.name, result.seconds)
         else:
-            logging.debug("primary_channel backfill not needed")
-    except Exception as e:
-        logging.warning(f"Could not backfill primary_channel column: {e}")
+            logging.debug("Migration %s: %s", result.name, result.detail)
 
-    conn.commit()
-    conn.close()
 
-    # Seed query-planner statistics on first run so the planner picks
-    # index-based plans instead of full scans on a large packet_history. Runs in
-    # a background thread so a cold ANALYZE (~100s on a multi-GB DB) does not
-    # delay packet ingestion or hold the write lock.
-    seed_query_planner_stats_async(DATABASE_FILE)
+def _run_migration_phase(
+    phase: Phase, *, with_db_lock: bool = True
+) -> list[MigrationResult]:
+    """Run every migration of one phase on its own connection.
 
+    ``with_db_lock`` is only for the phases that run while ingestion is paused;
+    DERIVED migrations run alongside packet inserts (and the bounded ANALYZE can
+    take minutes), so holding db_lock there would stall the capture.
+    """
+    guard = db_lock if with_db_lock else nullcontext()
+    with guard:
+        conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
+        try:
+            _configure_connection(conn)
+            results = run_migrations(conn, MIGRATIONS, phases=(phase,))
+        finally:
+            conn.close()
+    _log_migration_results(results)
+    return results
+
+
+def init_database() -> None:
+    """Apply the cheap schema migrations so the ingest path can write."""
+    init_start = time.time()
+    _run_migration_phase(Phase.SCHEMA)
     logging.info(
-        "Database initialized: %s (%.3fs)",
-        DATABASE_FILE,
-        time.time() - init_start,
+        "Database schema ready: %s (%.3fs)", DATABASE_FILE, time.time() - init_start
     )
+
+
+def run_write_locking_migrations() -> None:
+    """Index builds and other DDL that cannot run while packets are written."""
+    _run_migration_phase(Phase.BLOCKING)
+
+
+def start_background_migrations() -> threading.Thread:
+    """Run DERIVED migrations in a daemon thread, alongside packet ingestion."""
+
+    def _worker() -> None:
+        try:
+            _run_migration_phase(Phase.DERIVED, with_db_lock=False)
+        except Exception as exc:  # noqa: BLE001 - must never kill the daemon
+            logging.warning("Background migrations failed: %s", exc)
+
+    thread = threading.Thread(target=_worker, name="db-migrations", daemon=True)
+    thread.start()
+    return thread
 
 
 def load_node_cache() -> None:
@@ -1096,31 +1039,35 @@ def on_connect(
             logging.error("Connection refused: Unknown reason.")
 
 
-def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
-    """Callback for when a PUBLISH message is received from the server."""
-    # msg.topic is attacker-influenced; sanitise before it ever hits a log line.
-    safe_topic = _sanitize_for_log(msg.topic)
-    logging.debug(f"Received message on topic {safe_topic}: {len(msg.payload)} bytes")
+def process_message(topic: str, payload: bytes) -> None:
+    """Parse and store one MQTT PUBLISH.
+
+    Kept separate from :func:`on_message` so packets buffered during startup
+    migrations are replayed through exactly the same path as live ones.
+    """
+    # topic is attacker-influenced; sanitise before it ever hits a log line.
+    safe_topic = _sanitize_for_log(topic)
+    logging.debug(f"Received message on topic {safe_topic}: {len(payload)} bytes")
 
     # Reject oversized payloads before parsing or storing anything. A publisher
     # on the public broker must not be able to convert one PUBLISH into an
     # arbitrarily large protobuf parse and a durable DB blob (CWE-400/770).
-    if len(msg.payload) > MAX_MQTT_PAYLOAD_BYTES:
+    if len(payload) > MAX_MQTT_PAYLOAD_BYTES:
         logging.warning(
             f"Dropping oversized MQTT payload on topic {safe_topic}: "
-            f"{len(msg.payload)} bytes > {MAX_MQTT_PAYLOAD_BYTES} limit"
+            f"{len(payload)} bytes > {MAX_MQTT_PAYLOAD_BYTES} limit"
         )
         return
 
     # Skip JSON messages - we only want protobuf messages
-    if "/json/" in msg.topic:
+    if "/json/" in topic:
         logging.debug(f"Skipping JSON message on topic {safe_topic}")
         return
 
     logging.debug(f"Processing protobuf message on topic {safe_topic}")
 
     # Always store the raw message data first, regardless of parsing success
-    raw_service_envelope_data = msg.payload
+    raw_service_envelope_data = payload
     service_envelope = None
     mesh_packet = None
     processed_successfully = False
@@ -1130,7 +1077,7 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
     message_type = None
     topic_parts = []
     try:
-        topic_parts = msg.topic.split("/")
+        topic_parts = topic.split("/")
         if len(topic_parts) >= 4:
             message_type = topic_parts[3]  # Should be 'e', 'c', 'p', etc.
             logging.debug(f"Message type from topic: {_sanitize_for_log(message_type)}")
@@ -1140,7 +1087,7 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
     try:
         # Attempt to parse the ServiceEnvelope
         service_envelope = mqtt_pb2.ServiceEnvelope()
-        service_envelope.ParseFromString(msg.payload)
+        service_envelope.ParseFromString(payload)
         mesh_packet = service_envelope.packet
 
         from_node_id_numeric = getattr(mesh_packet, "from")
@@ -1398,19 +1345,19 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
     except UnicodeDecodeError as e:
         parsing_error = f"Unicode decode error: {str(e)}"
         logging.warning(
-            f"Could not decode payload as UTF-8 on topic {_sanitize_for_log(msg.topic)}: {e}"
+            f"Could not decode payload as UTF-8 on topic {_sanitize_for_log(topic)}: {e}"
         )
     except Exception as e:
         parsing_error = f"Parsing error: {str(e)}"
         logging.error(
-            f"Error processing MQTT protobuf message on topic {_sanitize_for_log(msg.topic)}: {e}"
+            f"Error processing MQTT protobuf message on topic {_sanitize_for_log(topic)}: {e}"
         )
-        logging.debug(f"Raw payload length: {len(msg.payload)} bytes")
+        logging.debug(f"Raw payload length: {len(payload)} bytes")
 
     # Always log packet to database, regardless of parsing success
     try:
         log_packet_to_database(
-            msg.topic,
+            topic,
             service_envelope,
             mesh_packet,
             processed_successfully,
@@ -1432,6 +1379,18 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
             logging.debug(
                 f"📦 Processed message type: {_sanitize_for_log(message_type)}"
             )
+
+
+def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
+    """Callback for when a PUBLISH message is received from the server.
+
+    While the daemon is still bringing the database up to date (write-locking
+    migrations), payloads are queued in memory instead of being dropped; the
+    main thread replays them once the database is ready.
+    """
+    if ingest_buffer.append(msg.topic, msg.payload):
+        return
+    process_message(msg.topic, msg.payload)
 
 
 def on_disconnect(
@@ -1500,6 +1459,11 @@ def main() -> None:
         "Node cache load step finished in %.3fs", time.time() - startup_step_start
     )
 
+    # From here on packets are queued in memory until the database is fully
+    # migrated, so the broker never sees a slow consumer and nothing published
+    # during the write-locking migrations is lost.
+    ingest_buffer.start()
+
     # Initialize MQTT Client
     mqtt_client = mqtt.Client(
         CallbackAPIVersion.VERSION2, client_id=MQTT_CLIENT_ID or ""
@@ -1539,7 +1503,27 @@ def main() -> None:
 
     # Start the MQTT client loop
     mqtt_client.loop_start()
-    logging.info("MQTT client loop started. Capturing packets to SQLite database...")
+    logging.info("MQTT client loop started; packets are buffered while migrations run")
+
+    # Write-locking migrations (index builds) and their siblings need no
+    # concurrent writers; packets received meanwhile sit in ingest_buffer.
+    migrations_started = time.time()
+    run_write_locking_migrations()
+    drained = ingest_buffer.drain(process_message)
+    logging.info(
+        "Startup migrations finished in %.3fs; processed %s buffered packets",
+        time.time() - migrations_started,
+        drained,
+    )
+    if ingest_buffer.dropped:
+        logging.error(
+            "%s packets were dropped: need a larger ingest buffer or faster migrations",
+            ingest_buffer.dropped,
+        )
+
+    # DERIVED migrations only touch stored rows, so they run in the background
+    # while packets are ingested normally from here on.
+    start_background_migrations()
 
     # Print initial statistics
     stats = get_node_statistics()
