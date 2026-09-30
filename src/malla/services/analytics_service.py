@@ -14,9 +14,6 @@ from ..utils.signal_quality import rssi_valid_sql, snr_valid_sql
 
 logger = logging.getLogger(__name__)
 
-#: Timelines are bucketed per quarter hour; a viewer's offset is snapped to this
-#: so that local day boundaries always fall on bucket boundaries.
-QUARTER_HOUR_MINUTES = activity_rollup.BUCKET_SECONDS // 60
 
 # NOTE: Lightweight, in-process cache so that repeated calls in a short period
 # do not hit the database multiple times. This is intentionally simple to keep
@@ -538,11 +535,8 @@ class AnalyticsService:
             range_key = "7d"
 
         # Day boundaries must land on bucket boundaries for the stored buckets
-        # to tile a viewer's day exactly; every real UTC offset is a quarter of
-        # an hour, and anything else is snapped to the nearest one.
-        tz_offset_minutes = (
-            int(tz_offset_minutes) // QUARTER_HOUR_MINUTES * QUARTER_HOUR_MINUTES
-        )
+        # to tile a viewer's day exactly; the store floors the offset itself.
+        tz_offset_minutes = activity_rollup.snap_offset_minutes(tz_offset_minutes)
 
         cache_key = (range_key, tz_offset_minutes)
         now_ts = time.time()

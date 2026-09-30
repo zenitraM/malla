@@ -33,6 +33,20 @@ logger = logging.getLogger(__name__)
 #: a day boundary for offsets such as +05:30, +05:45 or +12:45.
 BUCKET_SECONDS = 900
 
+
+def snap_offset_minutes(tz_offset_minutes: int) -> int:
+    """Floor a viewer's UTC offset to a multiple of the bucket width.
+
+    Local day boundaries must land on bucket boundaries for the stored buckets
+    to tile a viewer's day exactly. Every real-world UTC offset already is a
+    multiple of a quarter hour; anything else (a hand-crafted request) is
+    floored to the quarter hour below, east-positive, so the boundary never
+    moves backwards into the day being summed.
+    """
+    minutes = BUCKET_SECONDS // 60
+    return int(tz_offset_minutes) // minutes * minutes
+
+
 PACKET_TABLE = "activity_packet_quarter"
 NODE_TABLE = "activity_node_quarter"
 GATEWAY_TABLE = "activity_gateway_quarter"
@@ -164,6 +178,18 @@ def refresh(
     return inserted
 
 
+def prune_before(conn: sqlite3.Connection, cutoff: float) -> int:
+    """Drop buckets that start before *cutoff*, keeping the store in sync with
+    ``packet_history`` when data retention deletes old packets. Returns rows
+    deleted across the three bucket tables."""
+    cutoff_bucket = bucket_start(cutoff)
+    deleted = 0
+    for table in TABLES:
+        cursor = conn.execute(f"DELETE FROM {table} WHERE bucket < ?", (cutoff_bucket,))
+        deleted += cursor.rowcount
+    return deleted
+
+
 def _shifted_day(offset_sec: int) -> str:
     """SQL expression mapping a UTC bucket to the viewer's local date."""
     return f"date(bucket + {int(offset_sec)}, 'unixepoch')"
@@ -214,7 +240,11 @@ def daily_buckets(
 
 
 def new_nodes_by_day(
-    conn: sqlite3.Connection, *, tz_offset_minutes: int, start_utc: float, end_utc: float
+    conn: sqlite3.Connection,
+    *,
+    tz_offset_minutes: int,
+    start_utc: float,
+    end_utc: float,
 ) -> dict[str, int]:
     """Nodes first seen in each local day (``node_info`` is small and per-node)."""
     offset_sec = int(tz_offset_minutes) * 60

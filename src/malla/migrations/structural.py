@@ -57,8 +57,6 @@ NODE_INFO_TABLE_SQL = """
     )
 """
 
-# Names live with the store itself so the migration and the readers agree.
-ACTIVITY_QUARTER_TABLES = activity_rollup.TABLES
 
 # Columns added after packet_history first shipped; older databases get them
 # one by one.
@@ -307,9 +305,10 @@ CORE_INDEXES = Migration(
     pending=_core_indexes_pending,
 )
 
+
 def _activity_quarter_tables_pending(conn: sqlite3.Connection, _wm: Watermark) -> bool:
     present = tables(conn)
-    return any(table not in present for table in ACTIVITY_QUARTER_TABLES)
+    return any(table not in present for table in activity_rollup.TABLES)
 
 
 def _apply_activity_quarter_tables(

@@ -819,11 +819,19 @@ def cleanup_old_data() -> None:
             )
             nodes_deleted = cursor.rowcount
 
+            # Keep the quarter-hour activity buckets in sync with the packets
+            # just deleted, so the timeline never shows days whose source rows
+            # are gone.
+            buckets_deleted = activity_rollup.prune_before(
+                cursor.connection, cutoff_time
+            )
+
             conn.commit()
 
-            if packets_deleted > 0 or nodes_deleted > 0:
+            if packets_deleted > 0 or nodes_deleted > 0 or buckets_deleted > 0:
                 logging.info(
-                    f"🧹 Cleaned up {packets_deleted} old packets and {nodes_deleted} unused nodes "
+                    f"🧹 Cleaned up {packets_deleted} old packets, {nodes_deleted} unused nodes "
+                    f"and {buckets_deleted} activity bucket rows "
                     f"older than {DATA_RETENTION_HOURS} hours"
                 )
             else:

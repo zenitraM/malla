@@ -224,3 +224,41 @@ def test_timeline_snaps_viewer_offsets_to_a_quarter_hour(tmp_path, monkeypatch):
     raw_offset = AnalyticsService.get_activity_timeline("7d", offset_minutes + 3)
 
     assert snapped["buckets"] == raw_offset["buckets"]
+
+
+def test_snap_offset_floors_to_a_quarter_hour():
+    assert activity_rollup.snap_offset_minutes(0) == 0
+    assert activity_rollup.snap_offset_minutes(330) == 330
+    assert activity_rollup.snap_offset_minutes(333) == 330
+    assert activity_rollup.snap_offset_minutes(-32) == -45  # floored, not nearest
+    assert activity_rollup.snap_offset_minutes(33) == 30
+
+
+def test_prune_before_removes_only_old_buckets(tmp_path):
+    conn, _packets = _make_db(tmp_path / "prune.db")
+    activity_rollup.refresh(conn, until=NOW)
+    before = {
+        table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        for table in activity_rollup.TABLES
+    }
+    assert all(count > 0 for count in before.values())
+
+    # Cutting in the middle of the retained window removes the older buckets
+    # only; newer buckets and packet_history are untouched.
+    cutoff = NOW - DAY
+    assert activity_rollup.prune_before(conn, cutoff) > 0
+
+    for table in activity_rollup.TABLES:
+        newest_old = conn.execute(
+            f"SELECT MAX(bucket) FROM {table} WHERE bucket < ?", (cutoff,)
+        ).fetchone()[0]
+        assert newest_old is None
+    assert (
+        conn.execute("SELECT COUNT(*) FROM packet_history").fetchone()[0] > 0
+    )
+    after = {
+        table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        for table in activity_rollup.TABLES
+    }
+    assert all(after[table] < before[table] for table in activity_rollup.TABLES)
+    conn.close()
