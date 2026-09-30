@@ -22,7 +22,7 @@ import time
 from ..config import get_config
 from .base import PHASE_ORDER, Migration, Phase, Status
 from .registry import MIGRATIONS
-from .runner import forget_marker, read_marker, run_migrations
+from .runner import ensure_meta_table, forget_marker, read_marker, run_migrations
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,13 @@ def main(argv: list[str] | None = None) -> int:
 
     conn = sqlite3.connect(db_path, timeout=30)
     try:
+        if args.forget:
+            ensure_meta_table(conn)
+            conn.commit()
         for name in args.forget:
+            if args.dry_run:
+                print(f"dry run: would forget the progress marker of {name}")
+                continue
             if forget_marker(conn, name):
                 print(f"forgot progress marker of {name}")
             else:

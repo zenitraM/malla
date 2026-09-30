@@ -245,6 +245,22 @@ def _missing_columns(
     return [(name, decl) for name, decl in spec if name not in present]
 
 
+def missing_indexes(conn: sqlite3.Connection) -> list[str]:
+    """Indexes in :data:`INDEX_SPECS` whose table exists but the index does not.
+
+    This is the read-only view both consumers share: the ``core_indexes``
+    migration's ``pending`` check, and the web UI's startup verification (some
+    queries reference these indexes with ``INDEXED BY``).
+    """
+    present_tables = tables(conn)
+    present_indexes = indexes(conn)
+    return [
+        name
+        for name, table, _sql in INDEX_SPECS
+        if table in present_tables and name not in present_indexes
+    ]
+
+
 def _core_tables_pending(conn: sqlite3.Connection, _wm: Watermark) -> bool:
     present = tables(conn)
     if present < {"packet_history", "node_info", "activity_daily_rollup"}:
@@ -269,15 +285,10 @@ def _apply_core_tables(conn: sqlite3.Connection, _wm: Watermark) -> Watermark:
 
 
 def _core_indexes_pending(conn: sqlite3.Connection, _wm: Watermark) -> bool:
-    present_tables = tables(conn)
-    present_indexes = indexes(conn)
-    if any(
-        index not in present_indexes and table in present_tables
-        for index, table, _sql in INDEX_SPECS
-    ):
+    if missing_indexes(conn):
         return True
-    return "packet_history" in present_tables and any(
-        name in present_indexes for name in LEGACY_INDEX_NAMES
+    return "packet_history" in tables(conn) and any(
+        name in indexes(conn) for name in LEGACY_INDEX_NAMES
     )
 
 

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 
 
@@ -43,12 +43,6 @@ class Phase(StrEnum):
 
 
 PHASE_ORDER: tuple[Phase, ...] = (Phase.SCHEMA, Phase.BLOCKING, Phase.DERIVED)
-
-PHASE_DESCRIPTION: dict[Phase, str] = {
-    Phase.SCHEMA: "cheap DDL (tables, columns) before the first write",
-    Phase.BLOCKING: "write-locking DDL (index builds); ingestion is paused",
-    Phase.DERIVED: "idempotent data work; safe while packets are ingested",
-}
 
 #: Opaque, migration-owned progress marker. ``None`` means "never recorded";
 #: an empty string means "recorded, nothing to track" (one-shot migrations).
@@ -91,11 +85,12 @@ class MigrationResult:
     name: str
     phase: Phase
     status: Status
-    watermark: Watermark = None
     detail: str = ""
     seconds: float = 0.0
-    fields: dict[str, str] = field(default_factory=dict)
 
     def describe(self) -> str:
         extra = f" ({self.detail})" if self.detail else ""
-        return f"{self.name} [{self.phase.value}] {self.status.value}{extra} in {self.seconds:.2f}s"
+        return (
+            f"{self.name} [{self.phase.value}] {self.status.value}{extra}"
+            f" in {self.seconds:.2f}s"
+        )

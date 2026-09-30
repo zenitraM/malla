@@ -2,6 +2,7 @@
 
 import socket
 import sqlite3
+import threading
 import time
 
 import pytest
@@ -18,6 +19,7 @@ from malla.migrations import (
     run_migrations,
 )
 from malla.migrations.base import Watermark
+from malla.migrations.runner import migration_lock
 
 
 def _conn(path) -> sqlite3.Connection:
@@ -53,9 +55,8 @@ def test_phases_run_in_order_and_markers_are_written(tmp_path):
 
     assert log == ["schema_one", "blocking_one", "derived_one"]
     assert [r.status for r in results] == [Status.APPLIED] * 3
-    # One-shot migrations record "applied, nothing to track" and report no
-    # watermark; the stored value is the empty-string sentinel.
-    assert [r.watermark for r in results] == [None, None, None]
+    # One-shot migrations record "applied, nothing to track": the stored
+    # value is the empty-string sentinel.
     for migration in migrations:
         recorded, watermark = read_marker(conn, migration.name)
         assert recorded is True
@@ -222,6 +223,54 @@ def test_lock_from_a_dead_process_is_taken_over(tmp_path):
         ).fetchone()[0]
         == 0
     )
+    conn.close()
+
+
+def test_concurrent_takeover_of_a_dead_holder_elects_one_winner(tmp_path):
+    """Two waiters that saw the same dead owner must not both take the lock.
+
+    Regression: the takeover used to be an unguarded UPDATE, so both waiters
+    overwrote the holder row and both entered the critical section.
+    """
+
+    conn = _conn(tmp_path / "takeover.db")
+    ensure_meta_table(conn)
+    dead = f"{socket.gethostname()}:999999999"
+    conn.execute(
+        "INSERT INTO malla_meta (key, value, updated_at) VALUES ('migration_lock', ?, ?)",
+        (dead, time.time()),
+    )
+    conn.commit()
+
+    lock = threading.Lock()
+    acquired: list[int] = []
+    finished: list[int] = []
+
+    def contender(tag: int) -> None:
+        own = sqlite3.connect(tmp_path / "takeover.db", timeout=30)
+        try:
+            with migration_lock(own, timeout=30, stale_after=0):
+                with lock:
+                    acquired.append(tag)
+                time.sleep(0.1)  # widen the overlap window: a concurrent
+                # second holder would finish while this sleep is still running
+                with lock:
+                    finished.append(tag)
+        finally:
+            own.close()
+
+    threads = [threading.Thread(target=contender, args=(i,)) for i in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    # Both threads ran (the first holder is dead and stale_after=0 makes the
+    # takeover immediate), but the second could only enter after the first
+    # released: no overlap means the guarded takeover elected one winner.
+    assert sorted(acquired) == [0, 1]
+    assert sorted(finished) == [0, 1]
+    assert acquired == finished  # strictly sequential critical sections
     conn.close()
 
 

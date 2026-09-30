@@ -133,6 +133,10 @@ def migration_lock(
             conn.commit()
             break
         except sqlite3.IntegrityError:
+            # The failed INSERT opened an implicit transaction (python sqlite3
+            # legacy mode); end it, or every later read on this connection
+            # repeats its stale snapshot and never sees the lock released.
+            conn.rollback()
             row = conn.execute(
                 "SELECT value, updated_at FROM malla_meta WHERE key = ?", (LOCK_KEY,)
             ).fetchone()
@@ -142,12 +146,17 @@ def migration_lock(
                 logger.warning(
                     "Taking over migration lock held by %s for %.0fs", holder, age
                 )
-                conn.execute(
-                    "UPDATE malla_meta SET value = ?, updated_at = ? WHERE key = ?",
-                    (owner, time.time(), LOCK_KEY),
+                # Guard on the previous holder: two waiters that both saw the
+                # same dead owner must not both take over. Losing this race
+                # just means the winner is alive — retry the loop.
+                cursor = conn.execute(
+                    "UPDATE malla_meta SET value = ?, updated_at = ? "
+                    "WHERE key = ? AND value = ?",
+                    (owner, time.time(), LOCK_KEY, holder),
                 )
                 conn.commit()
-                break
+                if cursor.rowcount:
+                    break
             if time.monotonic() >= deadline:
                 raise TimeoutError(
                     f"migration lock is held by {holder} (waited {timeout:.0f}s)"
@@ -221,14 +230,11 @@ def _run_one(
     started = time.monotonic()
     _recorded, watermark = read_marker(conn, migration.name)
 
-    def result(
-        status: Status, detail: str = "", watermark: Watermark = watermark
-    ) -> MigrationResult:
+    def result(status: Status, detail: str = "") -> MigrationResult:
         return MigrationResult(
             name=migration.name,
             phase=migration.phase,
             status=status,
-            watermark=watermark,
             detail=detail,
             seconds=time.monotonic() - started,
         )
@@ -266,4 +272,4 @@ def _run_one(
     logger.info(
         "Applied migration %s: %s", migration.name, result(Status.APPLIED).seconds
     )
-    return result(Status.APPLIED, watermark=new_watermark)
+    return result(Status.APPLIED)

@@ -354,7 +354,7 @@ def _log_migration_results(results: list[MigrationResult]) -> None:
         if result.status is Status.FAILED:
             logging.error("Migration %s failed: %s", result.name, result.detail)
         elif result.status is Status.APPLIED:
-            logging.info("Migration %s applied in %.2fs", result.name, result.seconds)
+            logging.info("Migration %s", result.describe())
         else:
             logging.debug("Migration %s: %s", result.name, result.detail)
 

@@ -8,6 +8,7 @@ import sqlite3
 
 # Prefer configuration loader over environment variables
 from malla.config import get_config
+from malla.migrations.structural import missing_indexes
 
 logger = logging.getLogger(__name__)
 
@@ -95,19 +96,6 @@ def _present_required_tables(cursor: sqlite3.Cursor) -> set[str]:
     return {row[0] for row in cursor.fetchall()}
 
 
-def _missing_indexes(cursor: sqlite3.Cursor, present_tables: set[str]) -> list[str]:
-    """Indexes the queries need (some are referenced with INDEXED BY) that are absent."""
-    from ..migrations.structural import INDEX_SPECS
-
-    cursor.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
-    present = {row[0] for row in cursor.fetchall()}
-    return [
-        name
-        for name, table, _sql in INDEX_SPECS
-        if table in present_tables and name not in present
-    ]
-
-
 def init_database() -> None:
     """Verify the database is reachable and already migrated.
 
@@ -127,7 +115,7 @@ def init_database() -> None:
         # Test a simple query to verify the database is accessible
         cursor = conn.cursor()
         present = _present_required_tables(cursor)
-        missing_indexes = _missing_indexes(cursor, present)
+        missing_idx = missing_indexes(conn)
         cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
         table_count = cursor.fetchone()[0]
 
@@ -149,13 +137,13 @@ def init_database() -> None:
                 "will fail until then.",
                 ", ".join(missing),
             )
-        elif missing_indexes:
+        elif missing_idx:
             logger.error(
                 "Database is missing %s index(es) (%s). Start malla-capture once (or "
                 "run 'malla-migrate') to finish the migrations; some queries use "
                 "INDEXED BY and will fail until then.",
-                len(missing_indexes),
-                ", ".join(missing_indexes[:3]),
+                len(missing_idx),
+                ", ".join(missing_idx[:3]),
             )
 
     except Exception as e:
