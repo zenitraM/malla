@@ -200,9 +200,10 @@ def api_activity_timeline():
     """API endpoint for the dashboard activity timeline (24h / 7d / 30d / all)."""
     try:
         range_key = request.args.get("range", "7d")
-        # Viewer's UTC offset in minutes (east positive), used to align buckets
-        # with local calendar days/hours. Clamped to the real-world UTC-12..
-        # UTC+14 range so it can't explode the rollup table or cache.
+        # Viewer's UTC offset in minutes (east positive): buckets are aligned to
+        # its local calendar days/hours. Clamped to the real-world UTC-12..UTC+14
+        # range, and the service floors it to a quarter hour so day boundaries
+        # land on activity-bucket boundaries.
         tz_offset = request.args.get("tz_offset", default=0, type=int)
         tz_offset = max(-720, min(840, tz_offset))
 

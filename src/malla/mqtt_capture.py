@@ -57,7 +57,7 @@ from paho.mqtt.enums import CallbackAPIVersion
 # ---------------------------------------------------------------------------
 from malla.config import get_config  # Import here to avoid circular import issues
 
-from . import capture_startup
+from . import activity_rollup, capture_startup
 from .ingest_buffer import IngestBuffer
 
 # Load the singleton configuration once at module import time.  This ensures the
@@ -819,11 +819,19 @@ def cleanup_old_data() -> None:
             )
             nodes_deleted = cursor.rowcount
 
+            # Keep the quarter-hour activity buckets in sync with the packets
+            # just deleted, so the timeline never shows days whose source rows
+            # are gone.
+            buckets_deleted = activity_rollup.prune_before(
+                cursor.connection, cutoff_time
+            )
+
             conn.commit()
 
-            if packets_deleted > 0 or nodes_deleted > 0:
+            if packets_deleted > 0 or nodes_deleted > 0 or buckets_deleted > 0:
                 logging.info(
-                    f"🧹 Cleaned up {packets_deleted} old packets and {nodes_deleted} unused nodes "
+                    f"🧹 Cleaned up {packets_deleted} old packets, {nodes_deleted} unused nodes "
+                    f"and {buckets_deleted} activity bucket rows "
                     f"older than {DATA_RETENTION_HOURS} hours"
                 )
             else:
@@ -1455,6 +1463,17 @@ def main() -> None:
             logging.info(
                 f"Stats: {stats['total_nodes']} nodes, {stats['total_packets']} packets, {stats['active_nodes_24h']} active (24h)"
             )
+
+            # Buckets complete every 15 minutes; normally this is one MAX() on
+            # a small table and returns immediately.
+            try:
+                built = capture_startup.refresh_activity_buckets(
+                    DATABASE_FILE, lock=db_lock
+                )
+                if built:
+                    logging.debug("Built %s activity bucket rows", built)
+            except Exception as exc:  # noqa: BLE001 - never break the loop
+                logging.warning("Activity bucket refresh failed: %s", exc)
 
             # Periodically refresh query-planner statistics so the planner keeps
             # choosing index-based plans as packet_history grows. PRAGMA optimize
