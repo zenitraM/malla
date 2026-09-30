@@ -196,6 +196,35 @@ export MALLA_MQTT_BROKER_ADDRESS="127.0.0.1"  # Replace with your broker
 
 Both tools use the same SQLite database concurrently using thread-safe connections.
 
+## Database Schema and Migrations
+
+`malla-capture` owns the SQLite schema. On startup it applies every pending
+migration from `malla.migrations` and records progress in the `malla_meta` table.
+Each migration is tagged with the phase in which it may run:
+
+| Phase | What it does | When it runs |
+| --- | --- | --- |
+| `schema` | tables and columns (cheap DDL) | before the daemon connects, so the ingest path can always write |
+| `blocking` | write-locking DDL (index builds) | after connecting; incoming packets queue in memory and are replayed when the migration finishes, so none are lost |
+| `derived` | data work over stored rows (backfills, bounded `ANALYZE`) | in the background while packets are ingested |
+
+The web UI never creates or changes the schema — it only checks that it is
+present. **Start `malla-capture` at least once (or run `malla-migrate`) before
+expecting the web UI to serve data**: against an uninitialized database it logs a
+clear error at startup and requests fail until the schema exists.
+
+Migrations can be inspected or applied without starting MQTT:
+
+```bash
+uv run malla-migrate --list                             # applied vs pending
+uv run malla-migrate --dry-run                          # what would run
+uv run malla-migrate --phase derived                    # a single phase
+uv run malla-migrate --forget primary_channel_backfill   # force one to run again
+```
+
+Every migration is idempotent: a crash between the work and writing its progress
+marker simply repeats the migration on the next start.
+
 ## Docker Configuration
 
 When using Docker, configuration is handled through environment variables defined in your `.env` file:

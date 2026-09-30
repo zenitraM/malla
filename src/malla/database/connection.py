@@ -5,16 +5,10 @@ Database connection management for Meshtastic Mesh Health Web UI.
 import logging
 import os
 import sqlite3
-import threading
 
 # Prefer configuration loader over environment variables
 from malla.config import get_config
-
-from .schema import (
-    ensure_query_planner_stats,
-    ensure_startup_schema,
-    query_planner_stats_present,
-)
+from malla.migrations.structural import missing_indexes
 
 logger = logging.getLogger(__name__)
 
@@ -65,78 +59,6 @@ def _resolve_db_path() -> str:
     )
 
 
-# Guards against spawning more than one concurrent background ANALYZE seeder
-# per process. Tracks the live thread (not a latching flag) so a later startup
-# call can retry if a previous seed thread died, and so tests stay isolated.
-_stats_seed_lock = threading.Lock()
-_stats_seed_thread: threading.Thread | None = None
-
-
-def seed_query_planner_stats_async(db_path: str | None = None) -> bool:
-    """Seed SQLite planner statistics in a background thread if they are missing.
-
-    A bounded ANALYZE still reads ~1000 sample rows per index, which can take
-    ~100 seconds of random I/O on a cold multi-gigabyte database. Running it
-    synchronously at startup would block web request serving or packet
-    ingestion for that whole time, so we do it off-thread instead. When stats
-    are already present (the common case after the first run) this is a single
-    fast SELECT and no thread is started.
-
-    Returns ``True`` if a seeding thread was started.
-    """
-
-    global _stats_seed_thread
-
-    path = db_path or _resolve_db_path()
-
-    # Fast pre-check on the calling thread: usually stats already exist and we
-    # return immediately without touching threads.
-    try:
-        conn = sqlite3.connect(path, timeout=30.0)
-        try:
-            if query_planner_stats_present(conn.cursor()):
-                return False
-        finally:
-            conn.close()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not check query-planner statistics: %s", exc)
-        return False
-
-    with _stats_seed_lock:
-        if _stats_seed_thread is not None and _stats_seed_thread.is_alive():
-            return False
-
-    def _worker() -> None:
-        import time
-
-        try:
-            conn = sqlite3.connect(path, timeout=60.0)
-            try:
-                _apply_connection_pragmas(conn.cursor())
-                started = time.time()
-                if ensure_query_planner_stats(conn.cursor()):
-                    conn.commit()
-                    logger.info(
-                        "Seeded query-planner statistics in %.1fs",
-                        time.time() - started,
-                    )
-            finally:
-                conn.close()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Background ANALYZE seeding failed: %s", exc)
-
-    thread = threading.Thread(
-        target=_worker, name="malla-analyze-seed", daemon=True
-    )
-    with _stats_seed_lock:
-        # Re-check under the lock in case a concurrent caller started one.
-        if _stats_seed_thread is not None and _stats_seed_thread.is_alive():
-            return False
-        _stats_seed_thread = thread
-        thread.start()
-    return True
-
-
 def get_db_connection() -> sqlite3.Connection:
     """
     Get a connection to the SQLite database with proper concurrency configuration.
@@ -161,10 +83,26 @@ def get_db_connection() -> sqlite3.Connection:
         raise
 
 
+#: Tables the web UI needs; everything else is created by the capture daemon.
+REQUIRED_TABLES: tuple[str, ...] = ("packet_history", "node_info")
+
+
+def _present_required_tables(cursor: sqlite3.Cursor) -> set[str]:
+    placeholders = ",".join("?" * len(REQUIRED_TABLES))
+    cursor.execute(
+        f"SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ({placeholders})",
+        REQUIRED_TABLES,
+    )
+    return {row[0] for row in cursor.fetchall()}
+
+
 def init_database() -> None:
-    """
-    Initialize the database connection and verify it's accessible.
-    This function is called during application startup.
+    """Verify the database is reachable and already migrated.
+
+    Schema creation and migrations belong to ``malla-capture`` (or the
+    ``malla-migrate`` CLI): the web UI never writes DDL, so the daemon can never
+    be blocked by a web process building an index. An uninitialized database is
+    reported clearly here instead of failing one request at a time.
     """
     db_path = _resolve_db_path()
 
@@ -176,8 +114,8 @@ def init_database() -> None:
 
         # Test a simple query to verify the database is accessible
         cursor = conn.cursor()
-        ensure_startup_schema(cursor)
-        conn.commit()
+        present = _present_required_tables(cursor)
+        missing_idx = missing_indexes(conn)
         cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
         table_count = cursor.fetchone()[0]
 
@@ -187,15 +125,26 @@ def init_database() -> None:
 
         conn.close()
 
-        # Seed query-planner statistics on first run so the planner picks
-        # index-based plans instead of full scans on a large packet_history.
-        # Runs in a background thread so a cold ANALYZE (~100s on a multi-GB DB)
-        # never blocks request serving.
-        seed_query_planner_stats_async(db_path)
-
         logger.info(
             f"Database connection successful - found {table_count} tables, journal_mode: {journal_mode}"
         )
+
+        missing = [table for table in REQUIRED_TABLES if table not in present]
+        if missing:
+            logger.error(
+                "Database is not initialized (missing %s). Start malla-capture once "
+                "(or run 'malla-migrate') to create and migrate the schema; requests "
+                "will fail until then.",
+                ", ".join(missing),
+            )
+        elif missing_idx:
+            logger.error(
+                "Database is missing %s index(es) (%s). Start malla-capture once (or "
+                "run 'malla-migrate') to finish the migrations; some queries use "
+                "INDEXED BY and will fail until then.",
+                len(missing_idx),
+                ", ".join(missing_idx[:3]),
+            )
 
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
