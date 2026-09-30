@@ -114,13 +114,17 @@ def migration_lock(
     stale_after: float = 900.0,
     poll: float = 0.25,
 ) -> Iterator[None]:
-    """Serialise migration runners through a row in ``malla_meta``.
+    """Serialise migration *runners* through a row in ``malla_meta``.
 
     Two capture daemons pointed at the same database (a rolling deploy, a
     forgotten instance) would otherwise race on DDL. A lock whose owner is gone
     — the process died mid-migration — is taken over immediately, and one older
     than *stale_after* seconds is taken over regardless, so a crash cannot wedge
     the database.
+
+    Scope it to the schema-changing phases: DERIVED migrations are idempotent by
+    contract, and holding this lock across one that runs for minutes is how a
+    live holder gets mistaken for a dead one.
     """
     owner = f"{socket.gethostname()}:{os.getpid()}"
     deadline = time.monotonic() + timeout
@@ -187,8 +191,17 @@ def run_migrations(
     """Apply every pending migration in phase order.
 
     ``phases`` restricts the run (used to split the work around the MQTT
-    connect). ``strict`` re-raises instead of recording a failure. ``dry_run``
-    reports what would run without touching anything but ``malla_meta``.
+    connect). ``strict`` re-raises instead of recording a failure.
+
+    ``dry_run`` reports what would run and writes nothing at all — not even the
+    marker table or the advisory lock.
+
+    The advisory lock guards against a second *runner* (a rolling deploy, a
+    forgotten instance) performing DDL at the same time, so it is taken per
+    phase and only for the phases that change the schema. DERIVED migrations are
+    idempotent by contract and run unlocked: they may be duplicated by another
+    instance, and a multi-minute phase must not hold a lock that a second runner
+    could steal as stale. ``take_lock=False`` disables it entirely.
     """
     if migrations is None:
         from .registry import MIGRATIONS
@@ -198,25 +211,30 @@ def run_migrations(
         registry = migrations
 
     selected = set(phases) if phases else set(PHASE_ORDER)
-    ordered = [
-        m
-        for phase in PHASE_ORDER
-        if phase in selected
-        for m in registry
-        if m.phase is phase
-    ]
 
-    ensure_meta_table(conn)
-    conn.commit()
+    if not dry_run:
+        ensure_meta_table(conn)
+        conn.commit()
 
     results: list[MigrationResult] = []
-    guard: Any = (
-        migration_lock(conn, timeout=lock_timeout) if take_lock else nullcontext()
-    )
-    with guard:
-        for migration in ordered:
-            result = _run_one(conn, migration, strict=strict, dry_run=dry_run)
-            results.append(result)
+    for phase in PHASE_ORDER:
+        if phase not in selected:
+            continue
+        phase_migrations = [m for m in registry if m.phase is phase]
+        if not phase_migrations:
+            continue
+        # Schema-changing phases are serialised across runners; DERIVED work is
+        # idempotent, so it runs unlocked (see the docstring).
+        guard: Any = (
+            migration_lock(conn, timeout=lock_timeout)
+            if (take_lock and not dry_run and phase is not Phase.DERIVED)
+            else nullcontext()
+        )
+        with guard:
+            for migration in phase_migrations:
+                results.append(
+                    _run_one(conn, migration, strict=strict, dry_run=dry_run)
+                )
     return results
 
 

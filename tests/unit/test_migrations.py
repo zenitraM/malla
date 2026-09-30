@@ -42,6 +42,11 @@ def _append(
     return Migration(name=name, phase=phase, apply=apply)
 
 
+def _noop(phase: Phase) -> Migration:
+    """A migration that does nothing, for exercising the runner's locking."""
+    return Migration(name=f"noop_{phase.value}", phase=phase, apply=lambda _c, wm: wm)
+
+
 def test_phases_run_in_order_and_markers_are_written(tmp_path):
     log: list[str] = []
     migrations = (
@@ -173,6 +178,12 @@ def test_dry_run_reports_without_applying(tmp_path):
     assert [r.status for r in results] == [Status.SKIPPED]
     assert "dry run" in results[0].detail
     assert read_marker(conn, "later") == (False, None)
+    # A dry run writes nothing at all: no marker table, no advisory lock.
+    tables = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+    assert "malla_meta" not in tables
     conn.close()
 
 
@@ -199,7 +210,9 @@ def test_concurrent_runner_is_rejected_by_the_lock(tmp_path):
     conn.commit()
 
     with pytest.raises(TimeoutError):
-        run_migrations(conn, (), phases=(Phase.SCHEMA,), lock_timeout=0.1)
+        run_migrations(
+            conn, (_noop(Phase.SCHEMA),), phases=(Phase.SCHEMA,), lock_timeout=0.1
+        )
     conn.close()
 
 
@@ -214,8 +227,8 @@ def test_lock_from_a_dead_process_is_taken_over(tmp_path):
     )
     conn.commit()
 
-    results = run_migrations(conn, (), lock_timeout=5)
-    assert results == []
+    results = run_migrations(conn, (_noop(Phase.SCHEMA),), lock_timeout=5)
+    assert [r.status for r in results] == [Status.APPLIED]
     # The lock is released again after the run.
     assert (
         conn.execute(
@@ -271,6 +284,44 @@ def test_concurrent_takeover_of_a_dead_holder_elects_one_winner(tmp_path):
     assert sorted(acquired) == [0, 1]
     assert sorted(finished) == [0, 1]
     assert acquired == finished  # strictly sequential critical sections
+    conn.close()
+
+
+def test_lock_from_a_remote_holder_is_respected_then_taken_over(tmp_path):
+    """A holder we cannot inspect is freed by the staleness timeout, not by pid.
+
+    The dead-owner path only applies to holders on this host; anything else has
+    to go through ``stale_after``, which this pins.
+    """
+
+    conn = _conn(tmp_path / "remote.db")
+    ensure_meta_table(conn)
+    conn.execute(
+        "INSERT INTO malla_meta (key, value, updated_at) VALUES ('migration_lock', ?, ?)",
+        ("elsewhere.example:1", time.time()),
+    )
+    conn.commit()
+
+    # Fresh: respected, so a short wait gives up.
+    with pytest.raises(TimeoutError):
+        run_migrations(
+            conn, (_noop(Phase.SCHEMA),), phases=(Phase.SCHEMA,), lock_timeout=0.2
+        )
+
+    # Old: taken over even though the holder looks alive.
+    conn.execute(
+        "UPDATE malla_meta SET updated_at = ? WHERE key = 'migration_lock'",
+        (time.time() - 3600,),
+    )
+    conn.commit()
+    with migration_lock(conn, timeout=5, stale_after=60):
+        pass
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) FROM malla_meta WHERE key = 'migration_lock'"
+        ).fetchone()[0]
+        == 0
+    )
     conn.close()
 
 

@@ -61,9 +61,9 @@ class TestMQTTClientIdUsage:
     """Test that the MQTT client ID is passed correctly to the MQTT client."""
 
     @patch("malla.mqtt_capture.mqtt.Client")
-    @patch("malla.mqtt_capture.start_background_migrations")
-    @patch("malla.mqtt_capture.run_write_locking_migrations")
-    @patch("malla.mqtt_capture.init_database")
+    @patch("malla.capture_startup.start_background_migrations")
+    @patch("malla.capture_startup.run_write_locking_migrations")
+    @patch("malla.capture_startup.init_database")
     @patch("malla.mqtt_capture.load_node_cache")
     @patch("malla.mqtt_capture.get_node_statistics")
     def test_main_uses_configured_client_id(
@@ -110,9 +110,9 @@ class TestMQTTClientIdUsage:
         )
 
     @patch("malla.mqtt_capture.mqtt.Client")
-    @patch("malla.mqtt_capture.start_background_migrations")
-    @patch("malla.mqtt_capture.run_write_locking_migrations")
-    @patch("malla.mqtt_capture.init_database")
+    @patch("malla.capture_startup.start_background_migrations")
+    @patch("malla.capture_startup.run_write_locking_migrations")
+    @patch("malla.capture_startup.init_database")
     @patch("malla.mqtt_capture.load_node_cache")
     @patch("malla.mqtt_capture.get_node_statistics")
     def test_main_uses_empty_string_when_no_client_id(

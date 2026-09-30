@@ -38,7 +38,6 @@ import socket
 import sqlite3
 import threading
 import time
-from contextlib import nullcontext
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -58,8 +57,8 @@ from paho.mqtt.enums import CallbackAPIVersion
 # ---------------------------------------------------------------------------
 from malla.config import get_config  # Import here to avoid circular import issues
 
+from . import capture_startup
 from .ingest_buffer import IngestBuffer
-from .migrations import MIGRATIONS, MigrationResult, Phase, Status, run_migrations
 
 # Load the singleton configuration once at module import time.  This ensures the
 # capture tool honours the same YAML + optional environment override mechanism
@@ -314,98 +313,6 @@ def try_decrypt_mesh_packet(
     except Exception as e:
         logging.warning(f"Error in try_decrypt_mesh_packet: {e}")
         return False
-
-
-# --- Database Functions ---
-# ---------------------------------------------------------------------------
-# Database migrations
-# ---------------------------------------------------------------------------
-# Every schema or data change lives in malla.migrations as a named, idempotent
-# step tagged with a phase that says when it may run relative to ingestion:
-#
-#   SCHEMA    cheap DDL (tables, columns) - must finish before the first write
-#   BLOCKING  write-locking DDL (index builds) - runs with ingestion paused
-#   DERIVED   data work over stored rows - safe in the background
-#
-# main() applies SCHEMA before connecting so the ingest path can always write,
-# connects next so nothing published while BLOCKING runs is lost (payloads queue
-# in ingest_buffer), then lets DERIVED run in the background.
-
-
-def _configure_connection(conn: sqlite3.Connection) -> None:
-    """Apply the SQLite tuning pragmas shared by the capture's connections.
-
-    cache_size is negative so SQLite reads it as KiB (64 MiB) rather than a page
-    count. mmap is intentionally left off: with continuous writes, memory-mapped
-    readers can report "database disk image is malformed" during WAL checkpoints.
-    """
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.execute("PRAGMA busy_timeout=30000")
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.execute("PRAGMA cache_size=-65536")  # 64 MiB (negative => KiB)
-    cursor.execute("PRAGMA temp_store=MEMORY")
-    cursor.execute("PRAGMA analysis_limit=1000")  # bound ANALYZE / optimize work
-
-
-def _log_migration_results(results: list[MigrationResult]) -> None:
-    for result in results:
-        if result.status is Status.FAILED:
-            logging.error("Migration %s failed: %s", result.name, result.detail)
-        elif result.status is Status.APPLIED:
-            logging.info("Migration %s", result.describe())
-        else:
-            logging.debug("Migration %s: %s", result.name, result.detail)
-
-
-def _run_migration_phase(
-    phase: Phase, *, with_db_lock: bool = True
-) -> list[MigrationResult]:
-    """Run every migration of one phase on its own connection.
-
-    ``with_db_lock`` is only for the phases that run while ingestion is paused;
-    DERIVED migrations run alongside packet inserts (and the bounded ANALYZE can
-    take minutes), so holding db_lock there would stall the capture.
-    """
-    guard = db_lock if with_db_lock else nullcontext()
-    with guard:
-        conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
-        try:
-            _configure_connection(conn)
-            results = run_migrations(conn, MIGRATIONS, phases=(phase,))
-        finally:
-            conn.close()
-    _log_migration_results(results)
-    return results
-
-
-def init_database() -> None:
-    """Apply the cheap schema migrations so the ingest path can write."""
-    init_start = time.time()
-    _run_migration_phase(Phase.SCHEMA)
-    logging.info(
-        "Database schema ready: %s (%.3fs)", DATABASE_FILE, time.time() - init_start
-    )
-
-
-def run_write_locking_migrations() -> None:
-    """Index builds and other DDL that cannot run while packets are written."""
-    _run_migration_phase(Phase.BLOCKING)
-
-
-def start_background_migrations() -> threading.Thread:
-    """Run DERIVED migrations in a daemon thread, alongside packet ingestion."""
-
-    def _worker() -> None:
-        try:
-            _run_migration_phase(Phase.DERIVED, with_db_lock=False)
-        except Exception as exc:  # noqa: BLE001 - must never kill the daemon
-            logging.warning("Background migrations failed: %s", exc)
-
-    thread = threading.Thread(target=_worker, name="db-migrations", daemon=True)
-    thread.start()
-    return thread
 
 
 def load_node_cache() -> None:
@@ -1448,7 +1355,7 @@ def main() -> None:
     # Initialize database and load node cache
     logging.info("Initializing database...")
     startup_step_start = time.time()
-    init_database()
+    capture_startup.init_database(DATABASE_FILE, lock=db_lock)
     logging.info(
         "Database initialization step finished in %.3fs",
         time.time() - startup_step_start,
@@ -1508,7 +1415,7 @@ def main() -> None:
     # Write-locking migrations (index builds) and their siblings need no
     # concurrent writers; packets received meanwhile sit in ingest_buffer.
     migrations_started = time.time()
-    run_write_locking_migrations()
+    capture_startup.run_write_locking_migrations(DATABASE_FILE, lock=db_lock)
     drained = ingest_buffer.drain(process_message)
     logging.info(
         "Startup migrations finished in %.3fs; processed %s buffered packets",
@@ -1523,7 +1430,7 @@ def main() -> None:
 
     # DERIVED migrations only touch stored rows, so they run in the background
     # while packets are ingested normally from here on.
-    start_background_migrations()
+    capture_startup.start_background_migrations(DATABASE_FILE)
 
     # Print initial statistics
     stats = get_node_statistics()
