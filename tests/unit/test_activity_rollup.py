@@ -58,21 +58,15 @@ def test_buckets_reproduce_the_live_aggregation_for_every_offset(tmp_path):
     assert packets > 100
     assert activity_rollup.refresh(conn, until=NOW) > 0
 
-    start_utc = activity_rollup.bucket_start(NOW - 2 * DAY)
-    end_utc = activity_rollup.bucket_start(NOW)  # only completed buckets
     cursor = conn.cursor()
 
     for offset_minutes in OFFSETS:
-        offset_sec = offset_minutes * 60
+        window = activity_rollup.viewer_window(offset_minutes, now=NOW, days=2)
+        assert window.end_utc <= NOW  # only completed buckets
         live = AnalyticsService._compute_daily_span(
-            cursor, offset_sec, start_utc + offset_sec, end_utc + offset_sec
+            cursor, window.offset_sec, window.start_local, window.today_local
         )
-        stored = activity_rollup.daily_buckets(
-            conn,
-            tz_offset_minutes=offset_minutes,
-            start_utc=start_utc,
-            end_utc=end_utc,
-        )
+        stored = activity_rollup.daily_buckets(conn, window)
         assert set(stored) == set(live), f"offset {offset_minutes} days differ"
         for day, expected in live.items():
             for metric in ("total_packets", "active_nodes", "gateway_count"):
@@ -94,20 +88,13 @@ def test_new_nodes_by_day_matches_the_live_aggregation(tmp_path):
     )
     conn.commit()
 
-    start_utc = activity_rollup.bucket_start(NOW - 2 * DAY)
-    end_utc = activity_rollup.bucket_start(NOW)
     cursor = conn.cursor()
     for offset_minutes in OFFSETS:
-        offset_sec = offset_minutes * 60
+        window = activity_rollup.viewer_window(offset_minutes, now=NOW, days=2)
         live = AnalyticsService._compute_daily_span(
-            cursor, offset_sec, start_utc + offset_sec, end_utc + offset_sec
+            cursor, window.offset_sec, window.start_local, window.today_local
         )
-        stored = activity_rollup.new_nodes_by_day(
-            conn,
-            tz_offset_minutes=offset_minutes,
-            start_utc=start_utc,
-            end_utc=end_utc,
-        )
+        stored = activity_rollup.new_nodes_by_day(conn, window)
         for day in set(live) | set(stored):
             assert live.get(day, {}).get("new_nodes", 0) == stored.get(day, 0), (
                 offset_minutes,
@@ -224,6 +211,25 @@ def test_timeline_snaps_viewer_offsets_to_a_quarter_hour(tmp_path, monkeypatch):
     raw_offset = AnalyticsService.get_activity_timeline("7d", offset_minutes + 3)
 
     assert snapped["buckets"] == raw_offset["buckets"]
+
+
+def test_viewer_window_carries_the_floored_offset_and_aligned_bounds():
+    """A window is the only way the readers see an offset, so they cannot disagree."""
+    window = activity_rollup.viewer_window(333, now=NOW, days=7)
+
+    assert window.offset_minutes == 330  # floored, not the raw 333
+    assert window.offset_sec == 330 * 60
+    assert window.end_utc % activity_rollup.BUCKET_SECONDS == 0
+    assert window.start_utc % activity_rollup.BUCKET_SECONDS == 0
+    assert window.day_epochs[0] == window.start_local
+    assert window.day_epochs[-1] == window.today_local
+    assert len(window.day_epochs) == 8  # seven completed days plus today
+
+    # "all" starts at the first packet's local day, never after today.
+    window_all = activity_rollup.viewer_window(0, now=NOW, since=NOW - 3 * DAY)
+    assert len(window_all.day_epochs) == 4
+    future = activity_rollup.viewer_window(0, now=NOW, since=NOW + DAY)
+    assert future.start_local == future.today_local
 
 
 def test_snap_offset_floors_to_a_quarter_hour():

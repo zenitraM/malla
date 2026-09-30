@@ -1464,6 +1464,17 @@ def main() -> None:
                 f"Stats: {stats['total_nodes']} nodes, {stats['total_packets']} packets, {stats['active_nodes_24h']} active (24h)"
             )
 
+            # Buckets complete every 15 minutes; normally this is one MAX() on
+            # a small table and returns immediately.
+            try:
+                built = capture_startup.refresh_activity_buckets(
+                    DATABASE_FILE, lock=db_lock
+                )
+                if built:
+                    logging.debug("Built %s activity bucket rows", built)
+            except Exception as exc:  # noqa: BLE001 - never break the loop
+                logging.warning("Activity bucket refresh failed: %s", exc)
+
             # Periodically refresh query-planner statistics so the planner keeps
             # choosing index-based plans as packet_history grows. PRAGMA optimize
             # is bounded by the analysis_limit set on the connection and only
@@ -1471,15 +1482,6 @@ def main() -> None:
             # does little. It runs on its own connection WITHOUT db_lock so its
             # sampling never stalls packet ingestion; WAL plus busy_timeout make
             # its brief final stats write safe alongside concurrent inserts.
-            # Buckets complete every 15 minutes; normally this is one MAX() on
-            # a small table and returns immediately.
-            try:
-                built = refresh_activity_buckets()
-                if built:
-                    logging.debug("Built %s activity bucket rows", built)
-            except Exception as exc:  # noqa: BLE001 - never break the loop
-                logging.warning("Activity bucket refresh failed: %s", exc)
-
             now = time.time()
             if now - last_optimize >= optimize_interval:
                 try:

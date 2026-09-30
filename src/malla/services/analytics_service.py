@@ -653,53 +653,38 @@ class AnalyticsService:
         """
         from ..database.connection import get_db_connection
 
-        offset_sec = tz_offset_minutes * 60
-        today_local = (int(time.time() + offset_sec) // 86400) * 86400
-
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-
-            if range_key == "7d":
-                start_local = today_local - 7 * 86400
-            elif range_key == "30d":
-                start_local = today_local - 30 * 86400
-            else:  # all: from the local day of the first recorded packet
+            if range_key == "all":
+                # From the local day of the first recorded packet.
                 cursor.execute("SELECT MIN(timestamp) AS mn FROM packet_history")
                 row = cursor.fetchone()
-                mn = row["mn"] if row else None
-                start_local = (
-                    (int(mn + offset_sec) // 86400) * 86400
-                    if mn is not None
-                    else today_local
+                window = activity_rollup.viewer_window(
+                    tz_offset_minutes, since=row["mn"] if row else None
                 )
-                start_local = min(start_local, today_local)
+            else:
+                window = activity_rollup.viewer_window(
+                    tz_offset_minutes, days=7 if range_key == "7d" else 30
+                )
 
-            start_utc, end_utc = start_local - offset_sec, today_local - offset_sec
-            stats = activity_rollup.daily_buckets(
-                conn,
-                tz_offset_minutes=tz_offset_minutes,
-                start_utc=start_utc,
-                end_utc=end_utc,
-            )
-            for day, count in activity_rollup.new_nodes_by_day(
-                conn,
-                tz_offset_minutes=tz_offset_minutes,
-                start_utc=start_utc,
-                end_utc=end_utc,
-            ).items():
+            stats = activity_rollup.daily_buckets(conn, window)
+            for day, count in activity_rollup.new_nodes_by_day(conn, window).items():
                 stats.setdefault(day, {})["new_nodes"] = count
 
             today_stats = AnalyticsService._compute_daily_span(
-                cursor, offset_sec, today_local, today_local + 86400
+                cursor,
+                window.offset_sec,
+                window.today_local,
+                window.today_local + activity_rollup.DAY_SECONDS,
             )
         finally:
             conn.close()
 
         buckets: list[dict[str, Any]] = []
-        for day_epoch in range(start_local, today_local + 86400, 86400):
-            key = AnalyticsService._local_day_key(day_epoch)
-            source = today_stats if day_epoch >= today_local else stats
+        for day_epoch in window.day_epochs:
+            key = activity_rollup.day_key(day_epoch)
+            source = today_stats if day_epoch >= window.today_local else stats
             day_stats = source.get(key, {})
             buckets.append(
                 {
@@ -711,11 +696,6 @@ class AnalyticsService:
                 }
             )
         return buckets
-
-    @staticmethod
-    def _local_day_key(local_day_epoch: int) -> str:
-        """ISO date string for a local-midnight epoch (local time == shifted UTC)."""
-        return datetime.fromtimestamp(local_day_epoch, tz=UTC).date().isoformat()
 
     @staticmethod
     def _compute_daily_span(

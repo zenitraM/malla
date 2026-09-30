@@ -26,12 +26,16 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
 #: Bucket width. Anything coarser than 15 minutes mis-assigns the packets around
 #: a day boundary for offsets such as +05:30, +05:45 or +12:45.
 BUCKET_SECONDS = 900
+
+DAY_SECONDS = 86400
 
 
 def snap_offset_minutes(tz_offset_minutes: int) -> int:
@@ -45,6 +49,71 @@ def snap_offset_minutes(tz_offset_minutes: int) -> int:
     """
     minutes = BUCKET_SECONDS // 60
     return int(tz_offset_minutes) // minutes * minutes
+
+
+@dataclass(frozen=True)
+class ViewerWindow:
+    """A viewer's local-calendar range, aligned to bucket boundaries.
+
+    Built by :func:`viewer_window`. Readers take one of these rather than an
+    offset plus a time range, so the offset a day is bucketed with and the
+    boundaries it is summed over can never disagree.
+    """
+
+    offset_minutes: int
+    offset_sec: int
+    start_local: int
+    today_local: int
+
+    @property
+    def start_utc(self) -> int:
+        """Start of the window in UTC (bucket-aligned)."""
+        return self.start_local - self.offset_sec
+
+    @property
+    def end_utc(self) -> int:
+        """Exclusive end: the viewer's current local midnight, in UTC."""
+        return self.today_local - self.offset_sec
+
+    @property
+    def day_epochs(self) -> list[int]:
+        """Local-midnight epochs in the window, oldest first; today is last."""
+        return list(
+            range(self.start_local, self.today_local + DAY_SECONDS, DAY_SECONDS)
+        )
+
+
+def viewer_window(
+    tz_offset_minutes: int,
+    *,
+    now: float | None = None,
+    days: int | None = None,
+    since: float | None = None,
+) -> ViewerWindow:
+    """The local-calendar window a viewer's request covers.
+
+    *days* is a fixed trailing window (7d/30d), *since* a UTC epoch the window
+    starts at (the "all" range starts at the first packet), and with neither the
+    window is today alone.
+    """
+    offset_minutes = snap_offset_minutes(tz_offset_minutes)
+    offset_sec = offset_minutes * 60
+    current = time.time() if now is None else now
+    today_local = (int(current + offset_sec) // DAY_SECONDS) * DAY_SECONDS
+    if days is not None:
+        start_local = today_local - max(0, days) * DAY_SECONDS
+    elif since is not None:
+        start_local = min(
+            (int(since + offset_sec) // DAY_SECONDS) * DAY_SECONDS, today_local
+        )
+    else:
+        start_local = today_local
+    return ViewerWindow(offset_minutes, offset_sec, start_local, today_local)
+
+
+def day_key(local_epoch: int) -> str:
+    """ISO date for a local-midnight epoch (local time == shifted UTC)."""
+    return datetime.fromtimestamp(local_epoch, tz=UTC).date().isoformat()
 
 
 PACKET_TABLE = "activity_packet_quarter"
@@ -179,9 +248,13 @@ def refresh(
 
 
 def prune_before(conn: sqlite3.Connection, cutoff: float) -> int:
-    """Drop buckets that start before *cutoff*, keeping the store in sync with
-    ``packet_history`` when data retention deletes old packets. Returns rows
-    deleted across the three bucket tables."""
+    """Drop the buckets that are wholly older than the retention *cutoff*.
+
+    Called when data retention deletes old packets, so the store stops growing
+    and the timeline stops reporting days whose source rows are gone. The bucket
+    containing *cutoff* is kept even though part of it may already be expired:
+    that way a bucket is never dropped while any of its packets are still
+    retained. Returns rows deleted across the three bucket tables."""
     cutoff_bucket = bucket_start(cutoff)
     deleted = 0
     for table in TABLES:
@@ -196,20 +269,10 @@ def _shifted_day(offset_sec: int) -> str:
 
 
 def daily_buckets(
-    conn: sqlite3.Connection,
-    *,
-    tz_offset_minutes: int,
-    start_utc: float,
-    end_utc: float,
+    conn: sqlite3.Connection, window: ViewerWindow
 ) -> dict[str, dict[str, int]]:
-    """Per-local-day totals over ``[start_utc, end_utc)`` for one viewer offset.
-
-    The window must be aligned to :data:`BUCKET_SECONDS` (local day boundaries
-    are, for any offset that is a multiple of 15 minutes), otherwise the buckets
-    at the edges are partially outside it.
-    """
-    offset_sec = int(tz_offset_minutes) * 60
-    day = _shifted_day(offset_sec)
+    """Per-local-day totals for *window*: packets, distinct nodes, distinct gateways."""
+    day = _shifted_day(window.offset_sec)
     stats: dict[str, dict[str, int]] = {}
 
     def entry(key: str) -> dict[str, int]:
@@ -218,39 +281,32 @@ def daily_buckets(
     for row in conn.execute(
         f"SELECT {day} AS day, SUM(total_packets) FROM {PACKET_TABLE} "
         "WHERE bucket >= ? AND bucket < ? GROUP BY day",
-        (start_utc, end_utc),
+        (window.start_utc, window.end_utc),
     ):
         entry(row[0])["total_packets"] = int(row[1] or 0)
 
     for row in conn.execute(
         f"SELECT {day} AS day, COUNT(DISTINCT node_id) FROM {NODE_TABLE} "
         "WHERE bucket >= ? AND bucket < ? GROUP BY day",
-        (start_utc, end_utc),
+        (window.start_utc, window.end_utc),
     ):
         entry(row[0])["active_nodes"] = int(row[1] or 0)
 
     for row in conn.execute(
         f"SELECT {day} AS day, COUNT(DISTINCT gateway_id) FROM {GATEWAY_TABLE} "
         "WHERE bucket >= ? AND bucket < ? GROUP BY day",
-        (start_utc, end_utc),
+        (window.start_utc, window.end_utc),
     ):
         entry(row[0])["gateway_count"] = int(row[1] or 0)
 
     return stats
 
 
-def new_nodes_by_day(
-    conn: sqlite3.Connection,
-    *,
-    tz_offset_minutes: int,
-    start_utc: float,
-    end_utc: float,
-) -> dict[str, int]:
+def new_nodes_by_day(conn: sqlite3.Connection, window: ViewerWindow) -> dict[str, int]:
     """Nodes first seen in each local day (``node_info`` is small and per-node)."""
-    offset_sec = int(tz_offset_minutes) * 60
     rows = conn.execute(
         "SELECT date(first_seen + ?, 'unixepoch') AS day, COUNT(*) "
         "FROM node_info WHERE first_seen >= ? AND first_seen < ? GROUP BY day",
-        (offset_sec, start_utc, end_utc),
+        (window.offset_sec, window.start_utc, window.end_utc),
     ).fetchall()
     return {row[0]: int(row[1] or 0) for row in rows}
