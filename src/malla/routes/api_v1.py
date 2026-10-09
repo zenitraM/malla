@@ -50,7 +50,6 @@ from ..utils.node_utils import (
     get_bulk_node_names,
     get_bulk_node_short_names,
 )
-from ..utils.signal_quality import snr_valid_sql
 from ..utils.traceroute_utils import parse_traceroute_payload
 from . import api_routes as _legacy_api
 from .packet_routes import get_packet_details
@@ -555,10 +554,11 @@ def _node_public(node_id: int, **fields: Any) -> dict[str, Any]:
 #
 # NodeRepository.get_nodes cannot express has_position / last_seen_since
 # filters or snr/battery sorts, and its row shape lacks those fields, so the
-# v1 listing uses one dedicated query. The per-node 24h aggregate and position
-# existence are joined onto node_info; the battery sort additionally pulls each
-# node's latest device-telemetry payload and is ordered in Python after
-# decoding (battery lives inside a protobuf blob, unreachable from SQL).
+# v1 listing uses one dedicated query. The 24h counters and direct-SNR average
+# come from the capture-maintained ``node_hour_rollup`` (hour buckets; the
+# boundary bucket makes the window 24-25h wide) instead of aggregating
+# packet_history per request; batteries come from the ``node_latest_telemetry``
+# rollup via a TTL-cached map.
 # ---------------------------------------------------------------------------
 
 _NODE_AGG_WINDOW_SEC = 86400
@@ -566,30 +566,27 @@ _NODE_AGG_WINDOW_SEC = 86400
 _NODE_AGG_JOIN = """
     LEFT JOIN (
         SELECT
-            from_node_id AS node_id,
-            COUNT(*) AS packet_count_24h,
-            MAX(timestamp) AS last_packet_time
-        FROM packet_history
-        WHERE timestamp > ?
-        GROUP BY from_node_id
+            node_id,
+            SUM(packet_count) AS packet_count_24h,
+            MAX(last_seen) AS last_packet_time
+        FROM node_hour_rollup INDEXED BY sqlite_autoindex_node_hour_rollup_1
+        WHERE hour_epoch >= ?
+        GROUP BY node_id
     ) AS agg ON agg.node_id = ni.node_id
 """
 
-# Direct-reception signal average, kept in its own join so it can be served by
-# the existing partial index idx_packet_history_direct_hops
-# (timestamp, from_node_id, gateway_id, hop_start, hop_limit)
-# WHERE hop_start = hop_limit — measured 3.6x faster than letting the planner
-# fall back to the (timestamp, from_node_id) skip-scan for this aggregate.
+# Direct-reception signal average, pre-aggregated per hour bucket by the
+# capture refresh. The stored sums apply the same acceptance rule as the
+# legacy SQL (hop_start == hop_limit, 0..7, plausible SNR); parity is pinned
+# by tests/unit/test_capture_rollups.py.
 _NODE_SIGNAL_JOIN = """
     LEFT JOIN (
         SELECT
-            from_node_id AS node_id,
-            AVG(CASE WHEN {snr_valid} THEN CAST(snr AS FLOAT) END) AS avg_snr
-        FROM packet_history INDEXED BY idx_packet_history_direct_hops
-        WHERE timestamp > ?
-          AND hop_start = hop_limit
-          AND hop_start BETWEEN 0 AND 7
-        GROUP BY from_node_id
+            node_id,
+            SUM(direct_snr_sum) / NULLIF(SUM(direct_snr_count), 0) AS avg_snr
+        FROM node_hour_rollup INDEXED BY sqlite_autoindex_node_hour_rollup_1
+        WHERE hour_epoch >= ?
+        GROUP BY node_id
     ) AS sig ON sig.node_id = ni.node_id
 """
 
@@ -604,19 +601,27 @@ _NODE_POSITION_EXPR = (
 # WHERE portnum = 3 AND raw_payload IS NOT NULL AND from_node_id IS NOT NULL,
 # instead of a MATERIALIZEd DISTINCT join over the whole table.
 
-# Latest device battery per node, via the classic sqlite max-with-bare-columns
-# pattern: one pass, no window materialisation. On the 7.4M-row validation
-# snapshot this runs ~4x faster than the equivalent ROW_NUMBER join (293ms vs
-# 1275ms) and lets the battery map be cached across requests.
+# Latest device battery per node, from the capture-maintained
+# ``node_latest_telemetry`` rollup (decoded once at refresh time).
 _BATTERY_MAP_SQL = """
-    SELECT from_node_id AS node_id, raw_payload, MAX(timestamp) AS ts
-    FROM packet_history INDEXED BY idx_packet_history_telemetry_node_time
-    WHERE portnum_name = 'TELEMETRY_APP' AND raw_payload IS NOT NULL
-    GROUP BY node_id
+    SELECT node_id, battery_level
+    FROM node_latest_telemetry
+    WHERE battery_level IS NOT NULL
 """
 
 _BATTERY_CACHE_TTL_SEC = 120
 _battery_cache: dict[tuple[str, int], tuple[float, dict[int, float]]] = {}
+
+
+def _node_hour_window() -> int:
+    """Lowest ``node_hour_rollup`` bucket covering the rolling 24h window.
+
+    Whole hour buckets are the finest grain the rollup stores, so the window
+    they cover is 24-25h wide (the boundary bucket is included); see the
+    freshness contract in ``malla.capture_rollups``.
+    """
+    return int((time.time() - _NODE_AGG_WINDOW_SEC) // 3600)
+
 
 _NODE_SELECT = """
     SELECT
@@ -687,24 +692,6 @@ def _node_filters() -> tuple[str, list[Any], dict[str, bool]]:
     return where_sql, params, needs
 
 
-def _battery_from_payload(raw: Any) -> float | None:
-    """Decode the battery level from a Telemetry protobuf blob."""
-    if not raw:
-        return None
-    from meshtastic import telemetry_pb2
-
-    try:
-        telemetry = telemetry_pb2.Telemetry()
-        telemetry.ParseFromString(raw)
-    except Exception:
-        return None
-    if telemetry.HasField("device_metrics") and telemetry.device_metrics.HasField(
-        "battery_level"
-    ):
-        return float(telemetry.device_metrics.battery_level)
-    return None
-
-
 def _node_row(row: Any, battery_level: float | None = None) -> dict[str, Any]:
     return _node_public(
         row["node_id"],
@@ -742,11 +729,7 @@ def _battery_map() -> dict[int, float]:
     finally:
         conn.close()
 
-    result: dict[int, float] = {}
-    for row in rows:
-        level = _battery_from_payload(row["raw_payload"])
-        if level is not None:
-            result[row["node_id"]] = level
+    result: dict[int, float] = {row["node_id"]: row["battery_level"] for row in rows}
 
     # Bound the cache: keep the current bucket and the previous one.
     stale = [
@@ -771,14 +754,14 @@ def _nodes_joins(*, need_agg: bool = True, need_signal: bool = True) -> str:
     if need_agg:
         joins += _NODE_AGG_JOIN
     if need_signal:
-        joins += _NODE_SIGNAL_JOIN.format(snr_valid=snr_valid_sql())
+        joins += _NODE_SIGNAL_JOIN
     return joins
 
 
-def _nodes_join_params(need_agg: bool = True, need_signal: bool = True) -> list[float]:
+def _nodes_join_params(need_agg: bool = True, need_signal: bool = True) -> list[int]:
     """Window parameters for the joins produced by :func:`_nodes_joins`."""
-    window = time.time() - _NODE_AGG_WINDOW_SEC
-    params: list[float] = []
+    window = _node_hour_window()
+    params: list[int] = []
     if need_agg:
         params.append(window)
     if need_signal:
@@ -789,10 +772,10 @@ def _nodes_join_params(need_agg: bool = True, need_signal: bool = True) -> list[
 def _count_nodes(where_sql: str, params: list[Any], needs: dict[str, bool]) -> int:
     """Exact node count, joining only what the active filters reference."""
     joins = ""
-    join_params: list[float] = []
+    join_params: list[int] = []
     if needs["agg"]:
         joins += _NODE_AGG_JOIN
-        join_params.append(time.time() - _NODE_AGG_WINDOW_SEC)
+        join_params.append(_node_hour_window())
     conn = get_db_connection()
     try:
         cursor = conn.cursor()

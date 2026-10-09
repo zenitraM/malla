@@ -1523,7 +1523,7 @@ class NodeRepository:
                     "short_name": node_info_row["short_name"],
                     "hw_model": node_info_row["hw_model"],
                     "role": node_info_row["role"],
-                    "primary_channel": node_info_row.get("primary_channel"),
+                    "primary_channel": node_info_row["primary_channel"],
                     "total_packets": 0,
                     "last_seen": None,
                     "first_seen": None,
@@ -3963,6 +3963,39 @@ class TracerouteRepository:
             raise
 
 
+def _position_precision_meters(precision_bits: float | None) -> float | None:
+    """Precision circle radius in meters for a Meshtastic ``precision_bits`` value.
+
+    Mapping from https://meshtastic.org/docs/configuration/radio/channels/#position-precision
+    """
+    if precision_bits is None or precision_bits <= 0:
+        return None
+    precision_map = {
+        10: 23300,  # 23.3 km
+        11: 11700,  # 11.7 km
+        12: 5800,  # 5.8 km
+        13: 2900,  # 2.9 km
+        14: 1500,  # 1.5 km
+        15: 729,  # 729 m
+        16: 364,  # 364 m
+        17: 182,  # 182 m
+        18: 91,  # 91 m
+        19: 45,  # 45 m
+    }
+
+    if precision_bits >= 32:
+        return 1.0  # Full precision
+    precision_bits = int(precision_bits)
+    if precision_bits in precision_map:
+        return float(precision_map[precision_bits])
+    if precision_bits < 10:
+        return 50000.0  # Very low precision
+    # Extrapolate for high precision (better than 45m): each extra bit halves it
+    base_precision = 45.0  # 19 bits = 45m
+    additional_bits = precision_bits - 19
+    return base_precision / (2**additional_bits)
+
+
 class LocationRepository:
     """Repository for location operations."""
 
@@ -3970,15 +4003,19 @@ class LocationRepository:
     def get_node_locations(
         filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Get latest location for all nodes from position packets.
+        """Latest position per node, from the ``node_latest_position`` rollup.
+
+        The rollup is maintained by ``malla.capture_rollups`` (argmax merge over
+        ingested positions, decoded once at refresh time), so this is a plain
+        indexed lookup - no per-request window-argmax over ``packet_history``
+        and no per-row protobuf decode. ``filters`` supports ``node_ids``,
+        ``start_time``/``end_time`` (applied to ``last_seen``) and ``gateway_id``
+        (matched against the gateway of the kept position packet).
         If filters contains 'node_ids', restrict results to those nodes only.
         """
         if filters is None:
             filters = {}
         start_time = time.time()
-
-        # Detailed timing breakdown
-        timing_breakdown = {}
 
         try:
             conn = get_db_connection()
@@ -4008,215 +4045,96 @@ class LocationRepository:
                         node_ids_int.append(int(nid))
                 if node_ids_int:
                     placeholders = ",".join(["?"] * len(node_ids_int))
-                    node_ids_clause = f"AND from_node_id IN ({placeholders})"
+                    node_ids_clause = f"AND p.node_id IN ({placeholders})"
                     node_ids_params = node_ids_int
 
             extra_conditions: list[str] = []
             extra_params: list[Any] = []
             if filters.get("start_time"):
-                extra_conditions.append("timestamp >= ?")
+                extra_conditions.append("p.last_seen >= ?")
                 extra_params.append(filters["start_time"])
             if filters.get("end_time"):
-                extra_conditions.append("timestamp <= ?")
+                extra_conditions.append("p.last_seen <= ?")
                 extra_params.append(filters["end_time"])
             if filters.get("gateway_id"):
-                extra_conditions.append("gateway_id = ?")
+                extra_conditions.append("p.gateway_id = ?")
                 extra_params.append(filters["gateway_id"])
 
             extra_where = ""
             if extra_conditions:
                 extra_where = "AND " + " AND ".join(extra_conditions)
 
-            # Optimized query using window function instead of correlated subquery
             query = f"""
-                WITH max_timestamps AS (
-                    SELECT
-                        from_node_id,
-                        MAX(timestamp) as max_timestamp
-                    FROM packet_history
-                    WHERE portnum = 3  -- POSITION_APP
-                    AND raw_payload IS NOT NULL
-                    AND from_node_id IS NOT NULL
-                    {node_ids_clause}
-                    {extra_where}
-                    GROUP BY from_node_id
-                )
                 SELECT
-                    ph.from_node_id as node_id,
-                    ph.timestamp,
-                    ph.raw_payload,
+                    p.node_id,
+                    p.last_seen AS timestamp,
+                    p.latitude,
+                    p.longitude,
+                    p.altitude,
+                    p.precision_bits,
+                    p.sats_in_view,
                     ni.long_name,
                     ni.short_name,
                     ni.hw_model,
                     ni.role,
                     ni.primary_channel,
-                    printf('!%08x', ph.from_node_id) as hex_id
-                FROM packet_history ph
-                INNER JOIN max_timestamps mt ON ph.from_node_id = mt.from_node_id
-                    AND ph.timestamp = mt.max_timestamp
-                LEFT JOIN node_info ni ON ph.from_node_id = ni.node_id
-                WHERE ph.portnum = 3
-                AND ph.raw_payload IS NOT NULL
-                ORDER BY ph.timestamp DESC
+                    printf('!%08x', p.node_id) as hex_id
+                FROM node_latest_position p
+                LEFT JOIN node_info ni ON p.node_id = ni.node_id
+                WHERE 1=1
+                {node_ids_clause}
+                {extra_where}
+                ORDER BY p.last_seen DESC
             """
 
-            query_start = time.time()
-            cursor.execute(query, [*node_ids_params, *extra_params])
-            raw_rows = cursor.fetchall()
-            timing_breakdown["sql_query"] = time.time() - query_start
-
-            # Decode position data
-            decode_start = time.time()
-            locations = []
-            decode_count = 0
-            skip_count = 0
-
-            for row in raw_rows:
-                try:
-                    if not row["raw_payload"]:
-                        skip_count += 1
-                        continue
-
-                    # Decode position from raw protobuf payload
-                    position = mesh_pb2.Position()
-                    position.ParseFromString(row["raw_payload"])
-                    decode_count += 1
-
-                    # Extract coordinates (stored as integers, need to divide by 1e7)
-                    latitude = (
-                        position.latitude_i / 1e7 if position.latitude_i else None
-                    )
-                    longitude = (
-                        position.longitude_i / 1e7 if position.longitude_i else None
-                    )
-                    altitude = position.altitude if position.altitude else None
-
-                    # Extract precision and satellite information
-                    precision_bits = getattr(position, "precision_bits", None)
-                    sats_in_view = getattr(position, "sats_in_view", None)
-
-                    # Calculate precision in meters from precision_bits
-                    # Based on Meshtastic documentation: https://meshtastic.org/docs/configuration/radio/channels/#position-precision
-                    precision_meters = None
-                    if precision_bits is not None and precision_bits > 0:
-                        # Mapping from Meshtastic documentation
-                        precision_map = {
-                            10: 23300,  # 23.3 km
-                            11: 11700,  # 11.7 km
-                            12: 5800,  # 5.8 km
-                            13: 2900,  # 2.9 km
-                            14: 1500,  # 1.5 km
-                            15: 729,  # 729 m
-                            16: 364,  # 364 m
-                            17: 182,  # 182 m
-                            18: 91,  # 91 m
-                            19: 45,  # 45 m
-                        }
-
-                        if precision_bits >= 32:
-                            precision_meters = 1.0  # Full precision
-                        elif precision_bits in precision_map:
-                            precision_meters = float(precision_map[precision_bits])
-                        elif precision_bits < 10:
-                            precision_meters = 50000.0  # Very low precision
-                        elif precision_bits > 19:
-                            # Extrapolate for high precision (better than 45m)
-                            # Each additional bit roughly halves the precision
-                            base_precision = 45.0  # 19 bits = 45m
-                            additional_bits = precision_bits - 19
-                            precision_meters = base_precision / (2**additional_bits)
-                        else:
-                            # Interpolate between known values for bits between 10-19
-                            import math
-
-                            lower_bits = max(
-                                [b for b in precision_map.keys() if b < precision_bits]
-                            )
-                            upper_bits = min(
-                                [b for b in precision_map.keys() if b > precision_bits]
-                            )
-
-                            lower_precision = precision_map[lower_bits]
-                            upper_precision = precision_map[upper_bits]
-
-                            # Interpolate in log space (since precision roughly halves per bit)
-                            log_lower = math.log(lower_precision)
-                            log_upper = math.log(upper_precision)
-
-                            ratio = (precision_bits - lower_bits) / (
-                                upper_bits - lower_bits
-                            )
-                            log_result = log_lower + ratio * (log_upper - log_lower)
-
-                            precision_meters = math.exp(log_result)
-
-                    if (
-                        latitude is None
-                        or longitude is None
-                        or latitude == 0
-                        or longitude == 0
-                    ):
-                        skip_count += 1
-                        continue
-
-                    display_name = (
-                        row["long_name"]
-                        or row["short_name"]
-                        or f"Node {row['node_id']:08x}"
-                    )
-
-                    locations.append(
-                        {
-                            "node_id": row["node_id"],
-                            "hex_id": row["hex_id"],
-                            "display_name": display_name,
-                            "long_name": row["long_name"],
-                            "short_name": row["short_name"],
-                            "hw_model": row["hw_model"],
-                            "role": row["role"],
-                            "primary_channel": row["primary_channel"]
-                            if "primary_channel" in row.keys()
-                            else None,
-                            "latitude": latitude,
-                            "longitude": longitude,
-                            "altitude": altitude,
-                            "timestamp": row["timestamp"],
-                            "precision_bits": precision_bits,
-                            "precision_meters": precision_meters,
-                            "sats_in_view": sats_in_view,
-                        }
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to parse location for node {row['node_id']}: {e}"
-                    )
-                    skip_count += 1
-                    continue
-
-            timing_breakdown["decode_and_process"] = time.time() - decode_start
-            timing_breakdown["new_decodes"] = decode_count
-
+            rows = cursor.execute(query, [*node_ids_params, *extra_params]).fetchall()
             conn.close()
 
-            total_time = time.time() - start_time
-            timing_breakdown["total"] = total_time
+            locations = []
+            for row in rows:
+                latitude = row["latitude"]
+                longitude = row["longitude"]
+                if (
+                    latitude is None
+                    or longitude is None
+                    or latitude == 0
+                    or longitude == 0
+                ):
+                    continue
 
-            # Enhanced logging with timing breakdown
-            if total_time > 0.5:  # Only log if it takes more than 500ms
-                logger.warning(
-                    f"Slow get_node_locations: {total_time:.3f}s "
-                    f"(SQL: {timing_breakdown['sql_query']:.3f}s, "
-                    f"Decode: {timing_breakdown['decode_and_process']:.3f}s) "
-                    f"- processed {len(raw_rows)} packets, "
-                    f"decoded {decode_count}, skipped {skip_count}"
+                precision_bits = row["precision_bits"]
+                altitude = row["altitude"]
+
+                display_name = (
+                    row["long_name"]
+                    or row["short_name"]
+                    or f"Node {row['node_id']:08x}"
                 )
-            else:
-                logger.info(
-                    f"get_node_locations: {total_time:.3f}s "
-                    f"(SQL: {timing_breakdown['sql_query']:.3f}s, "
-                    f"Decode: {timing_breakdown['decode_and_process']:.3f}s) "
-                    f"- {len(locations)} locations"
+
+                locations.append(
+                    {
+                        "node_id": row["node_id"],
+                        "hex_id": row["hex_id"],
+                        "display_name": display_name,
+                        "long_name": row["long_name"],
+                        "short_name": row["short_name"],
+                        "hw_model": row["hw_model"],
+                        "role": row["role"],
+                        "primary_channel": row["primary_channel"],
+                        "latitude": latitude,
+                        "longitude": longitude,
+                        "altitude": altitude if altitude else None,
+                        "timestamp": row["timestamp"],
+                        "precision_bits": precision_bits,
+                        "precision_meters": _position_precision_meters(precision_bits),
+                        "sats_in_view": row["sats_in_view"],
+                    }
                 )
+
+            total_time = time.time() - start_time
+            logger.info(
+                "get_node_locations: %.3fs - %d locations", total_time, len(locations)
+            )
 
             return locations
 

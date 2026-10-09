@@ -105,6 +105,18 @@ def fresh_database_client():
 
     os.unlink(handle.name)
     try:
+        # The web no longer writes DDL (contract since the migration registry):
+        # bootstrap exactly like the capture daemon would, then verify the
+        # empty-data behavior of a provisioned database.
+        from src.malla.capture_startup import (
+            init_database as _capture_init,
+        )
+        from src.malla.capture_startup import (
+            run_write_locking_migrations as _capture_blocking,
+        )
+
+        _capture_init(handle.name)
+        _capture_blocking(handle.name)
         app = create_app(AppConfig(database_file=handle.name))
         app.config["TESTING"] = True
         _clear_process_caches()
@@ -129,6 +141,15 @@ def schema_only_client():
     finally:
         connection.close()
     try:
+        from src.malla.capture_startup import (
+            init_database as _capture_init,
+        )
+        from src.malla.capture_startup import (
+            run_write_locking_migrations as _capture_blocking,
+        )
+
+        _capture_init(handle.name)
+        _capture_blocking(handle.name)
         app = create_app(AppConfig(database_file=handle.name))
         app.config["TESTING"] = True
         _clear_process_caches()

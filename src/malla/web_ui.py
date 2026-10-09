@@ -20,6 +20,7 @@ from flask import Flask, jsonify, render_template_string, request
 from werkzeug.exceptions import InternalServerError
 
 # Import application configuration loader
+from . import capture_rollups
 from .config import AppConfig, get_config
 
 # Optional CORS support will be checked inline
@@ -395,6 +396,20 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
             _spawn_planner_stats_bootstrap(_db_file)
     except Exception as exc:  # noqa: BLE001 - must not block app creation
         logger.debug("Planner-stats bootstrap check skipped: %s", exc)
+
+    # Rollup maintenance: one budgeted catch-up chunk now (mirrors the
+    # AnalyticsService lazy-rollup precedent) plus a persistent low-priority
+    # refresher. The capture daemon refreshes too; overlap is safe because
+    # every rollup write is idempotent on its natural keys. NOTE: this
+    # intentionally deviates from design §0's "web does a single bounded
+    # chunk only" - the standing sign-off is a persistent thread here as well.
+    if capture_rollups.refresh_enabled():
+        db_path = str(app.config.get("DATABASE_FILE") or cfg.database_file)
+        try:
+            capture_rollups.run_boot_refresh(db_path)
+        except Exception as exc:  # noqa: BLE001 - never block startup
+            logger.warning("Rollup boot refresh failed: %s", exc)
+        capture_rollups.ensure_refresh_thread(db_path)
 
     # Start periodic cache cleanup for node names
     logger.info("Starting node name cache cleanup background thread")

@@ -238,7 +238,6 @@ def tables(conn: sqlite3.Connection) -> set[str]:
         )
     }
 
-
 def indexes(conn: sqlite3.Connection) -> set[str]:
     """Names of every index in the database."""
     return {
@@ -383,9 +382,145 @@ DROP_ACTIVITY_DAILY_ROLLUP = Migration(
     pending=_drop_activity_daily_rollup_pending,
 )
 
+# Capture-maintained rollup tables backing the slow-path reads (nodes list
+# aggregates, latest positions/telemetry, traceroute catalogs, longest-links).
+# They are populated exclusively by :mod:`malla.capture_rollups` (completed-
+# bucket rolling refresh + id-high-water merges; see that module for the
+# freshness contract) and are deliberately created by the shared startup path
+# so a web UI on a fresh database self-heals before first request.
+ROLLUP_TABLES_SQL: tuple[str, ...] = (
+    # Single-row-per-name resume cursors for the latest-state merges. This is a
+    # resume cursor, not a backlog watermark: steady state scans only the
+    # minutes since the last refresh and a crash redoes one interval.
+    """
+    CREATE TABLE IF NOT EXISTS _rollup_cursor (
+        name TEXT PRIMARY KEY,
+        last_packet_id INTEGER NOT NULL DEFAULT 0,
+        updated_at REAL NOT NULL DEFAULT 0
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS node_hour_rollup (
+        hour_epoch  INTEGER NOT NULL,                    -- timestamp // 3600, UTC
+        node_id     INTEGER NOT NULL,
+        packet_count INTEGER NOT NULL DEFAULT 0,
+        direct_snr_sum  REAL NOT NULL DEFAULT 0,         -- hop_start=hop_limit rows passing
+        direct_snr_count INTEGER NOT NULL DEFAULT 0,     -- the signal-quality validity rule
+        last_seen   REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (hour_epoch, node_id)
+    ) WITHOUT ROWID
+""",
+    """
+    CREATE INDEX IF NOT EXISTS idx_node_hour_rollup_node
+        ON node_hour_rollup(node_id, hour_epoch)
+""",
+    """
+    CREATE TABLE IF NOT EXISTS node_latest_position (
+        node_id        INTEGER PRIMARY KEY,
+        last_seen      REAL NOT NULL,
+        packet_id      INTEGER NOT NULL,
+        gateway_id     TEXT,                             -- gateway of the kept packet
+        latitude       REAL,                             -- already /1e7
+        longitude      REAL,
+        altitude       INTEGER,                          -- raw; 0 vs NULL preserved here
+        precision_bits INTEGER,
+        sats_in_view   INTEGER
+    )
+""",
+    """
+    CREATE TABLE IF NOT EXISTS node_latest_telemetry (
+        node_id        INTEGER PRIMARY KEY,
+        last_seen      REAL NOT NULL,
+        packet_id      INTEGER NOT NULL,
+        battery_level  REAL,
+        voltage        REAL,
+        channel_utilization REAL,
+        air_util_tx    REAL
+    )
+""",
+    """
+    CREATE TABLE IF NOT EXISTS traceroute_endpoint (
+        node_id    INTEGER PRIMARY KEY,
+        first_seen REAL NOT NULL,
+        last_seen  REAL NOT NULL
+    )
+""",
+    """
+    CREATE TABLE IF NOT EXISTS link_day_rollup (
+        day          TEXT NOT NULL,                      -- UTC date of packet ts
+        node_a       INTEGER NOT NULL,                   -- canonical a < b
+        node_b       INTEGER NOT NULL,
+        packet_count INTEGER NOT NULL DEFAULT 0,
+        snr_sum      REAL   NOT NULL DEFAULT 0,
+        snr_count    INTEGER NOT NULL DEFAULT 0,
+        snr_min      REAL,
+        snr_max      REAL,
+        last_seen    REAL NOT NULL DEFAULT 0,
+        last_packet_id INTEGER,                          -- newest packet id folded for the pair/day
+        PRIMARY KEY (day, node_a, node_b)
+    ) WITHOUT ROWID
+""",
+    """
+    CREATE INDEX IF NOT EXISTS idx_link_day_rollup_pair ON link_day_rollup(node_a, node_b, day)
+""",
+    # Endpoint pairs of multi-hop traceroute paths (mirrors the legacy
+    # longest-links "indirect" aggregation; path shape kept for the preview).
+    """
+    CREATE TABLE IF NOT EXISTS route_day_rollup (
+        day          TEXT NOT NULL,
+        end_a        INTEGER NOT NULL,                   -- first-hop source
+        end_b        INTEGER NOT NULL,                   -- last-hop target
+        path_count   INTEGER NOT NULL DEFAULT 0,         -- SNR-valid paths folded
+        hop_count_sum INTEGER NOT NULL DEFAULT 0,
+        snr_avg_sum  REAL NOT NULL DEFAULT 0,            -- sum of per-path mean SNR
+        last_seen    REAL NOT NULL DEFAULT 0,
+        last_packet_id INTEGER,
+        last_route   TEXT,                               -- comma ids of the newest path
+        PRIMARY KEY (day, end_a, end_b)
+    ) WITHOUT ROWID
+""",
+    """
+    CREATE INDEX IF NOT EXISTS idx_route_day_rollup_pair ON route_day_rollup(end_a, end_b, day)
+""",
+)
+
+#: Every table :mod:`malla.capture_rollups` reads or writes; the pending check
+#: mirrors the module contract that all of them exist before it runs.
+ROLLUP_TABLE_NAMES: tuple[str, ...] = (
+    "_rollup_cursor",
+    "node_hour_rollup",
+    "node_latest_position",
+    "node_latest_telemetry",
+    "traceroute_endpoint",
+    "link_day_rollup",
+    "route_day_rollup",
+)
+
+
+
+def _capture_rollup_tables_pending(conn: sqlite3.Connection, _wm: Watermark) -> bool:
+    present = tables(conn)
+    return any(name not in present for name in ROLLUP_TABLE_NAMES)
+
+
+def _apply_capture_rollup_tables(conn: sqlite3.Connection, _wm: Watermark) -> Watermark:
+    for statement in ROLLUP_TABLES_SQL:
+        conn.execute(statement)
+    return None
+
+
+CAPTURE_ROLLUP_TABLES = Migration(
+    name="capture_rollup_tables",
+    phase=Phase.SCHEMA,
+    apply=_apply_capture_rollup_tables,
+    description="capture-maintained rollup tables for the slow read paths",
+    pending=_capture_rollup_tables_pending,
+)
+
 SCHEMA_MIGRATIONS: tuple[Migration, ...] = (
     CORE_TABLES,
     ACTIVITY_QUARTER_TABLES_MIGRATION,
     DROP_ACTIVITY_DAILY_ROLLUP,
+    CAPTURE_ROLLUP_TABLES,
 )
 BLOCKING_MIGRATIONS: tuple[Migration, ...] = (CORE_INDEXES,)
