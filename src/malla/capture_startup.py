@@ -21,6 +21,7 @@ lets each phase be exercised without the MQTT stack.
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -30,6 +31,32 @@ from . import activity_rollup
 from .migrations import MIGRATIONS, MigrationResult, Phase, Status, run_migrations
 
 logger = logging.getLogger(__name__)
+
+#: Environment knob for the migration-lock staleness threshold (seconds). A
+#: lock older than this is taken over even if its holder looks alive.
+LOCK_STALE_AFTER_ENV = "MALLA_MIGRATION_LOCK_STALE_AFTER"
+LOCK_STALE_AFTER_DEFAULT = 900.0
+
+
+def migration_lock_stale_after() -> float:
+    """Staleness threshold for the runner's advisory lock.
+
+    Tunable via ``MALLA_MIGRATION_LOCK_STALE_AFTER`` (seconds); malformed
+    values fall back to the default rather than disabling takeover.
+    """
+    raw = os.getenv(LOCK_STALE_AFTER_ENV)
+    if not raw:
+        return LOCK_STALE_AFTER_DEFAULT
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid %s=%r, using %ss",
+            LOCK_STALE_AFTER_ENV,
+            raw,
+            LOCK_STALE_AFTER_DEFAULT,
+        )
+        return LOCK_STALE_AFTER_DEFAULT
 
 
 def configure_connection(conn: sqlite3.Connection, *, cache_kib: int = 65536) -> None:
@@ -79,7 +106,12 @@ def run_phase(
         conn = sqlite3.connect(db_path, timeout=30.0)
         try:
             configure_connection(conn)
-            results = run_migrations(conn, MIGRATIONS, phases=(phase,))
+            results = run_migrations(
+                conn,
+                MIGRATIONS,
+                phases=(phase,),
+                stale_after=migration_lock_stale_after(),
+            )
         finally:
             conn.close()
     _log_results(results)
@@ -132,3 +164,30 @@ def start_background_migrations(db_path: str) -> threading.Thread:
     thread = threading.Thread(target=_worker, name="db-migrations", daemon=True)
     thread.start()
     return thread
+
+
+def retry_derived_migrations(db_path: str) -> None:
+    """Re-run pending DERIVED migrations on their own connection.
+
+    Called from the maintenance loop: a DERIVED migration that failed at boot
+    (a killed ``ANALYZE``, a busy database) is retried here every minute
+    instead of never. The pending checks are cheap, the work is idempotent,
+    and every exception is logged rather than raised — the next tick retries.
+    """
+    try:
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        try:
+            configure_connection(conn)
+            results = run_migrations(
+                conn,
+                MIGRATIONS,
+                phases=(Phase.DERIVED,),
+                take_lock=False,
+                stale_after=migration_lock_stale_after(),
+            )
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - never break the maintenance loop
+        logger.warning("Deferred-migration retry failed: %s", exc)
+        return
+    _log_results(results)

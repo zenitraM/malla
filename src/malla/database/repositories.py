@@ -167,6 +167,7 @@ def _aggregate(
         band.extend(run_band)
     return avg_line, band
 
+
 RELAY_CANDIDATE_CACHE_TTL_SECONDS = 1800
 RELAY_CANDIDATE_CACHE_MAX_ENTRIES = 4096
 _relay_candidate_cache: dict[tuple[int, int], tuple[float, list[dict[str, Any]]]] = {}
@@ -830,7 +831,9 @@ class PacketRepository:
                     "hop_count",
                     "relay_node",
                 }
-                order_column = order_by if order_by in valid_order_columns else "timestamp"
+                order_column = (
+                    order_by if order_by in valid_order_columns else "timestamp"
+                )
                 order_dir_sql = "DESC" if order_dir.lower() == "desc" else "ASC"
 
                 # Main query

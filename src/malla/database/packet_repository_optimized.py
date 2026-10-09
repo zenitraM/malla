@@ -317,7 +317,9 @@ class PacketRepositoryOptimized:
                     "hop_count",
                     "relay_node",
                 }
-                order_column = order_by if order_by in valid_order_columns else "timestamp"
+                order_column = (
+                    order_by if order_by in valid_order_columns else "timestamp"
+                )
                 order_dir_sql = "DESC" if order_dir.lower() == "desc" else "ASC"
 
                 # Main query

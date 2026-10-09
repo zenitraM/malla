@@ -1475,6 +1475,11 @@ def main() -> None:
             except Exception as exc:  # noqa: BLE001 - never break the loop
                 logging.warning("Activity bucket refresh failed: %s", exc)
 
+            # Retry DERIVED migrations that failed at boot (a killed ANALYZE, a
+            # busy database): the pending checks are cheap, and without this
+            # slot a boot-time failure would warn once and never re-run.
+            capture_startup.retry_derived_migrations(DATABASE_FILE)
+
             # Periodically refresh query-planner statistics so the planner keeps
             # choosing index-based plans as packet_history grows. PRAGMA optimize
             # is bounded by the analysis_limit set on the connection and only
