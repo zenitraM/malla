@@ -208,10 +208,14 @@ Each migration is tagged with the phase in which it may run:
 | `blocking` | write-locking DDL (index builds) | after connecting; incoming packets queue in memory and are replayed when the migration finishes, so none are lost |
 | `derived` | data work over stored rows (backfills, bounded `ANALYZE`) | in the background while packets are ingested |
 
-The web UI never creates or changes the schema — it only checks that it is
-present. **Start `malla-capture` at least once (or run `malla-migrate`) before
-expecting the web UI to serve data**: against an uninitialized database it logs a
-clear error at startup and requests fail until the schema exists.
+The web UI never runs the write-locking (`blocking`) phase on a populated
+database — it re-checks the cheap `schema` phase on every boot, so a fresh
+database is bootstrapped (tables, then indexes, since there are no rows yet)
+and later releases' tables appear without waiting for the capture daemon.
+**Still start `malla-capture` at least once (or run `malla-migrate`) before
+expecting the web UI to serve data**: index builds on a populated database are
+the daemon's job, and against a large uninitialized database the web UI logs a
+clear error at startup while the heavy phases run.
 
 Migrations can be inspected or applied without starting MQTT:
 
@@ -400,6 +404,10 @@ The sidebar can still be expanded by users clicking the toggle button, giving th
 ```
 
 This approach maximizes the visible map area while keeping full functionality accessible through the expandable sidebar.
+
+## Internal API
+
+The web UI talks to the backend over a versioned internal JSON API under `/api/v1`. It is undocumented by design and is not a public or stable contract; it exists to serve the UI and evolves with it. A machine-readable OpenAPI schema is served at [`/api/v1/openapi.json`](http://localhost:5008/api/v1/openapi.json) for internal tooling.
 
 ## Contributing
 

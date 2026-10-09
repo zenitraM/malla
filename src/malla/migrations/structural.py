@@ -179,6 +179,38 @@ INDEX_SPECS: tuple[tuple[str, str, str], ...] = (
         "packet_history",
         "CREATE INDEX IF NOT EXISTS idx_packet_history_chat_channel ON packet_history(portnum_name, channel_id, id DESC) WHERE raw_payload IS NOT NULL AND payload_length > 0",
     ),
+    # Web UI list filters/sorts measured on production-scale (7.4M rows):
+    # portnum-name listings, telemetry per node, and the rssi/snr/hop sorts.
+    (
+        "idx_packet_history_portnum_name",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_portnum_name ON packet_history(portnum_name)",
+    ),
+    (
+        "idx_packet_history_portnum_name_time",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_portnum_name_time ON packet_history(portnum_name, timestamp DESC)",
+    ),
+    (
+        "idx_packet_history_telemetry_node_time",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_telemetry_node_time ON packet_history(from_node_id, timestamp DESC) WHERE portnum_name = 'TELEMETRY_APP' AND raw_payload IS NOT NULL",
+    ),
+    (
+        "idx_packet_history_rssi",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_rssi ON packet_history(rssi)",
+    ),
+    (
+        "idx_packet_history_snr",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_snr ON packet_history(snr)",
+    ),
+    (
+        "idx_packet_history_hop_count",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_hop_count ON packet_history((hop_start - hop_limit))",
+    ),
     (
         "idx_node_hex_id",
         "node_info",

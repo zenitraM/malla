@@ -3813,6 +3813,7 @@ class TracerouteRepository:
 
                 # Main query
                 valid_order_columns = [
+                    "id",
                     "timestamp",
                     "from_node_id",
                     "to_node_id",
