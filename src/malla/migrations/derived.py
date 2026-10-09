@@ -80,7 +80,9 @@ def _apply_activity_quarters(conn: sqlite3.Connection, _wm: Watermark) -> Waterm
     """
     inserted = activity_rollup.refresh(conn)
     newest = activity_rollup.latest_bucket(conn)
-    logger.info("Activity buckets: %s rows inserted, newest bucket %s", inserted, newest)
+    logger.info(
+        "Activity buckets: %s rows inserted, newest bucket %s", inserted, newest
+    )
     return None if newest is None else str(newest)
 
 

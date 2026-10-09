@@ -259,12 +259,172 @@ def test_prune_before_removes_only_old_buckets(tmp_path):
             f"SELECT MAX(bucket) FROM {table} WHERE bucket < ?", (cutoff,)
         ).fetchone()[0]
         assert newest_old is None
-    assert (
-        conn.execute("SELECT COUNT(*) FROM packet_history").fetchone()[0] > 0
-    )
+    assert conn.execute("SELECT COUNT(*) FROM packet_history").fetchone()[0] > 0
     after = {
         table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         for table in activity_rollup.TABLES
     }
     assert all(after[table] < before[table] for table in activity_rollup.TABLES)
+    conn.close()
+
+
+def test_chunked_refresh_matches_the_unchunked_result(tmp_path):
+    """max_bucket_span only slices the transactions; the store is identical."""
+    conn_a, _ = _make_db(tmp_path / "whole.db")
+    conn_b, _ = _make_db(tmp_path / "chunked.db")
+
+    assert activity_rollup.refresh(conn_b, until=NOW, max_bucket_span=3) > 0
+    assert activity_rollup.refresh(conn_a, until=NOW) > 0
+
+    for table in activity_rollup.TABLES:
+        rows_a = conn_a.execute(f"SELECT * FROM {table} ORDER BY 1, 2").fetchall()
+        rows_b = conn_b.execute(f"SELECT * FROM {table} ORDER BY 1, 2").fetchall()
+        assert rows_a == rows_b, table
+
+    # And the chunked store is complete: nothing pending, idempotent again.
+    assert activity_rollup.pending(conn_b, until=NOW) is False
+    assert activity_rollup.refresh(conn_b, until=NOW, max_bucket_span=3) == 0
+    conn_a.close()
+    conn_b.close()
+
+
+def test_prune_refold_keeps_bucket_sums_exact(tmp_path):
+    """After a retention cut, buckets agree with the surviving packet rows.
+
+    The boundary bucket keeps packets from both sides of the cutoff in the
+    store; the prune must re-fold it from what retention left behind, or its
+    counts silently include the deleted ones forever.
+    """
+    conn, _packets = _make_db(tmp_path / "refold.db")
+    assert activity_rollup.refresh(conn, until=NOW) > 0
+
+    # Cut just after a packet that shares its bucket with the next one, so the
+    # boundary bucket definitely loses rows to the retention delete.
+    bucket, first_ts = conn.execute(
+        "SELECT CAST(timestamp / ? AS INT) * ?, MIN(timestamp) FROM packet_history "
+        "GROUP BY 1 HAVING COUNT(*) >= 2 ORDER BY 1 DESC LIMIT 1",
+        (activity_rollup.BUCKET_SECONDS, activity_rollup.BUCKET_SECONDS),
+    ).fetchone()
+    cutoff = first_ts + 1
+    cutoff_bucket = bucket
+    conn.execute("DELETE FROM packet_history WHERE timestamp < ?", (cutoff,))
+
+    # Pre-refold, the boundary bucket still counts the deleted packets.
+    stale = dict(
+        conn.execute(
+            "SELECT bucket, total_packets FROM activity_packet_quarter WHERE bucket = ?",
+            (cutoff_bucket,),
+        ).fetchone()
+    )
+
+    activity_rollup.prune_before(conn, cutoff)
+    conn.commit()
+
+    live = dict(
+        conn.execute(
+            "SELECT CAST(timestamp / ? AS INT) * ? AS b, COUNT(*) "
+            "FROM packet_history GROUP BY b",
+            (activity_rollup.BUCKET_SECONDS, activity_rollup.BUCKET_SECONDS),
+        ).fetchall()
+    )
+    stored = dict(
+        conn.execute("SELECT bucket, total_packets FROM activity_packet_quarter")
+    )
+    assert stored == live
+    assert (
+        stale["total_packets"] > stored[cutoff_bucket]
+    )  # refold dropped the gone ones
+
+    # Same for the identity buckets: every stored node/gateway is still there.
+    for table, stored_col, live_col in (
+        (activity_rollup.NODE_TABLE, "node_id", "from_node_id"),
+        (activity_rollup.GATEWAY_TABLE, "gateway_id", "gateway_id"),
+    ):
+        live_ids = dict(
+            conn.execute(
+                f"SELECT CAST(timestamp / ? AS INT) * ? AS b, COUNT(DISTINCT {live_col}) "
+                f"FROM packet_history WHERE {live_col} IS NOT NULL GROUP BY b",
+                (activity_rollup.BUCKET_SECONDS, activity_rollup.BUCKET_SECONDS),
+            ).fetchall()
+        )
+        stored_ids = dict(
+            conn.execute(
+                f"SELECT bucket, COUNT(DISTINCT {stored_col}) FROM {table} "
+                "GROUP BY bucket"
+            ).fetchall()
+        )
+        assert stored_ids == live_ids, table
+    conn.close()
+
+
+def test_hourly_timeline_matches_the_live_aggregation(tmp_path):
+    """The bucket-backed hourly view equals the live SQL, hour for hour."""
+    from malla.services.analytics_service import AnalyticsService
+
+    # Packets running into the current hour so the live tail is exercised too.
+    conn, _packets = _make_db(tmp_path / "hourly.db", end=NOW - 61)
+    assert activity_rollup.refresh(conn, until=NOW) > 0
+    cursor = conn.cursor()
+
+    for offset_minutes in OFFSETS:
+        offset_sec = offset_minutes * 60
+        current_hour_local = (int(NOW + offset_sec) // 3600) * 3600
+        start_local = current_hour_local - 23 * 3600
+        start_utc = start_local - offset_sec
+
+        got = AnalyticsService._hourly_buckets_in_window(
+            cursor, offset_sec, start_local, current_hour_local
+        )
+
+        # The historical live-only shape: zeros for every hour, then the
+        # packet/gateway/new-node aggregates by local hour label.
+        expected: dict[str, dict[str, int]] = {}
+        for i in range(24):
+            key = time.strftime("%Y-%m-%d %H:00", time.gmtime(start_local + i * 3600))
+            expected[key] = {
+                "bucket": key,
+                "total_packets": 0,
+                "active_nodes": 0,
+                "gateway_count": 0,
+                "new_nodes": 0,
+            }
+        for row in cursor.execute(
+            """
+            SELECT strftime('%Y-%m-%d %H:00', timestamp + ?, 'unixepoch') AS bucket,
+                   COUNT(*) AS total_packets,
+                   COUNT(DISTINCT from_node_id) AS active_nodes
+            FROM packet_history WHERE timestamp >= ? GROUP BY bucket
+            """,
+            (offset_sec, start_utc),
+        ):
+            entry = expected.get(row["bucket"])
+            if entry:
+                entry["total_packets"] = row["total_packets"]
+                entry["active_nodes"] = row["active_nodes"]
+        for row in cursor.execute(
+            """
+            SELECT strftime('%Y-%m-%d %H:00', timestamp + ?, 'unixepoch') AS bucket,
+                   COUNT(DISTINCT gateway_id) AS gateway_count
+            FROM packet_history
+            WHERE gateway_id IS NOT NULL AND timestamp >= ? GROUP BY bucket
+            """,
+            (offset_sec, start_utc),
+        ):
+            entry = expected.get(row["bucket"])
+            if entry:
+                entry["gateway_count"] = row["gateway_count"]
+        for row in cursor.execute(
+            """
+            SELECT strftime('%Y-%m-%d %H:00', first_seen + ?, 'unixepoch') AS bucket,
+                   COUNT(*) AS new_nodes
+            FROM node_info WHERE first_seen >= ? GROUP BY bucket
+            """,
+            (offset_sec, start_utc),
+        ):
+            entry = expected.get(row["bucket"])
+            if entry:
+                entry["new_nodes"] = row["new_nodes"]
+
+        assert got == list(expected.values()), offset_minutes
+
     conn.close()

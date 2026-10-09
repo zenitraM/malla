@@ -230,6 +230,10 @@ def test_timeline_24h_hourly_buckets(temp_database, monkeypatch):
         nodes=[(1, ts_current_hour, now)],
     )
 
+    # Completed hours are read from the bucket store; the current hour is the
+    # only one aggregated live.
+    _build_buckets(temp_database)
+
     timeline = AnalyticsService.get_activity_timeline("24h", 0)
     buckets = timeline["buckets"]
 
@@ -324,6 +328,7 @@ def test_timeline_read_path_never_writes(temp_database, monkeypatch):
     assert len(days) == 8
     assert days[-1]["total_packets"] == 1  # today, computed live
     assert all(day["total_packets"] == 1 for day in days[-4:-1])
+
 
 def test_hop_distribution_counts_real_hops(temp_database, monkeypatch):
     """Hop distribution reflects hop_start - hop_limit, excluding malformed rows."""
