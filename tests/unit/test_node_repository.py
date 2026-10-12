@@ -238,3 +238,31 @@ class TestNodeRepository:
         """Test get_bulk_node_names with empty list."""
         result = NodeRepository.get_bulk_node_names([])
         assert result == {}
+
+    @pytest.mark.unit
+    @patch("src.malla.database.repositories.get_db_connection")
+    def test_get_bulk_node_roles(self, mock_get_db):
+        """Test get_bulk_node_roles method."""
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_get_db.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+
+        mock_cursor.fetchall.return_value = [
+            {"node_id": 1, "role": "ROUTER"},
+            {"node_id": 2, "role": "CLIENT_MUTE"},
+            {"node_id": 3, "role": None},
+        ]
+
+        result = NodeRepository.get_bulk_node_roles([1, 2, 3, 4])
+
+        assert result[1] == "ROUTER"
+        assert result[2] == "CLIENT_MUTE"
+        assert result[3] is None
+        assert result[4] is None  # Missing node defaults to None
+
+    @pytest.mark.unit
+    def test_get_bulk_node_roles_empty_list(self):
+        """Test get_bulk_node_roles with empty list."""
+        result = NodeRepository.get_bulk_node_roles([])
+        assert result == {}
