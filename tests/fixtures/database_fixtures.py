@@ -36,6 +36,7 @@ class DatabaseFixtures:
         logger.info(f"Creating test database at {db_path}")
 
         with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
             # Create the schema
@@ -44,6 +45,18 @@ class DatabaseFixtures:
             # Insert fixture data
             self._insert_node_info(cursor)
             self._insert_packets(cursor)
+
+            # Materialize the fixture rows so tests exercise the materialized reader path.
+            from malla.database.schema import ensure_startup_schema
+            from malla.database.traceroutes import write_traceroute
+
+            ensure_startup_schema(cursor)
+            traceroutes = cursor.execute(
+                "SELECT * FROM packet_history "
+                "WHERE portnum = 70 OR portnum_name = 'TRACEROUTE_APP'"
+            ).fetchall()
+            for traceroute in traceroutes:
+                write_traceroute(cursor, dict(traceroute))
 
             conn.commit()
 

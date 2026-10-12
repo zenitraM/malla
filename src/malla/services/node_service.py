@@ -167,7 +167,6 @@ class NodeService:
             Dictionary containing related nodes and their RF hop counts
         """
         from ..database import get_db_connection
-        from ..models.traceroute import TraceroutePacket
 
         node_id_int = convert_node_id(node_id)
 
@@ -178,78 +177,26 @@ class NodeService:
         end_time = datetime.now()
         start_time = end_time - timedelta(days=7)  # Look at last 7 days
 
-        query = """
+        rows = cursor.execute(
+            """
             SELECT
-                id,
-                timestamp,
-                from_node_id,
-                to_node_id,
-                gateway_id,
-                hop_start,
-                hop_limit,
-                raw_payload
-            FROM packet_history
-            WHERE portnum_name = 'TRACEROUTE_APP'
-            AND processed_successfully = 1
-            AND raw_payload IS NOT NULL
-            AND timestamp >= ?
-            AND timestamp <= ?
-        """
-
-        cursor.execute(query, (start_time.timestamp(), end_time.timestamp()))
-        packets = cursor.fetchall()
-
-        # Track nodes with direct RF hops and their connection counts
-        related_nodes = {}
-
-        for packet in packets:
+                CASE WHEN from_node_id = ? THEN to_node_id ELSE from_node_id END AS other_node,
+                COUNT(*) AS observation_count
+            FROM traceroute_hops
+            WHERE timestamp >= ? AND timestamp <= ?
+              AND (from_node_id = ? OR to_node_id = ?)
+            GROUP BY other_node
+            ORDER BY observation_count DESC, other_node
+            """,
             (
-                packet_id,
-                timestamp,
-                from_node_id,
-                to_node_id,
-                gateway_id,
-                hop_start,
-                hop_limit,
-                raw_payload,
-            ) = packet
-
-            try:
-                # Create TraceroutePacket to analyze RF hops
-                packet_data = {
-                    "id": packet_id,
-                    "timestamp": timestamp,
-                    "from_node_id": from_node_id,
-                    "to_node_id": to_node_id,
-                    "gateway_id": gateway_id,
-                    "hop_start": hop_start,
-                    "hop_limit": hop_limit,
-                    "raw_payload": raw_payload,
-                }
-
-                tr_packet = TraceroutePacket(packet_data, resolve_names=False)
-
-                # Get all RF hops (both forward and return)
-                rf_hops = tr_packet.get_rf_hops()
-
-                # Check if any RF hop involves our target node
-                for hop in rf_hops:
-                    if hop.from_node_id == node_id_int:
-                        # Target node is the sender in this RF hop
-                        other_node = hop.to_node_id
-                        if other_node not in related_nodes:
-                            related_nodes[other_node] = 0
-                        related_nodes[other_node] += 1
-                    elif hop.to_node_id == node_id_int:
-                        # Target node is the receiver in this RF hop
-                        other_node = hop.from_node_id
-                        if other_node not in related_nodes:
-                            related_nodes[other_node] = 0
-                        related_nodes[other_node] += 1
-
-            except Exception as e:
-                logger.warning(f"Failed to analyze RF hops for packet {packet_id}: {e}")
-                continue
+                node_id_int,
+                start_time.timestamp(),
+                end_time.timestamp(),
+                node_id_int,
+                node_id_int,
+            ),
+        ).fetchall()
+        related_nodes = {row["other_node"]: row["observation_count"] for row in rows}
 
         # Get node info for all related nodes
         if related_nodes:

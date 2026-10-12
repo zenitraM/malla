@@ -12,6 +12,29 @@ class URLFilterManager {
 
         this.form = document.querySelector(this.options.formSelector);
         this.groupingCheckbox = document.querySelector(this.options.groupingSelector);
+        this._userEditedFields = new Set();
+        this._trackUserEdits();
+    }
+
+    /**
+     * Track fields the user has interacted with, so that the async
+     * applyURLParameters() restoration never overwrites user input
+     * (it can still be in flight when a user starts typing after a reload).
+     */
+    _trackUserEdits() {
+        const markEdited = (event) => {
+            const target = event.target;
+            if (!target) return;
+            // Prefer the field name; picker search inputs only carry an id
+            const field = target.name || target.id;
+            if (field) {
+                this._userEditedFields.add(field);
+            }
+        };
+        // Listen at document level: some controls (e.g. the grouping
+        // checkbox) may live outside the form element
+        document.addEventListener('input', markEdited, true);
+        document.addEventListener('change', markEdited, true);
     }
 
     /**
@@ -58,6 +81,7 @@ class URLFilterManager {
 
         // Apply simple form field values
         Object.entries(urlParams).forEach(([key, value]) => {
+            if (this._userEditedFields.has(key)) return; // never clobber user input
             if (key === 'group_packets') {
                 if (this.groupingCheckbox) {
                     this.groupingCheckbox.checked = value === 'true';
@@ -102,6 +126,8 @@ class URLFilterManager {
      * Set node picker value by node ID
      */
     async setNodePickerValue(fieldName, nodeId) {
+        // Skip if the user edited this field while we were initialising
+        if (this._userEditedFields.has(fieldName)) return;
         try {
             let displayName = `Node ${nodeId}`; // Default fallback
 
@@ -124,6 +150,9 @@ class URLFilterManager {
                                document.querySelector(`input[data-field="${fieldName}"]`) ||
                                document.querySelector(`.node-picker-input[data-field="${fieldName}"]`);
 
+            // Re-check: the user may have edited this field while we fetched
+            if (this._userEditedFields.has(fieldName)) return;
+
             if (hiddenField && visibleField) {
                 hiddenField.value = nodeId;
                 visibleField.value = displayName;
@@ -141,6 +170,8 @@ class URLFilterManager {
      * Set gateway picker value by gateway ID
      */
     async setGatewayPickerValue(fieldName, gatewayId) {
+        // Skip if the user edited this field while we were initialising
+        if (this._userEditedFields.has(fieldName)) return;
         try {
             // Normalise: convert !hex to decimal string if applicable
             let nodeId = gatewayId;
@@ -196,6 +227,9 @@ class URLFilterManager {
             const visibleField = document.querySelector(`#${fieldName}`) ||
                                document.querySelector(`input[data-field="${fieldName}"]`) ||
                                document.querySelector(`.gateway-picker-input[data-field="${fieldName}"]`);
+
+            // Re-check: the user may have edited this field while we fetched
+            if (this._userEditedFields.has(fieldName)) return;
 
             if (hiddenField && visibleField) {
                 hiddenField.value = nodeId;

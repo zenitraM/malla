@@ -1,202 +1,186 @@
-"""
-Unit tests for the traceroute link endpoint bug fix.
+"""Regression tests for materialized traceroute-link pagination."""
 
-Tests that the endpoint properly handles RF hops without crashing on missing gateway_node_name.
-"""
-
-import json
+import sqlite3
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
+from flask import Flask
 
-from src.malla.models.traceroute import TracerouteHop, TraceroutePacket
+from src.malla.database.traceroute_read_repository import get_traceroute_link
+from src.malla.routes.api_routes import register_api_routes
+
+pytestmark = pytest.mark.unit
 
 
-class TestTracerouteLinkEndpointFix:
-    """Test the fix for the traceroute link endpoint gateway_node_name bug."""
+class _NonClosingConnection:
+    def __init__(self, connection):
+        self.connection = connection
 
-    @pytest.mark.unit
-    def test_endpoint_returns_rf_hops_without_gateway_node_name_error(self):
+    def __getattr__(self, name):
+        return getattr(self.connection, name)
+
+    def close(self):
+        pass
+
+
+def _packet(packet_id, timestamp, gateway_id="!0000012c"):
+    return {
+        "id": packet_id,
+        "timestamp": timestamp,
+        "timestamp_str": "2026-09-10 10:00:00",
+        "from_node_id": 100,
+        "to_node_id": 200,
+        "gateway_id": gateway_id,
+        "route_nodes_json": "[]",
+        "snr_towards_json": "[-16.5]",
+        "route_back_json": "[]",
+        "snr_back_json": "[]",
+        "target_hop_snr": -16.5,
+    }
+
+
+def test_endpoint_paginates_details_but_keeps_full_window_statistics():
+    now = time.time()
+    link_result = {
+        "packets": [_packet(15, now), _packet(14, now - 1)],
+        "total_count": 25,
+        "total_attempts": 25,
+        "forward_count": 13,
+        "reverse_count": 12,
+        "avg_snr": -11.25,
+    }
+
+    app = Flask(__name__)
+    register_api_routes(app)
+    with (
+        patch(
+            "src.malla.routes.api_routes.get_traceroute_link",
+            return_value=link_result,
+        ) as query,
+        patch(
+            "src.malla.routes.api_routes.NodeRepository.get_bulk_node_names",
+            return_value={100: "Node A", 200: "Node B", 300: "Gateway"},
+        ) as names,
+        app.test_client() as client,
+    ):
+        response = client.get("/api/traceroute/link/100/200?limit=10&page=2")
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert [row["id"] for row in data["traceroutes"]] == [15, 14]
+    assert data["page"] == 2
+    assert data["limit"] == 10
+    assert data["total_count"] == 25
+    assert data["total_pages"] == 3
+    assert data["total_attempts"] == 25
+    assert data["avg_snr"] == -11.25
+    assert data["direction_counts"] == {
+        "Node A → Node B": 13,
+        "Node B → Node A": 12,
+    }
+    assert data["traceroutes"][0]["complete_path_display"] == "Node A"
+    assert data["traceroutes"][0]["gateway_node_name"] == "Gateway"
+    assert names.call_count == 1
+    assert query.call_args.kwargs["limit"] == 10
+    assert query.call_args.kwargs["offset"] == 10
+
+
+def test_endpoint_returns_empty_paginated_result():
+    link_result = {
+        "packets": [],
+        "total_count": 0,
+        "total_attempts": 0,
+        "forward_count": 0,
+        "reverse_count": 0,
+        "avg_snr": None,
+    }
+    app = Flask(__name__)
+    register_api_routes(app)
+    with (
+        patch(
+            "src.malla.routes.api_routes.get_traceroute_link",
+            return_value=link_result,
+        ),
+        patch(
+            "src.malla.routes.api_routes.NodeRepository.get_bulk_node_names",
+            return_value={},
+        ),
+        app.test_client() as client,
+    ):
+        response = client.get("/api/traceroute/link/100/200?limit=10&page=2")
+
+    data = response.get_json()
+    assert response.status_code == 200
+    assert data["traceroutes"] == []
+    assert data["direction_counts"] == {"forward": 0, "reverse": 0}
+    assert data["total_count"] == 0
+    assert data["total_pages"] == 0
+
+
+def test_materialized_link_query_aggregates_all_rows_and_pages_packet_details():
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.executescript(
         """
-        Test that the endpoint returns RF hops between nodes without crashing
-        on the missing gateway_node_name attribute.
-
-        This is a regression test for the bug where the endpoint tried to access
-        tr_packet.gateway_node_name which doesn't exist on TraceroutePacket.
+        CREATE TABLE packet_history (
+            id INTEGER PRIMARY KEY, gateway_id TEXT, channel_id TEXT,
+            hop_start INTEGER, hop_limit INTEGER, rssi REAL, snr REAL,
+            payload_length INTEGER, processed_successfully INTEGER
+        );
+        CREATE TABLE traceroute_routes (
+            packet_id INTEGER PRIMARY KEY, timestamp REAL, from_node_id INTEGER,
+            to_node_id INTEGER, mesh_packet_id INTEGER, route_nodes_json TEXT,
+            snr_towards_json TEXT, route_back_json TEXT, snr_back_json TEXT,
+            parse_status TEXT, parser_version INTEGER
+        );
+        CREATE TABLE traceroute_hops (
+            packet_id INTEGER, direction TEXT, hop_index INTEGER, timestamp REAL,
+            from_node_id INTEGER, to_node_id INTEGER, snr REAL
+        );
         """
+    )
+    now = time.time()
+    for packet_id in range(1, 26):
+        from_node_id, to_node_id = (
+            (100, 200) if packet_id % 2 else (200, 100)
+        )
+        connection.execute(
+            "INSERT INTO packet_history VALUES (?, ?, '', 5, 4, -80, 1, 10, 1)",
+            (packet_id, "!0000012c"),
+        )
+        connection.execute(
+            "INSERT INTO traceroute_routes VALUES (?, ?, 100, 200, ?, '[]', ?, '[]', '[]', 'parsed', 1)",
+            (packet_id, now + packet_id, packet_id, "[-10]"),
+        )
+        connection.execute(
+            "INSERT INTO traceroute_hops VALUES (?, 'forward', 0, ?, ?, ?, ?)",
+            (packet_id, now + packet_id, from_node_id, to_node_id, -packet_id),
+        )
+    # Repeated occurrences stay in aggregate hop statistics but must not duplicate
+    # the packet in the paginated traceroute details.
+    connection.execute(
+        "INSERT INTO traceroute_hops VALUES (1, 'return', 1, ?, 200, 100, 5)",
+        (now + 1,),
+    )
+    connection.commit()
 
-        # Mock TracerouteRepository.get_traceroute_packets
-        mock_packets = [
-            {
-                "id": 12345,
-                "timestamp": time.time(),
-                "timestamp_str": "2024-01-20 10:30:00",
-                "from_node_id": 2510468508,
-                "to_node_id": 1128074276,
-                "gateway_id": 3333333333,
-                "raw_payload": b"fake_payload",
-            }
-        ]
+    with patch(
+        "src.malla.database.traceroute_read_repository.get_db_connection",
+        return_value=_NonClosingConnection(connection),
+    ):
+        result = get_traceroute_link(
+            100,
+            200,
+            start_time=now,
+            end_time=now + 30,
+            limit=10,
+            offset=10,
+        )
 
-        # Mock TraceroutePacket with RF hops between target nodes
-        mock_traceroute_packet = MagicMock(spec=TraceroutePacket)
-        mock_traceroute_packet.from_node_name = "Test Node A"
-        mock_traceroute_packet.to_node_name = "Test Node B"
-        mock_traceroute_packet.gateway_id = 3333333333
-        # Note: gateway_node_name is intentionally NOT set to test the bug fix
-        mock_traceroute_packet.format_path_display.return_value = "A -> B"
-        mock_traceroute_packet.get_display_hops.return_value = []
-
-        # Create a mock RF hop between the target nodes
-        mock_rf_hop = MagicMock(spec=TracerouteHop)
-        mock_rf_hop.from_node_id = 2510468508
-        mock_rf_hop.to_node_id = 1128074276
-        mock_rf_hop.snr = -16.5
-        mock_rf_hop.from_node_name = "Test Node A"
-        mock_rf_hop.to_node_name = "Test Node B"
-        mock_rf_hop.direction = "forward_rf"
-
-        mock_traceroute_packet.get_rf_hops.return_value = [mock_rf_hop]
-
-        with patch(
-            "src.malla.routes.api_routes.TracerouteRepository"
-        ) as mock_repo_class:
-            mock_repo = mock_repo_class
-            mock_repo.get_traceroute_packets.return_value = {"packets": mock_packets}
-
-            with patch("src.malla.routes.api_routes.NodeRepository") as mock_node_repo:
-                mock_node_repo.get_bulk_node_names.return_value = {
-                    2510468508: "Test Node A",
-                    1128074276: "Test Node B",
-                    3333333333: "Gateway Node",
-                }
-
-                with patch(
-                    "src.malla.routes.api_routes.TraceroutePacket"
-                ) as mock_traceroute_class:
-                    mock_traceroute_class.return_value = mock_traceroute_packet
-
-                    # Import here to use the mocked dependencies
-                    from flask import Flask
-
-                    from src.malla.routes.api_routes import register_api_routes
-
-                    app = Flask(__name__)
-                    register_api_routes(app)
-
-                    with app.test_client() as client:
-                        # Test the endpoint that was previously crashing
-                        response = client.get(
-                            "/api/traceroute/link/2510468508/1128074276"
-                        )
-
-                        # Should not crash and should return valid data
-                        assert response.status_code == 200
-
-                        data = json.loads(response.data)
-
-                        # Should have traceroutes (not empty due to the crash)
-                        assert "traceroutes" in data
-                        assert len(data["traceroutes"]) > 0
-
-                        # Should have proper statistics
-                        assert "avg_snr" in data
-                        assert data["avg_snr"] == -16.5
-
-                        # Should have direction counts
-                        assert "direction_counts" in data
-
-                        # Verify the traceroute entry structure (with gateway_node_name)
-                        traceroute = data["traceroutes"][0]
-                        expected_fields = {
-                            "id",
-                            "timestamp",
-                            "timestamp_str",
-                            "from_node_id",
-                            "to_node_id",
-                            "from_node_name",
-                            "to_node_name",
-                            "gateway_id",
-                            "gateway_node_name",
-                            "hop_snr",
-                            "route_hops",
-                            "complete_path_display",
-                        }
-
-                        for field in expected_fields:
-                            assert field in traceroute, f"Missing field: {field}"
-
-                        # Ensure gateway_node_name is properly set
-                        assert traceroute["gateway_node_name"] == "Gateway Node"
-
-                        # Verify specific values
-                        assert traceroute["from_node_id"] == 2510468508
-                        assert traceroute["to_node_id"] == 1128074276
-                        assert traceroute["hop_snr"] == -16.5
-                        assert traceroute["gateway_id"] == 3333333333
-
-    @pytest.mark.unit
-    def test_endpoint_handles_no_rf_hops_gracefully(self):
-        """
-        Test that the endpoint returns empty results when no RF hops exist between nodes.
-        """
-
-        # Mock TracerouteRepository.get_traceroute_packets
-        mock_packets = [
-            {
-                "id": 12346,
-                "timestamp": time.time(),
-                "timestamp_str": "2024-01-20 10:30:00",
-                "from_node_id": 1111111111,
-                "to_node_id": 2222222222,
-                "gateway_id": 3333333333,
-                "raw_payload": b"fake_payload",
-            }
-        ]
-
-        # Mock TraceroutePacket with NO RF hops between target nodes
-        mock_traceroute_packet = MagicMock(spec=TraceroutePacket)
-        mock_traceroute_packet.get_rf_hops.return_value = []  # No RF hops
-        mock_traceroute_packet.get_display_hops.return_value = []
-
-        with patch(
-            "src.malla.routes.api_routes.TracerouteRepository"
-        ) as mock_repo_class:
-            mock_repo = mock_repo_class
-            mock_repo.get_traceroute_packets.return_value = {"packets": mock_packets}
-
-            with patch("src.malla.routes.api_routes.NodeRepository") as mock_node_repo:
-                mock_node_repo.get_bulk_node_names.return_value = {
-                    1111111111: "Test Node A",
-                    2222222222: "Test Node B",
-                }
-
-                with patch(
-                    "src.malla.routes.api_routes.TraceroutePacket"
-                ) as mock_traceroute_class:
-                    mock_traceroute_class.return_value = mock_traceroute_packet
-
-                    # Import here to use the mocked dependencies
-                    from flask import Flask
-
-                    from src.malla.routes.api_routes import register_api_routes
-
-                    app = Flask(__name__)
-                    register_api_routes(app)
-
-                    with app.test_client() as client:
-                        # Test with nodes that have no RF hops between them
-                        response = client.get(
-                            "/api/traceroute/link/9999999999/8888888888"
-                        )
-
-                        # Should not crash
-                        assert response.status_code == 200
-
-                        data = json.loads(response.data)
-
-                        # Should return empty results
-                        assert data["traceroutes"] == []
-                        assert data["avg_snr"] is None
-                        assert data["direction_counts"] == {"forward": 0, "reverse": 0}
+    assert result["total_count"] == 25
+    assert result["total_attempts"] == 25
+    assert result["forward_count"] == 13
+    assert result["reverse_count"] == 13
+    assert result["avg_snr"] == pytest.approx((sum(range(-1, -26, -1)) + 5) / 26)
+    assert [packet["id"] for packet in result["packets"]] == list(range(15, 5, -1))
