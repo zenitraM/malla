@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 
+from .. import activity_rollup
 from .base import Migration, Phase, Watermark
 
 logger = logging.getLogger(__name__)
@@ -56,23 +57,6 @@ NODE_INFO_TABLE_SQL = """
     )
 """
 
-# Per-local-day activity aggregates for the dashboard timeline. Completed days
-# never change (packet_history is append-only and rows are stamped with insert
-# time), so each (tz_offset, day) is computed once and reused forever; only the
-# current day is recomputed live. Without this, the "All" range re-aggregates
-# the entire multi-million-row packet_history on every view.
-ACTIVITY_ROLLUP_TABLE_SQL = """
-    CREATE TABLE IF NOT EXISTS activity_daily_rollup (
-        tz_offset_minutes INTEGER NOT NULL,
-        day TEXT NOT NULL,
-        total_packets INTEGER NOT NULL DEFAULT 0,
-        active_nodes INTEGER NOT NULL DEFAULT 0,
-        gateway_count INTEGER NOT NULL DEFAULT 0,
-        new_nodes INTEGER NOT NULL DEFAULT 0,
-        computed_at REAL NOT NULL,
-        PRIMARY KEY (tz_offset_minutes, day)
-    )
-"""
 
 # Columns added after packet_history first shipped; older databases get them
 # one by one.
@@ -263,7 +247,7 @@ def missing_indexes(conn: sqlite3.Connection) -> list[str]:
 
 def _core_tables_pending(conn: sqlite3.Connection, _wm: Watermark) -> bool:
     present = tables(conn)
-    if present < {"packet_history", "node_info", "activity_daily_rollup"}:
+    if present < {"packet_history", "node_info"}:
         return True
     if _missing_columns(conn, "packet_history", PACKET_HISTORY_ADDED_COLUMNS):
         return True
@@ -273,7 +257,6 @@ def _core_tables_pending(conn: sqlite3.Connection, _wm: Watermark) -> bool:
 def _apply_core_tables(conn: sqlite3.Connection, _wm: Watermark) -> Watermark:
     conn.execute(PACKET_HISTORY_TABLE_SQL)
     conn.execute(NODE_INFO_TABLE_SQL)
-    conn.execute(ACTIVITY_ROLLUP_TABLE_SQL)
     for table, spec in (
         ("packet_history", PACKET_HISTORY_ADDED_COLUMNS),
         ("node_info", NODE_INFO_ADDED_COLUMNS),
@@ -322,5 +305,55 @@ CORE_INDEXES = Migration(
     pending=_core_indexes_pending,
 )
 
-SCHEMA_MIGRATIONS: tuple[Migration, ...] = (CORE_TABLES,)
+
+def _activity_quarter_tables_pending(conn: sqlite3.Connection, _wm: Watermark) -> bool:
+    present = tables(conn)
+    return any(table not in present for table in activity_rollup.TABLES)
+
+
+def _apply_activity_quarter_tables(
+    conn: sqlite3.Connection, _wm: Watermark
+) -> Watermark:
+    conn.executescript(activity_rollup.ACTIVITY_QUARTER_TABLES_SQL)
+    for sql in activity_rollup.CREATE_INDEXES_SQL:
+        conn.execute(sql)
+    return None
+
+
+def _drop_activity_daily_rollup_pending(
+    conn: sqlite3.Connection, _wm: Watermark
+) -> bool:
+    return "activity_daily_rollup" in tables(conn)
+
+
+def _apply_drop_activity_daily_rollup(
+    conn: sqlite3.Connection, _wm: Watermark
+) -> Watermark:
+    """Remove the per-viewer daily rollup the quarter-hour buckets replace."""
+    conn.execute("DROP TABLE IF EXISTS activity_daily_rollup")
+    logger.info("Dropped activity_daily_rollup (replaced by quarter-hour buckets)")
+    return None
+
+
+ACTIVITY_QUARTER_TABLES_MIGRATION = Migration(
+    name="activity_quarter_tables",
+    phase=Phase.SCHEMA,
+    apply=_apply_activity_quarter_tables,
+    description="quarter-hour activity buckets the timeline shifts at query time",
+    pending=_activity_quarter_tables_pending,
+)
+
+DROP_ACTIVITY_DAILY_ROLLUP = Migration(
+    name="drop_activity_daily_rollup",
+    phase=Phase.SCHEMA,
+    apply=_apply_drop_activity_daily_rollup,
+    description="drop the superseded per-viewer daily activity rollup",
+    pending=_drop_activity_daily_rollup_pending,
+)
+
+SCHEMA_MIGRATIONS: tuple[Migration, ...] = (
+    CORE_TABLES,
+    ACTIVITY_QUARTER_TABLES_MIGRATION,
+    DROP_ACTIVITY_DAILY_ROLLUP,
+)
 BLOCKING_MIGRATIONS: tuple[Migration, ...] = (CORE_INDEXES,)

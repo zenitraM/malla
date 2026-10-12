@@ -702,14 +702,6 @@ async function loadActivityTimeline(range) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
-        if (data.pending) {
-            // The server backfills its daily rollup in bounded slices so a
-            // request never outlives the worker timeout; committed progress
-            // survives between calls, so just poll until the range completes.
-            showTimelineBackfillProgress(data.days_remaining);
-            setTimeout(() => { if (timelineRange === range) loadActivityTimeline(range); }, 1000);
-            return;
-        }
         timelineData = data;
         renderTimelinePanels();
     } catch (error) {
@@ -720,19 +712,6 @@ async function loadActivityTimeline(range) {
         if (errorEl) errorEl.style.display = '';
     } finally {
         if (panels) panels.style.opacity = '';
-    }
-}
-
-function showTimelineBackfillProgress(daysRemaining) {
-    const loading = document.getElementById('activityTimelinePanelsLoading');
-    if (loading) loading.style.display = '';
-    const panels = document.getElementById('activityTimelinePanels');
-    if (panels) panels.style.display = 'none';
-    const text = document.getElementById('activityTimelineLoadingText');
-    if (text) {
-        text.textContent = daysRemaining
-            ? `Building daily history — ${daysRemaining} day${daysRemaining === 1 ? '' : 's'} to go...`
-            : 'Building daily history...';
     }
 }
 

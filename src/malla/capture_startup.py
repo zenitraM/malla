@@ -26,6 +26,7 @@ import threading
 import time
 from contextlib import nullcontext
 
+from . import activity_rollup
 from .migrations import MIGRATIONS, MigrationResult, Phase, Status, run_migrations
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,23 @@ def run_write_locking_migrations(
 ) -> list[MigrationResult]:
     """Apply the BLOCKING migrations: DDL that cannot run while packets are written."""
     return run_phase(db_path, Phase.BLOCKING, lock=lock)
+
+
+def refresh_activity_buckets(db_path: str, *, lock: threading.Lock) -> int:
+    """Append completed quarter-hour activity buckets. Returns rows inserted.
+
+    Called from the daemon's steady-state loop, where it is normally one
+    ``MAX(bucket)`` plus one indexed existence check: a bucket only completes
+    every 15 minutes.
+    """
+    with lock:
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        try:
+            if not activity_rollup.pending(conn):
+                return 0
+            return activity_rollup.refresh(conn)
+        finally:
+            conn.close()
 
 
 def start_background_migrations(db_path: str) -> threading.Thread:

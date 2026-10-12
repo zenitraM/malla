@@ -11,6 +11,7 @@ import sqlite3
 import time
 
 import malla.database.repositories as repositories
+from malla import activity_rollup
 from malla.database.repositories import DashboardRepository
 from malla.services.analytics_service import AnalyticsService
 
@@ -36,6 +37,17 @@ def _reset_data(db_path: str, packets, nodes):
         nodes,
     )
     conn.commit()
+    conn.close()
+
+
+def _build_buckets(db_path: str) -> None:
+    """Fill the activity buckets the way the capture daemon does.
+
+    Completed days are served from this store, so tests that assert numbers for
+    days before today have to seed it (exactly like seeding packet_history).
+    """
+    conn = sqlite3.connect(db_path)
+    activity_rollup.refresh(conn)
     conn.close()
 
 
@@ -120,6 +132,8 @@ def test_timeline_7d_buckets_align_to_local_days(temp_database, monkeypatch):
         nodes=[(1, ts_today, now), (2, ts_yesterday, now)],
     )
 
+    _build_buckets(temp_database)
+
     timeline = AnalyticsService.get_activity_timeline("7d", tz_offset_minutes)
     days = timeline["buckets"]
 
@@ -139,8 +153,8 @@ def test_timeline_7d_buckets_align_to_local_days(temp_database, monkeypatch):
     assert all(d["total_packets"] == 0 and d["active_nodes"] == 0 for d in days[:-2])
 
 
-def test_timeline_completed_days_served_from_rollup(temp_database, monkeypatch):
-    """Completed days are persisted to activity_daily_rollup and reused as-is."""
+def test_timeline_completed_days_come_from_buckets(temp_database, monkeypatch):
+    """Completed days are served from the activity buckets, today is recomputed."""
     monkeypatch.setenv("MALLA_DATABASE_FILE", temp_database)
     AnalyticsService._TIMELINE_CACHE.clear()
 
@@ -159,24 +173,23 @@ def test_timeline_completed_days_served_from_rollup(temp_database, monkeypatch):
         nodes=[(1, ts_yesterday, now)],
     )
 
+    _build_buckets(temp_database)
+
     first = AnalyticsService.get_activity_timeline("7d", tz_offset_minutes)
     assert first["buckets"][-2]["total_packets"] == 2
+    assert "pending" not in first and "days_remaining" not in first
 
-    # The completed day is now persisted.
+    # The completed day comes from the bucket store the capture maintains.
     conn = sqlite3.connect(temp_database)
-    rollup_days = {
-        row[0]
-        for row in conn.execute(
-            "SELECT day FROM activity_daily_rollup WHERE tz_offset_minutes = 0"
-        )
-    }
+    stored_buckets = conn.execute(
+        "SELECT MIN(bucket), MAX(bucket) FROM activity_packet_quarter"
+    ).fetchone()
     conn.close()
-    assert first["buckets"][-2]["bucket"] in rollup_days
-    assert first["buckets"][-1]["bucket"] not in rollup_days  # today never cached
+    assert stored_buckets[0] is not None
 
-    # A packet backdated into a completed day must NOT change the rollup value
-    # (append-only history can't grow the past; this pins that we serve the
-    # cached aggregate instead of rescanning), while today stays live.
+    # A packet backdated into a completed day must NOT change it — the bucket
+    # was built from the packets seen at the time and is not rescanned — while
+    # today stays live.
     conn = sqlite3.connect(temp_database)
     conn.execute(
         "INSERT INTO packet_history (timestamp, topic, from_node_id, gateway_id, "
@@ -244,6 +257,8 @@ def test_timeline_all_starts_at_first_packet(temp_database, monkeypatch):
         nodes=[(1, now - 3 * DAY, now)],
     )
 
+    _build_buckets(temp_database)
+
     timeline = AnalyticsService.get_activity_timeline("all", 0)
     buckets = timeline["buckets"]
 
@@ -255,25 +270,18 @@ def test_timeline_all_starts_at_first_packet(temp_database, monkeypatch):
     assert sum(b["total_packets"] for b in buckets) == 2
 
 
-def test_timeline_backfill_is_budgeted_and_resumable(temp_database, monkeypatch):
-    """Rollup backfill commits per day and yields when the time budget is spent.
+def test_timeline_read_path_never_writes(temp_database, monkeypatch):
+    """A timeline request is read-only and carries no backfill contract.
 
-    On large deployments the first 7d/30d/all request used to aggregate every
-    missing day in one transaction; past the gunicorn worker timeout it was
-    SIGKILLed, the transaction rolled back, and every retry started from zero
-    (a permanent 502 loop, seen on malla.meshtastic.es). A zero budget must
-    still make progress — exactly one day per call — and repeated calls must
-    converge to a complete, correct timeline.
+    The web UI used to aggregate and persist missing days per request, which is
+    why responses had ``pending``/``days_remaining`` and why the process needed
+    write access. The capture daemon owns the bucket store now.
     """
     monkeypatch.setenv("MALLA_DATABASE_FILE", temp_database)
     AnalyticsService._TIMELINE_CACHE.clear()
-    # Deadline is already in the past when the backfill starts: every call
-    # computes only its guaranteed single day.
-    monkeypatch.setattr(AnalyticsService, "_ROLLUP_TIME_BUDGET_SEC", -1.0)
 
     now = time.time()
     local_today_start = (int(now) // DAY) * DAY
-    # One packet per completed day for the last 3 days, plus one today.
     _reset_data(
         temp_database,
         packets=[
@@ -283,33 +291,39 @@ def test_timeline_backfill_is_budgeted_and_resumable(temp_database, monkeypatch)
         nodes=[(1, now - 10 * DAY, now)],
     )
 
-    first = AnalyticsService.get_activity_timeline("7d", 0)
-    assert first["pending"] is True
-    assert first["days_remaining"] == 6  # 7 completed days wanted, 1 done
+    def snapshot() -> tuple[int, set[str]]:
+        conn = sqlite3.connect(temp_database)
+        try:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM activity_packet_quarter"
+            ).fetchone()[0]
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            return count, tables
+        finally:
+            conn.close()
 
-    conn = sqlite3.connect(temp_database)
-    (rollup_count,) = conn.execute(
-        "SELECT COUNT(*) FROM activity_daily_rollup"
-    ).fetchone()
-    conn.close()
-    assert rollup_count == 1  # progress committed despite the exhausted budget
+    before = snapshot()
+    assert before[0] == 0  # nothing built yet: the request must not build it
+    assert "activity_daily_rollup" not in before[1]
 
-    # Pending responses are not cached: the next call resumes immediately.
-    second = AnalyticsService.get_activity_timeline("7d", 0)
-    assert second["pending"] is True
-    assert second["days_remaining"] == 5
+    timeline = AnalyticsService.get_activity_timeline("7d", 0)
 
-    for _ in range(5):
-        result = AnalyticsService.get_activity_timeline("7d", 0)
-    assert result["pending"] is False
-    assert "days_remaining" not in result
+    assert "pending" not in timeline and "days_remaining" not in timeline
+    assert snapshot() == before  # a request writes nothing at all
 
-    days = result["buckets"]
+    # With the store filled (as the capture does), completed days carry data.
+    _build_buckets(temp_database)
+    AnalyticsService._TIMELINE_CACHE.clear()
+    filled = AnalyticsService.get_activity_timeline("7d", 0)
+    days = filled["buckets"]
     assert len(days) == 8
     assert days[-1]["total_packets"] == 1  # today, computed live
-    assert all(d["total_packets"] == 1 for d in days[-4:-1])  # the 3 backfilled
-    assert all(d["total_packets"] == 0 for d in days[:-4])
-
+    assert all(day["total_packets"] == 1 for day in days[-4:-1])
 
 def test_hop_distribution_counts_real_hops(temp_database, monkeypatch):
     """Hop distribution reflects hop_start - hop_limit, excluding malformed rows."""
