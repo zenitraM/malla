@@ -46,6 +46,12 @@ def node_detail(node_id):
         if not node_details:
             return "Node not found", 404
 
+        node = node_details.get("node") or {}
+        node_details["firmware"] = NodeRepository.get_firmware_estimate(
+            node_id_int, role=node.get("role"), hw_model=node.get("hw_model")
+        )
+        node_details["same_mac_nodes"] = NodeRepository.get_same_mac_nodes(node_id_int)
+
         logger.info("Node detail page rendered successfully")
         return render_template("node_detail.html", **node_details)
     except Exception as e:

@@ -303,6 +303,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             },
             {
+                key: 'firmware_label',
+                title: 'Firmware',
+                sortable: false,
+                render: (value, row) => {
+                    const label = value || 'Unknown';
+                    const cls = row.firmware_source === 'reported'
+                        ? 'bg-success'
+                        : (row.firmware_source === 'fingerprint' ? 'bg-secondary' : 'bg-light text-dark');
+                    const element = badge(label, cls);
+                    if (Array.isArray(row.firmware_evidence) && row.firmware_evidence.length) {
+                        element.title = row.firmware_evidence.join(', ');
+                    }
+                    return element;
+                }
+            },
+            {
                 key: 'last_packet_str',
                 title: 'Last Seen',
                 sortable: true,

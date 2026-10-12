@@ -45,6 +45,8 @@
         font-size: 0.75rem;
     }
     .matrix-table td { text-align: center; }
+.info-popover { line-height: 1; vertical-align: baseline; text-decoration: none; }
+.info-popover:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; border-radius: 50%; }
 </style>
 {% endblock %}
 
@@ -165,6 +167,23 @@
                                     <td><code>{{ node.mac_address }}</code></td>
                                 </tr>
                                 {% endif %}
+                                {% if same_mac_nodes %}
+                                <tr>
+                                    <th>Same Device:</th>
+                                    <td>
+                                        <ul class="list-unstyled mb-0 same-mac-nodes">
+                                            {% for sibling in same_mac_nodes %}
+                                            <li>
+                                                <a href="/node/{{ sibling.node_id }}"><code>{{ sibling.hex_id }}</code></a>
+                                                {{ sibling.node_name }}
+                                                <span class="badge {{ 'bg-info' if sibling.relation == 'newer' else 'bg-secondary' }}">{{ sibling.relation }} id</span>
+                                                {% if sibling.first_seen_str %}<small class="text-muted">first seen {{ sibling.first_seen_str }}{% if sibling.last_updated_str %}, last {{ sibling.last_updated_str }}{% endif %}</small>{% endif %}
+                                            </li>
+                                            {% endfor %}
+                                        </ul>
+                                    </td>
+                                </tr>
+                                {% endif %}
                                 <tr>
                                     <th>First Seen:</th>
                                     <td>{{ node.first_seen }}</td>
@@ -212,11 +231,19 @@
                                 <tr>
                                     <th>Firmware Version:</th>
                                     <td>
-                                        <span class="text-muted">Not available</span>
-                                        <i class="bi bi-info-circle text-muted ms-1"
-                                           data-bs-toggle="tooltip"
-                                           data-bs-placement="top"
-                                           title="Firmware version information is not transmitted in standard nodeinfo packets. It would require admin access to query device metadata."></i>
+                                        {% if firmware and firmware.source == 'reported' %}
+                                        <span class="badge bg-success">{{ firmware.label }}</span>
+                                        <small class="text-muted">reported{% if firmware.reported_at_str %} {{ firmware.reported_at_str }}{% endif %}</small>
+                                        {% elif firmware and firmware.source == 'fingerprint' %}
+                                        <span class="badge bg-secondary">{{ firmware.label }}</span>
+                                        <small class="text-muted">estimated</small>
+                                        {% else %}
+                                        <span class="text-muted">Unknown</span>
+                                        {% endif %}
+                                        <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline text-muted info-popover" tabindex="0"
+                                                aria-label="Evidence" data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                                data-bs-placement="top" data-bs-html="true"
+                                                data-bs-content="{% if firmware %}{% for item in firmware.evidence_items %}<div class='d-flex justify-content-between gap-3'><span>{{ item.trait }}</span><span class='text-muted text-nowrap'>{{ item.range }}</span></div>{% endfor %}{% else %}no evidence yet{% endif %}"><i class="bi bi-info-circle"></i></button>
                                     </td>
                                 </tr>
                                 <tr>
@@ -791,6 +818,13 @@
 
 <script data-node-id="{{ node.node_id }}">
 document.addEventListener('DOMContentLoaded', function() {
+    // Explanations live in popovers: hover shows them on desktop, and on touch
+    // devices a tap focuses the button and shows them until the next tap.
+    if (window.bootstrap && bootstrap.Popover) {
+        document.querySelectorAll('[data-bs-toggle="popover"]').forEach(function (el) {
+            new bootstrap.Popover(el);
+        });
+    }
     // Set progress bar widths from data attributes
     document.querySelectorAll('.progress-bar[data-width]').forEach(function(bar) {
         const width = bar.getAttribute('data-width');
