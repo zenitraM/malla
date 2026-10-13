@@ -285,6 +285,229 @@ class TestChatMessagesAPI:
             "Expected some mesh_packet_ids to appear more than once (multi-gateway receptions)"
         )
 
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_chat_channels_endpoint(self, client):
+        """The /api/chat/channels endpoint returns channels list."""
+        response = client.get("/api/chat/channels")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert "channels" in data
+        assert isinstance(data["channels"], list)
+
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_chat_channels_filter_empty(self, client):
+        """When chat_hide_empty_channels is True, only channels with text messages are returned."""
+        from src.malla.config import AppConfig, _override_config, get_config
+
+        orig_cfg = get_config()
+        try:
+            # Test with chat_hide_empty_channels = False (all channels)
+            cfg_all = AppConfig(
+                database_file=orig_cfg.database_file,
+                chat_hide_empty_channels=False,
+            )
+            _override_config(cfg_all)
+            res_all = client.get("/api/chat/channels").get_json()
+
+            # Test with chat_hide_empty_channels = True (only with messages)
+            cfg_filtered = AppConfig(
+                database_file=orig_cfg.database_file,
+                chat_hide_empty_channels=True,
+            )
+            _override_config(cfg_filtered)
+            res_filtered = client.get("/api/chat/channels").get_json()
+
+            assert set(res_filtered["channels"]).issubset(set(res_all["channels"]))
+
+            # Test query parameter ?all=true override
+            res_override = client.get("/api/chat/channels?all=true").get_json()
+            assert res_override["channels"] == res_all["channels"]
+        finally:
+            _override_config(orig_cfg)
+
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_chat_channels_include_and_exclude(self, client):
+        """Include and exclude filters properly constrain channels returned to chat."""
+        from src.malla.config import AppConfig, _override_config, get_config
+
+        orig_cfg = get_config()
+        try:
+            # Baseline: get unfiltered channels
+            cfg_base = AppConfig(
+                database_file=orig_cfg.database_file,
+                chat_hide_empty_channels=False,
+                chat_include_channels=[],
+                chat_exclude_channels=[],
+            )
+            _override_config(cfg_base)
+            base_channels = client.get("/api/chat/channels").get_json()["channels"]
+
+            if len(base_channels) >= 2:
+                chan_a = base_channels[0]
+                chan_b = base_channels[1]
+
+                # 1. Test chat_include_channels only
+                cfg_include = AppConfig(
+                    database_file=orig_cfg.database_file,
+                    chat_include_channels=[chan_a],
+                )
+                _override_config(cfg_include)
+                res_inc = client.get("/api/chat/channels").get_json()["channels"]
+                assert res_inc == [chan_a]
+
+                # 2. Test chat_exclude_channels only
+                cfg_exclude = AppConfig(
+                    database_file=orig_cfg.database_file,
+                    chat_exclude_channels=[chan_a],
+                )
+                _override_config(cfg_exclude)
+                res_exc = client.get("/api/chat/channels").get_json()["channels"]
+                assert chan_a not in res_exc
+                assert chan_b in res_exc
+
+                # 3. Test both include and exclude together
+                cfg_both = AppConfig(
+                    database_file=orig_cfg.database_file,
+                    chat_include_channels=[chan_a, chan_b],
+                    chat_exclude_channels=[chan_a],
+                )
+                _override_config(cfg_both)
+                res_both = client.get("/api/chat/channels").get_json()["channels"]
+                assert res_both == [chan_b]
+        finally:
+            _override_config(orig_cfg)
+
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_chat_messages_include_and_exclude(self, client):
+        """Streaming chat messages respects chat_include_channels and chat_exclude_channels."""
+        from src.malla.config import AppConfig, _override_config, get_config
+
+        orig_cfg = get_config()
+        try:
+            # Baseline: get messages from all channels
+            cfg_base = AppConfig(
+                database_file=orig_cfg.database_file,
+                chat_hide_empty_channels=False,
+                chat_include_channels=[],
+                chat_exclude_channels=[],
+            )
+            _override_config(cfg_base)
+            base_data = client.get("/api/chat/messages?limit=100").get_json()
+            all_channels = {p["ch"] for p in base_data["packets"] if p.get("ch")}
+
+            if len(all_channels) >= 2:
+                chan_list = list(all_channels)
+                target_chan = chan_list[0]
+                other_chan = chan_list[1]
+
+                # 1. Test chat_include_channels on "All channels" (no ?channel)
+                cfg_inc = AppConfig(
+                    database_file=orig_cfg.database_file,
+                    chat_include_channels=[target_chan],
+                )
+                _override_config(cfg_inc)
+                inc_data = client.get("/api/chat/messages?limit=100").get_json()
+                for p in inc_data["packets"]:
+                    assert p["ch"] == target_chan
+
+                # Direct query for forbidden channel returns empty
+                bad_chan_data = client.get(f"/api/chat/messages?channel={other_chan}").get_json()
+                assert bad_chan_data["packets"] == []
+
+                # 2. Test chat_exclude_channels on "All channels"
+                cfg_exc = AppConfig(
+                    database_file=orig_cfg.database_file,
+                    chat_exclude_channels=[target_chan],
+                )
+                _override_config(cfg_exc)
+                exc_data = client.get("/api/chat/messages?limit=100").get_json()
+                for p in exc_data["packets"]:
+                    assert p["ch"] != target_chan
+
+                # Direct query for excluded channel returns empty
+                exc_direct = client.get(f"/api/chat/messages?channel={target_chan}").get_json()
+                assert exc_direct["packets"] == []
+
+                # 3. Test both include and exclude
+                cfg_both = AppConfig(
+                    database_file=orig_cfg.database_file,
+                    chat_include_channels=[target_chan, other_chan],
+                    chat_exclude_channels=[target_chan],
+                )
+                _override_config(cfg_both)
+                both_data = client.get("/api/chat/messages?limit=100").get_json()
+                for p in both_data["packets"]:
+                    assert p["ch"] == other_chan
+        finally:
+            _override_config(orig_cfg)
+
+    @pytest.mark.integration
+    @pytest.mark.api
+    def test_chat_messages_deduplication_and_empty_allowed(self, client):
+        """Duplicates in include/exclude are deduplicated; empty effective allowed returns empty response."""
+        from src.malla.config import AppConfig, _override_config, get_config
+
+        orig_cfg = get_config()
+        try:
+            # 1. Duplicate channels in include config are handled cleanly
+            cfg_dups = AppConfig(
+                database_file=orig_cfg.database_file,
+                chat_include_channels="ChanA, ChanA, ChanB",
+                chat_exclude_channels="ChanA, ChanA",
+            )
+            assert cfg_dups.get_chat_include_channels() == ["ChanA", "ChanB"]
+            assert cfg_dups.get_chat_exclude_channels() == ["ChanA"]
+            _override_config(cfg_dups)
+            res = client.get("/api/chat/messages?limit=10").get_json()
+            assert "packets" in res
+            assert "last_id" in res
+
+            # 2. When all included channels are excluded, returns empty response
+            cfg_empty = AppConfig(
+                database_file=orig_cfg.database_file,
+                chat_include_channels="ChanA",
+                chat_exclude_channels="ChanA",
+            )
+            _override_config(cfg_empty)
+            res_empty = client.get("/api/chat/messages").get_json()
+            assert res_empty["packets"] == []
+            assert res_empty["nodes"] == {}
+        finally:
+            _override_config(orig_cfg)
+
+    @pytest.mark.integration
+    def test_get_unique_chat_channels_connection_cleanup(self, monkeypatch):
+        """NodeRepository.get_unique_chat_channels closes connection in finally block even if query fails."""
+        import sqlite3
+
+        from malla.database import repositories
+
+        real_get_conn = repositories.get_db_connection
+        closed = []
+
+        class MockConn:
+            def __init__(self, raw_conn):
+                self._raw = raw_conn
+
+            def cursor(self):
+                raise sqlite3.OperationalError("Simulated database failure")
+
+            def close(self):
+                closed.append(True)
+                self._raw.close()
+
+        def mock_get_db_connection():
+            return MockConn(real_get_conn())
+
+        monkeypatch.setattr(repositories, "get_db_connection", mock_get_db_connection)
+        res = repositories.NodeRepository.get_unique_chat_channels(only_with_messages=True)
+        assert res == []
+        assert len(closed) == 1
+
 
 class TestChatPageRoute:
     """Tests for the /chat HTML page route."""
