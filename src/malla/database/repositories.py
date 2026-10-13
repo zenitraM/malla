@@ -3238,6 +3238,51 @@ class NodeRepository:
             return []
 
     @staticmethod
+    def get_unique_chat_channels(only_with_messages: bool = False) -> list[str]:
+        """Return list of distinct channel IDs for chat.
+
+        Args:
+            only_with_messages: If True, only returns channels that have at least
+                one decrypted text message (TEXT_MESSAGE_APP with non-empty payload).
+                If False, returns all distinct observed packet channel IDs.
+        """
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            if only_with_messages:
+                cursor.execute(
+                    """
+                    SELECT DISTINCT channel_id
+                    FROM packet_history
+                    WHERE portnum_name = 'TEXT_MESSAGE_APP'
+                      AND raw_payload IS NOT NULL
+                      AND payload_length > 0
+                      AND channel_id IS NOT NULL
+                      AND channel_id != ''
+                    ORDER BY channel_id
+                    """
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT DISTINCT channel_id
+                    FROM packet_history
+                    WHERE channel_id IS NOT NULL
+                      AND channel_id != ''
+                    ORDER BY channel_id
+                    """
+                )
+            rows = cursor.fetchall()
+            return [row[0] for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting unique chat channels: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    @staticmethod
     def get_node_telemetry_history(
         node_id: int | str,
         start_time: float | None = None,
