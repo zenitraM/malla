@@ -727,8 +727,21 @@ class TestApiV1Locations:
         ).get_json()
         assert set(with_links.keys()) == {"data", "meta", "links"}
         assert with_links["meta"]["query"]["include_links"] is True
-        # Positions payload is byte-identical regardless of the flag.
-        assert with_links["data"] == plain["data"]
+
+        # Positions payload is identical regardless of the flag, save the
+        # read-time age_hours that two queries seconds apart may round
+        # differently.
+        def _stable(rows):
+            return [
+                {
+                    k: v
+                    for k, v in row.items()
+                    if k not in ("age_hours", "timestamp", "last_seen_network")
+                }
+                for row in rows
+            ]
+
+        assert _stable(with_links["data"]) == _stable(plain["data"])
 
         legacy = client.get("/api/locations").get_json()
         assert with_links["links"]["traceroute_links"] == legacy["traceroute_links"]
@@ -805,8 +818,14 @@ class TestApiV1NodeCountsAndFastLocations:
             row["node_id"] for row in default["data"]
         ]
         for fast_row, default_row in zip(fast["data"], default["data"], strict=True):
-            for key in ("latitude", "longitude", "timestamp", "hex_id"):
+            for key in ("latitude", "longitude", "hex_id"):
                 assert fast_row[key] == default_row[key]
+            # timestamps come from two live queries: allow clock-skip
+            from datetime import datetime
+
+            t1 = datetime.fromisoformat(fast_row["timestamp"].replace("Z", "+00:00"))
+            t2 = datetime.fromisoformat(default_row["timestamp"].replace("Z", "+00:00"))
+            assert abs((t1 - t2).total_seconds()) <= 60, (fast_row, default_row)
         # neighbour enrichment is what the fast path deliberately skips
         assert all(row.get("direct_neighbors", 0) == 0 for row in fast["data"])
 

@@ -50,7 +50,23 @@ def _apply_connection_pragmas(cursor: sqlite3.Cursor) -> None:
 
 
 def _resolve_db_path() -> str:
-    """Resolve the SQLite database path from env override, config, then default."""
+    """Resolve the SQLite database path for the current context.
+
+    Order: the Flask app being served (request/template contexts must always
+    hit the DB that app was configured with, even if another fixture in the
+    same process re-pointed the env var), then the env override, then config,
+    then the historic default.
+    """
+
+    try:
+        from flask import current_app, has_app_context
+
+        if has_app_context():
+            configured = current_app.config.get("DATABASE_FILE")
+            if configured:
+                return str(configured)
+    except Exception:  # pragma: no cover - Flask not importable is not fatal
+        pass
 
     return (
         os.getenv("MALLA_DATABASE_FILE")
@@ -83,8 +99,21 @@ def get_db_connection() -> sqlite3.Connection:
         raise
 
 
-#: Tables the web UI needs; everything else is created by the capture daemon.
-REQUIRED_TABLES: tuple[str, ...] = ("packet_history", "node_info")
+#: Tables the web UI's read paths hard-depend on. The capture daemon (or
+#: ``malla-migrate``) creates everything else; a database from an older
+#: release is missing these and every read 500s, so the preflight treats
+#: them as required and serves the actionable 503 instead.
+REQUIRED_TABLES: tuple[str, ...] = (
+    "packet_history",
+    "node_info",
+    "node_hour_rollup",
+    "node_latest_position",
+    "node_latest_telemetry",
+    "traceroute_endpoint",
+    "link_day_rollup",
+    "route_day_rollup",
+    "activity_node_quarter",
+)
 
 
 def _present_required_tables(cursor: sqlite3.Cursor) -> set[str]:

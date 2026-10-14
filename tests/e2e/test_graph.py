@@ -15,7 +15,7 @@ class TestGraphBasicFunctionality:
         page.goto(traceroute_graph_url)
 
         # Wait for the page to load
-        expect(page.locator("h5")).to_contain_text("Network Graph")
+        expect(page.locator("h2.h5")).to_contain_text("Network Graph")
 
         # Check that the graph container is present
         expect(page.locator("#networkGraph")).to_be_visible()

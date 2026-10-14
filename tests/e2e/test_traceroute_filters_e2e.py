@@ -67,8 +67,12 @@ class TestTracerouteFilters:
         ]
         print(f"Form-related messages: {form_messages}")
 
-        assert len(debug_messages) > 0, (
-            f"Expected debug messages, got: {console_messages}"
+        # The redesigned page no longer emits debug console noise; JS
+        # execution is asserted through the rendered table instead.
+        rows = page.locator("#tracerouteTable tbody tr")
+        assert rows.count() > 0, (
+            "Expected the traceroute table to render rows (JS executed), "
+            f"console messages: {console_messages}"
         )
 
     def test_automatic_filtering_triggers(self, page: Page, test_server_url: str):
@@ -215,16 +219,16 @@ class TestTracerouteFilters:
         page.wait_for_timeout(2000)
 
         # Check API requests
-        api_requests = [req for req in requests if "/api/traceroute/data" in req.url]
+        api_requests = [req for req in requests if "/api/v1/traceroutes" in req.url]
         print(f"API requests: {[req.url for req in api_requests]}")
 
         # Find the request with filters - TGA has node ID 1128074276 in test fixtures
         filtered_requests = [
-            req for req in api_requests if "from_node=1128074276" in req.url
+            req for req in api_requests if "from=1128074276" in req.url
         ]
 
         assert len(filtered_requests) > 0, (
-            f"Expected API request with from_node filter, got: {[req.url for req in api_requests]}"
+            f"Expected API request with from= filter, got: {[req.url for req in api_requests]}"
         )
 
     def test_direct_hidden_input_event_trigger(self, page: Page, test_server_url: str):
@@ -1454,7 +1458,7 @@ class TestTracerouteFilters:
 
         # Verify filtering occurred by checking API directly
         response = requests.get(
-            f"{test_server_url}/api/traceroute/data?to_node={to_node_id}&limit=5"
+            f"{test_server_url}/api/v1/traceroutes?to={to_node_id}&page_size=5"
         )
         assert response.status_code == 200, (
             f"API request failed: {response.status_code}"
@@ -1534,7 +1538,7 @@ class TestTracerouteFilters:
 
             # Verify filtering via API
             response = requests.get(
-                f"{test_server_url}/api/traceroute/data?route_node={route_node_id}&limit=5"
+                f"{test_server_url}/api/v1/traceroutes?page_size=50"
             )
             assert response.status_code == 200, (
                 f"API request failed: {response.status_code}"
@@ -1543,12 +1547,17 @@ class TestTracerouteFilters:
             api_data = response.json()
             assert "data" in api_data, "API response should contain data field"
 
-            # Verify API results contain the route node
-            for item in api_data["data"]:
-                route_nodes = item.get("route_nodes", [])
-                assert int(route_node_id) in route_nodes, (
-                    f"API result should contain route_node {route_node_id}, got {route_nodes}"
-                )
+            # v1 has no route_node query parameter — the traceroute table
+            # filters on the structured names.route enrichment client-side, so
+            # assert that enrichment carries the hop ids the filter matches on.
+            hops = [
+                hop.get("node_id")
+                for item in api_data["data"]
+                for hop in ((item.get("names") or {}).get("route") or [])
+            ]
+            assert int(route_node_id) in hops, (
+                f"Expected names.route to carry node_id {route_node_id}, got {hops}"
+            )
 
     def test_traceroute_gateway_filter_e2e(self, page: Page, test_server_url: str):
         """Test that the gateway filter works end-to-end."""
@@ -1609,7 +1618,7 @@ class TestTracerouteFilters:
 
             # Verify filtering via API
             response = requests.get(
-                f"{test_server_url}/api/traceroute/data?gateway_id={gateway_id}&limit=5"
+                f"{test_server_url}/api/v1/traceroutes?gateway={gateway_id}&page_size=5"
             )
             assert response.status_code == 200, (
                 f"API request failed: {response.status_code}"
@@ -1664,7 +1673,7 @@ class TestTracerouteFilters:
 
         # Verify filtering via API first to confirm expected behavior
         response = requests.get(
-            f"{test_server_url}/api/traceroute/data?return_path_only=1&limit=10"
+            f"{test_server_url}/api/v1/traceroutes?return_path_only=1&page_size=10"
         )
         assert response.status_code == 200, (
             f"API request failed: {response.status_code}"
@@ -1722,7 +1731,7 @@ class TestTracerouteFilters:
 
         # Verify via API
         response = requests.get(
-            f"{test_server_url}/api/traceroute/data?start_time=2030-01-01T00:00:00&limit=5"
+            f"{test_server_url}/api/v1/traceroutes?since=2030-01-01T00:00:00&page_size=5"
         )
         assert response.status_code == 200, (
             f"API request failed: {response.status_code}"
@@ -1817,7 +1826,7 @@ class TestTracerouteFilters:
 
         # Verify combined filtering via API
         response = requests.get(
-            f"{test_server_url}/api/traceroute/data?from_node={from_node_id}&to_node={to_node_id}&limit=5"
+            f"{test_server_url}/api/v1/traceroutes?from={from_node_id}&to={to_node_id}&page_size=5"
         )
         assert response.status_code == 200, (
             f"API request failed: {response.status_code}"
@@ -1855,7 +1864,7 @@ class TestTracerouteFilters:
 
         # Verify the filtering was applied by checking API directly
         response = requests.get(
-            f"{test_server_url}/api/traceroute/data?from_node={test_from_node}&limit=5"
+            f"{test_server_url}/api/v1/traceroutes?from={test_from_node}&page_size=5"
         )
         assert response.status_code == 200, (
             f"API request failed: {response.status_code}"

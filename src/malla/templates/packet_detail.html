@@ -905,6 +905,21 @@ window.packetData = {{ {
     'relayHex': packet.relay_hex if packet.relay_hex else None
 } | tojson }};
 
+// v1 location rows: `timestamp` is ISO-8601 and `timestamp_str` is dropped.
+// Restore epoch seconds for age maths and a human string for popups.
+function normaliseLocationRow(loc) {
+    if (!loc) return loc;
+    let epoch = loc.timestamp;
+    if (typeof epoch === 'string') {
+        const ms = Date.parse(epoch);
+        epoch = Number.isNaN(ms) ? epoch : ms / 1000;
+    }
+    const display = (typeof formatTimestamp === 'function' && typeof epoch === 'number')
+        ? formatTimestamp(epoch)
+        : (loc.timestamp_str || loc.timestamp);
+    return { ...loc, timestamp: epoch, timestamp_str: display };
+}
+
 // Initialize maps if data exists
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize traceroute map if traceroute data exists
@@ -1049,11 +1064,14 @@ async function loadTracerouteMap(routeNodes) {
         });
 
         // Fetch node locations
-        const response = await fetch('/api/locations');
-        const data = await response.json();
+        // v1 rows keep legacy field names (timestamp is ISO; timestamp_str
+        // is dropped — normalise back for the popup renderers below).
+        const locationsResponse = await fetch('/api/v1/locations?enrich=false&page_size=5000');
+        const locationsBody = await locationsResponse.json();
+        const data = { locations: (locationsBody.data || []).map(normaliseLocationRow) };
 
-        if (data.error) {
-            throw new Error(data.error);
+        if (locationsBody.error) {
+            throw new Error(locationsBody.error);
         }
 
         // Filter locations for our route nodes and interpolate missing ones
@@ -1341,10 +1359,11 @@ async function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocation
 
         if (needsLocations) {
             try {
-                const response = await fetch('/api/locations');
-                allLocationsData = await response.json();
+                const response = await fetch('/api/v1/locations?enrich=false&page_size=5000');
+                const body = await response.json();
+                allLocationsData = { locations: (body.data || []).map(normaliseLocationRow) };
 
-                if (!allLocationsData.error && window.packetData.relayCandidates) {
+                if (!body.error && window.packetData.relayCandidates) {
                     // Find locations for primary gateway's relay candidates
                     window.packetData.relayCandidates.forEach(candidate => {
                         const location = allLocationsData.locations.find(loc => loc.node_id === candidate.node_id);

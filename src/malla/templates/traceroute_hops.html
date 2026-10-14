@@ -13,19 +13,19 @@
         margin-bottom: 1rem;
     }
     .hop-analysis-card {
-        border-left: 4px solid #0d6efd;
+        border-left: 4px solid var(--malla-primary);
     }
     .signal-badge {
         font-size: 0.8rem;
     }
     .distance-display {
         font-weight: bold;
-        color: #0d6efd;
+        color: var(--malla-primary);
     }
     .no-data {
         text-align: center;
         padding: 2rem;
-        color: #6c757d;
+        color: var(--malla-text-muted);
     }
     .loading-spinner {
         display: none;
@@ -33,7 +33,7 @@
         padding: 2rem;
     }
     .traceroute-item {
-        border-bottom: 1px solid #dee2e6;
+        border-bottom: 1px solid var(--malla-border);
         padding: 0.75rem 0;
     }
     .traceroute-item:last-child {
@@ -197,6 +197,15 @@
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
 <script>
+    // rgba() from hex for series fills.
+    function hexToRgba(hex, alpha) {
+        let h = (hex || '').trim().replace('#', '');
+        if (h.length === 3) h = h.split('').map(c => c + c).join('');
+        if (h.length !== 6) return `rgba(128, 128, 128, ${alpha})`;
+        const n = parseInt(h, 16);
+        return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+    }
+
     let availableNodes = [];
     let relatedNodes = [];
     let snrChart = null;
@@ -258,9 +267,11 @@
     }
 
     function loadAvailableNodes() {
-        fetch('/api/traceroute-hops/nodes')
+        fetch('/api/v1/traceroute-hops/nodes')
             .then(response => response.json())
-            .then(data => {
+            .then(body => {
+                // v1 envelope: {data:{nodes,total_count},meta}
+                const data = body && body.data ? body.data : body;
                 availableNodes = data.nodes;
                 populateNodeSelects();
             })
@@ -282,9 +293,10 @@
         node2Select.replaceChildren(new Option('Loading related nodes...', ''));
         node2Select.disabled = true;
 
-        return fetch(`/api/traceroute/related-nodes/${nodeId}`)
+        return fetch(`/api/v1/related-nodes/${nodeId}`)
             .then(response => response.json())
-            .then(data => {
+            .then(body => {
+                const data = body && body.data ? body.data : body;
                 relatedNodes = data.related_nodes || [];
                 populateNode2Select(relatedNodes);
                 node2Select.disabled = false;
@@ -449,9 +461,10 @@
         document.getElementById('no-data-section').style.display = 'none';
 
         // Fetch hop analysis data
-        fetch(`/api/traceroute/link/${node1Id}/${node2Id}`)
+        fetch(`/api/v1/traceroute-link/${node1Id}/${node2Id}`)
             .then(response => response.json())
-            .then(data => {
+            .then(body => {
+                const data = body && body.data ? body.data : body;
                 document.getElementById('loading').style.display = 'none';
 
                 if (data.traceroutes && data.traceroutes.length > 0) {
@@ -639,8 +652,33 @@
         setChildren(directionDiv, content);
     }
 
+    // Theme tokens for chart text/grid/series (malla.css); charts rebuild
+    // on theme flips via the listener at the bottom of this script.
+    function hopsChartTheme() {
+        const css = getComputedStyle(document.documentElement);
+        const get = (n, f) => css.getPropertyValue(n).trim() || f;
+        const dark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+        return {
+            text: get('--malla-text', '#17212e'),
+            muted: get('--malla-text-muted', '#5b6b7c'),
+            grid: dark ? 'rgba(255,255,255,0.08)' : 'rgba(15, 23, 42, 0.08)',
+            primary: get('--malla-primary', '#2563eb'),
+            palette: [
+                get('--malla-primary', '#2563eb'),
+                get('--malla-info', '#0e7490'),
+                get('--malla-success', '#15803d'),
+                get('--malla-warning-strong', '#d97706'),
+            ],
+        };
+    }
+
+    let lastSnrTraceroutes = null;
+    let lastDirectionCounts = null;
+
     function updateSNRChart(traceroutes) {
+        lastSnrTraceroutes = traceroutes;
         const ctx = document.getElementById('snr-chart').getContext('2d');
+        const theme = hopsChartTheme();
 
         if (snrChart) {
             snrChart.destroy();
@@ -662,8 +700,8 @@
                 datasets: [{
                     label: 'SNR (dB)',
                     data: data.map(d => d.y),
-                    borderColor: '#0d6efd',
-                    backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                    borderColor: theme.primary,
+                    backgroundColor: hexToRgba(theme.primary, 0.1),
                     tension: 0.1,
                     fill: true
                 }]
@@ -674,11 +712,10 @@
                 scales: {
                     x: {
                         display: true,
-                        title: {
-                            display: true,
-                            text: 'Time'
-                        },
+                        grid: { color: theme.grid },
+                        border: { color: theme.grid },
                         ticks: {
+                            color: theme.muted,
                             maxTicksLimit: 10,
                             callback: function(value, index, values) {
                                 // Show only every nth label to avoid crowding
@@ -688,9 +725,13 @@
                         }
                     },
                     y: {
+                        grid: { color: theme.grid },
+                        border: { color: theme.grid },
+                        ticks: { color: theme.muted },
                         title: {
                             display: true,
-                            text: 'SNR (dB)'
+                            text: 'SNR (dB)',
+                            color: theme.muted
                         }
                     }
                 },
@@ -711,6 +752,8 @@
     }
 
     function updateDirectionChart(directionCounts) {
+        lastDirectionCounts = directionCounts;
+        const theme = hopsChartTheme();
         const ctx = document.getElementById('direction-chart').getContext('2d');
 
         if (directionChart) {
@@ -727,12 +770,8 @@
                 labels: labels,
                 datasets: [{
                     data: data,
-                    backgroundColor: [
-                        '#0d6efd',
-                        '#6f42c1',
-                        '#20c997',
-                        '#fd7e14'
-                    ]
+                    backgroundColor: theme.palette,
+                    borderColor: 'transparent'
                 }]
             },
             options: {
@@ -924,5 +963,11 @@
         if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
         return `${Math.floor(diff / 86400)}d ago`;
     }
+
+    // Re-theme charts when the color scheme flips.
+    window.addEventListener('themeChanged', () => {
+        if (lastSnrTraceroutes) updateSNRChart(lastSnrTraceroutes);
+        if (lastDirectionCounts) updateDirectionChart(lastDirectionCounts);
+    });
 </script>
 {% endblock %}

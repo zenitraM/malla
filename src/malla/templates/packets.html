@@ -157,8 +157,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize URL filter manager AFTER sidebar content is moved
     const urlManager = new URLFilterManager();
-
-    // Expose urlManager to global scope for debugging and testing
     window.urlManager = urlManager;
 
     // Initialize sidebar toggle functionality
@@ -184,21 +182,15 @@ document.addEventListener('DOMContentLoaded', function() {
         window.initializeAllPickers();
     }
 
-    // Load packet types from API
     async function loadPacketTypes() {
         try {
-            const response = await fetch('/api/meshtastic/packet-types');
-            const data = await response.json();
-
-            if (data.packet_types) {
+            const packetTypes = await window.MallaFilters.packetTypes();
+            if (packetTypes.length) {
                 const select = document.getElementById('portnum');
-                // Keep the "All Types" option
                 const allOption = select.querySelector('option[value=""]');
                 select.innerHTML = '';
                 select.appendChild(allOption);
-
-                // Add packet type options
-                data.packet_types.forEach(([value, displayName]) => {
+                packetTypes.forEach(([value, displayName]) => {
                     const option = document.createElement('option');
                     option.value = value;
                     option.textContent = displayName;
@@ -212,14 +204,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadPrimaryChannels() {
         try {
-            const response = await fetch('/api/meshtastic/packet-channels');
-            const data = await response.json();
-            if (data.channels) {
+            const channels = await window.MallaFilters.packetChannels();
+            if (channels.length) {
                 const select = document.getElementById('primary_channel');
                 const allOption = select.querySelector('option[value=""]');
                 select.innerHTML = '';
                 select.appendChild(allOption);
-                data.channels.forEach((ch) => {
+                channels.forEach((ch) => {
                     const option = document.createElement('option');
                     option.value = ch;
                     option.textContent = ch;
@@ -231,41 +222,35 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Initialize page with filters and load data
     async function initializePageWithFilters() {
-        // Load packet types first
         await loadPacketTypes();
         await loadPrimaryChannels();
-
-        // Small delay to ensure DOM is updated
         await new Promise(resolve => setTimeout(resolve, 100));
-
-        // Apply URL parameters
         const hasParams = await urlManager.applyURLParameters();
-
-        // Initialize the filter controller
         controller.initialLoad(hasParams);
     }
 
-    // Generic column configuration system
+    // ------------------------------------------------------------------
+    // Columns. v1 rows: names {from,to,gateway}, numeric rssi/snr/hop_count.
+    // ------------------------------------------------------------------
     const COLUMN_CONFIGS = {
-        // Base columns that are always visible
         base: [
             {
                 key: 'timestamp',
                 title: 'Timestamp',
                 sortable: true,
-                render: (value, row) => {
-                    return renderTimestampColumn(row, 'timestamp', 'id', '/packet/{id}');
-                }
+                sortKey: 'timestamp',
+                render: (value, row) => renderTimestampColumn(row, 'timestamp', 'id', '/packet/{id}')
             },
             {
                 key: 'from_node',
                 title: 'From',
                 sortable: true,
+                sortKey: 'from_node',
                 render: (value, row) => {
                     if (row.from_node_id) {
-                        const shortName = row.from_node_short || row.from_node_id.toString(16).padStart(8, '0').slice(-4);
+                        const shortName = (row.names && row.names.from && row.names.from.short_name)
+                            || row.from_node_id.toString(16).padStart(8, '0').slice(-4);
                         return nodeLink(row.from_node_id, shortName);
                     }
                     return el('span', { className: 'text-muted' }, 'Unknown');
@@ -275,9 +260,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 key: 'to_node',
                 title: 'To',
                 sortable: true,
+                sortKey: 'to_node',
                 render: (value, row) => {
-                    if (row.to_node_id) {
-                        const shortName = row.to_node_short || row.to_node_id.toString(16).padStart(8, '0').slice(-4);
+                    if (row.to_node_id && row.to_node_id !== 4294967295) {
+                        const shortName = (row.names && row.names.to && row.names.to.short_name)
+                            || row.to_node_id.toString(16).padStart(8, '0').slice(-4);
                         return nodeLink(row.to_node_id, shortName);
                     }
                     return el('span', { className: 'text-muted' }, 'Broadcast');
@@ -287,6 +274,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 key: 'portnum_name',
                 title: 'Type',
                 sortable: true,
+                sortKey: 'portnum_name',
                 render: (value, row) => {
                     if (value) {
                         const typeMap = {
@@ -299,20 +287,18 @@ document.addEventListener('DOMContentLoaded', function() {
                             'TRACEROUTE_APP': 'Traceroute',
                             'NEIGHBORINFO_APP': 'Neighbor Info'
                         };
-                        const displayName = typeMap[value] || value;
-                        return badge(displayName, 'bg-secondary');
+                        return badge(typeMap[value] || value, 'bg-secondary');
                     }
                     return el('span', { className: 'text-muted' }, 'Unknown');
                 }
             }
         ],
 
-        // Always visible columns
         always: [
             {
-                key: 'channel',
+                key: 'channel_id',
                 title: 'Channel',
-                sortable: true,
+                sortable: false,
                 render: (value, row) => {
                     if (value && value !== 'Unknown') {
                         return badge(value, value === 'LongFast' ? 'bg-primary' : 'bg-info');
@@ -322,7 +308,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         ],
 
-        // Conditional columns based on packet type
         conditional: {
             'TEXT_MESSAGE_APP': [
                 {
@@ -339,114 +324,89 @@ document.addEventListener('DOMContentLoaded', function() {
             ]
         },
 
-        // Default columns for all packet types (unless overridden)
         default: [
             {
-                key: 'gateway',
+                key: 'gateway_id',
                 title: 'Gateway',
                 sortable: true,
+                sortKey: 'gateway',
                 render: (value, row) => {
-                    if (row.is_grouped) {
-                        const count = row.gateway_count;
-                        if (count > 1) {
-                            return el('span', {
-                                className: 'badge bg-info',
-                                title: `Multiple gateways: ${row.gateway_list}`
-                            }, `${count} gateways`);
-                        }
-                        return badge(value, 'bg-info');
-                    } else {
-                        const gatewayName = row.gateway_name;
-                        const gatewayNodeId = row.gateway_node_id;
-
-                        if (value && value.startsWith('!') && gatewayNodeId) {
-                            const shortName = value.substring(value.length - 4).toUpperCase();
-                            return nodeLink(gatewayNodeId, shortName);
-                        } else if (gatewayName && gatewayNodeId) {
-                            const parenMatch = gatewayName.match(/\(([^)]+)\)$/);
-                            const shortName = parenMatch ? parenMatch[1] : gatewayName.substring(0, 4).toUpperCase();
-                            return nodeLink(gatewayNodeId, shortName);
-                        }
-                        return textNode(value || 'N/A');
+                    // Server-side grouped rows: badge when several gateways
+                    // heard it, otherwise fall through to the single gateway.
+                    const group = row.group;
+                    if (group && group.reception_count > 1) {
+                        const names = (group.gateways || [])
+                            .map((g) => g.display_name || g.short_name)
+                            .filter(Boolean);
+                        return el('span', {
+                            className: 'badge bg-info',
+                            title: `Multiple gateways: ${names.join(', ')}`
+                        }, `${group.reception_count} gateways`);
                     }
+                    const gw = row.names && row.names.gateway;
+                    if (gw && gw.node_id != null) {
+                        const shortName = gw.short_name
+                            || (gw.hex_id ? gw.hex_id.slice(1, -4).toUpperCase() : 'GW');
+                        return nodeLink(gw.node_id, shortName);
+                    }
+                    return textNode(value || 'N/A');
                 }
             },
             {
                 key: 'rssi',
                 title: 'RSSI',
                 sortable: true,
+                sortKey: 'rssi',
                 render: (value, row) => {
-                    if (row.is_grouped) {
-                        return value && value !== 'N/A'
-                            ? el('span', null, value)
-                            : el('span', { className: 'text-muted' }, 'N/A');
-                    } else if (value !== null && value !== '' && value !== 'N/A') {
-                        const rssiValue = parseFloat(value);
-                        const colorClass = getRssiColorClass(rssiValue);
-                        const formattedValue = rssiValue.toFixed(1);
-                        return el('span', { className: colorClass }, `${formattedValue} dBm`);
+                    if (!Number.isFinite(value)) {
+                        return el('span', { className: 'text-muted' }, 'N/A');
                     }
-                    return el('span', { className: 'text-muted' }, 'N/A');
+                    return el('span', { className: getRssiColorClass(value) }, `${value.toFixed(1)} dBm`);
                 }
             },
             {
                 key: 'snr',
                 title: 'SNR',
                 sortable: true,
+                sortKey: 'snr',
                 render: (value, row) => {
-                    if (row.is_grouped) {
-                        return value && value !== 'N/A'
-                            ? el('span', null, value)
-                            : el('span', { className: 'text-muted' }, 'N/A');
-                    } else if (value !== null && value !== '' && value !== 'N/A') {
-                        const snrValue = parseFloat(value);
-                        const colorClass = getSnrColorClass(snrValue);
-                        const formattedValue = snrValue.toFixed(2);
-                        return el('span', { className: colorClass }, `${formattedValue} dB`);
+                    if (!Number.isFinite(value)) {
+                        return el('span', { className: 'text-muted' }, 'N/A');
                     }
-                    return el('span', { className: 'text-muted' }, 'N/A');
+                    return el('span', { className: getSnrColorClass(value) }, `${value.toFixed(2)} dB`);
                 }
             },
             {
-                key: 'hops',
+                key: 'hop_count',
                 title: 'Hops',
                 sortable: true,
+                sortKey: 'hop_count',
                 render: (value, row) => {
-                    if (row.is_grouped) {
-                        return value && value !== 'N/A'
-                            ? el('span', { className: 'text-info' }, value)
-                            : el('span', { className: 'text-muted' }, 'N/A');
-                    } else if (value !== null && value !== '') {
-                        const hops = parseInt(value);
-                        if (hops === 0) {
-                            return badge('Direct', 'bg-success');
-                        } else if (hops <= 2) {
-                            return badge(String(hops), 'bg-info');
-                        } else {
-                            return badge(String(hops), 'bg-warning');
-                        }
+                    if (!Number.isFinite(value)) {
+                        return el('span', { className: 'text-muted' }, 'N/A');
                     }
-                    return el('span', { className: 'text-muted' }, 'N/A');
+                    if (value === 0) {
+                        return badge('Direct', 'bg-success');
+                    } else if (value <= 2) {
+                        return badge(String(value), 'bg-info');
+                    }
+                    return badge(String(value), 'bg-warning');
                 }
             },
             {
                 key: 'relay_node',
                 title: 'Relay Node',
-                sortable: true,
+                sortable: false,
                 render: (value, row) => {
-                    if (row.is_grouped && typeof value === 'string' && value) {
-                        return el('code', null, value);
-                    }
-                    if (value !== null && value !== undefined && value !== 0 && typeof value === 'number') {
+                    if (value !== null && value !== undefined && value !== 0 && Number.isFinite(value)) {
                         const relayHex = (value & 0xFF).toString(16).padStart(2, '0');
                         return el('code', null, relayHex);
                     }
                     return el('span', { className: 'text-muted' }, '-');
                 }
             },
-          ],
+        ],
 
-        // Final columns that are always at the end
         actions: [
             {
                 key: 'id',
@@ -464,57 +424,86 @@ document.addEventListener('DOMContentLoaded', function() {
         ]
     };
 
-    // Function to get dynamic columns based on current filter
     function getDynamicColumns() {
         const portnum = document.getElementById('portnum')?.value || '';
-
-        let columns = [
-            ...COLUMN_CONFIGS.base,
-            ...COLUMN_CONFIGS.always
-        ];
-
-        // Add conditional columns based on packet type
+        let columns = [...COLUMN_CONFIGS.base, ...COLUMN_CONFIGS.always];
         if (COLUMN_CONFIGS.conditional[portnum]) {
             columns.push(...COLUMN_CONFIGS.conditional[portnum]);
         }
-
-        // Add default columns (unless we're in a mode that excludes them)
         const excludeDefaultColumns = getExcludedDefaultColumns(portnum);
-        const defaultColumns = COLUMN_CONFIGS.default.filter(col =>
-            !excludeDefaultColumns.includes(col.key)
-        );
-        columns.push(...defaultColumns);
-
-        // Add action columns
+        columns.push(...COLUMN_CONFIGS.default.filter(col => !excludeDefaultColumns.includes(col.key)));
         columns.push(...COLUMN_CONFIGS.actions);
-
         return columns;
     }
 
-    // Function to determine which default columns to exclude for specific packet types
     function getExcludedDefaultColumns(portnum) {
-        const exclusions = {
-            // No column exclusions currently needed
-        };
+        const exclusions = {};
         return exclusions[portnum] || [];
     }
 
-
-
-    // Initialize the modern table
+    // v1 table: server-side pagination/sort/filters.
     let table = new ModernTable('packetsTable', {
-        endpoint: '/api/packets/data',
+        endpoint: '/api/v1/packets',
         enableSearch: false,
         enablePagination: true,
         pageSize: 100,
         deferInitialLoad: true,  // Defer loading until after URL parameters are applied
+        // Sidebar form fields -> v1 query params (per /api/v1/openapi.json).
+        requestParams: (state) => {
+            const f = state.filters || {};
+            const params = new URLSearchParams({
+                page: state.page,
+                page_size: state.pageSize,
+            });
+            ['from_node', 'to_node', 'exclude_from', 'exclude_to', 'gateway_id'].forEach((k) => {
+                if (f[k]) params.set(k, f[k]);
+            });
+            if (f.portnum) params.set('portnum', f.portnum);
+            if (f.primary_channel) params.set('primary_channel', f.primary_channel);
+            if (f.min_rssi) params.set('min_rssi', f.min_rssi);
+            if (f.hop_count) params.set('hop_count', f.hop_count);
+            if (f.exclude_self === true || f.exclude_self === '1' || f.exclude_self === 'true') {
+                params.set('exclude_self', 'true');
+            }
+            // datetime-local -> ISO for the v1 since/until bounds
+            if (f.start_time) {
+                const d = new Date(f.start_time);
+                if (!Number.isNaN(d.getTime())) params.set('since', d.toISOString());
+            }
+            if (f.end_time) {
+                const d = new Date(f.end_time);
+                if (!Number.isNaN(d.getTime())) params.set('until', d.toISOString());
+            }
+            // channel_id / relay_node are intentionally NOT sortable: v1
+            // rejects those keys by design (400).
+            const sortMap = {
+                timestamp: 'timestamp',
+                from_node: 'from_node',
+                to_node: 'to_node',
+                gateway: 'gateway',
+                portnum_name: 'portnum_name',
+                rssi: 'rssi',
+                snr: 'snr',
+                hop_count: 'hop_count',
+            };
+            if (state.sortBy && sortMap[state.sortBy]) {
+                params.set('sort', sortMap[state.sortBy]);
+                params.set('order', state.sortOrder || 'desc');
+            }
+            if (f.group_packets === true || f.group_packets === 'true') {
+                params.set('group_by', 'mesh_packet_id');
+            }
+            return params;
+        },
+        // Grouped view is server-side (group_by=mesh_packet_id): pager totals
+        // are group counts, matching what is displayed. Rows carry
+        // group:{reception_count, gateways[]} for the badge.
+        refineRows: (rows) => rows,
         columns: getDynamicColumns()
     });
 
-    // Expose table to global scope for debugging and testing
     window.table = table;
 
-    // Update stats function
     function updateStats() {
         const groupPacketsCheckbox = document.getElementById('group_packets');
         document.getElementById('statsTotal').textContent = table.state.totalCount || '0';
@@ -523,7 +512,6 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('statsLastUpdate').textContent = new Date().toLocaleTimeString();
     }
 
-    // Initialize the filter controller
     const controller = new TableFilterController({
         table,
         urlManager,
@@ -533,15 +521,12 @@ document.addEventListener('DOMContentLoaded', function() {
         updateStats
     });
 
-    // Expose controller methods to global scope for testing/debugging
     window.applyCurrentFilters = () => controller.applyCurrentFilters();
     window.controller = controller;
 
-    // Button handlers
     const applyFiltersBtn = document.getElementById('applyFilters');
     const clearFiltersBtn = document.getElementById('clearFilters');
     const refreshBtn = document.getElementById('refreshTable');
-    const groupPacketsCheckbox = document.getElementById('group_packets');
 
     applyFiltersBtn.addEventListener('click', () => controller.applyCurrentFilters());
     clearFiltersBtn.addEventListener('click', () => controller.clearFilters());
@@ -550,24 +535,21 @@ document.addEventListener('DOMContentLoaded', function() {
         updateStats();
     });
 
-    // Helper functions for signal quality color coding
     function getRssiColorClass(rssi) {
-        if (rssi >= -60) return 'text-success'; // Excellent
-        if (rssi >= -70) return 'text-info';    // Good
-        if (rssi >= -80) return 'text-warning'; // Fair
-        return 'text-danger';                   // Poor
+        if (rssi >= -60) return 'text-success';
+        if (rssi >= -70) return 'text-info';
+        if (rssi >= -80) return 'text-warning';
+        return 'text-danger';
     }
 
     function getSnrColorClass(snr) {
-        if (snr > 5) return 'text-success';     // Excellent
-        if (snr > 0) return 'text-info';       // Good
-        if (snr > -5) return 'text-warning';   // Fair
-        return 'text-danger';                  // Poor
+        if (snr > 5) return 'text-success';
+        if (snr > 0) return 'text-info';
+        if (snr > -5) return 'text-warning';
+        return 'text-danger';
     }
 
-    // Initialize tooltips after table loads
     table.on('dataLoaded', function() {
-        // Initialize Bootstrap tooltips
         const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
         tooltipTriggerList.map(function (tooltipTriggerEl) {
             return new bootstrap.Tooltip(tooltipTriggerEl);
@@ -575,7 +557,6 @@ document.addEventListener('DOMContentLoaded', function() {
         updateStats();
     });
 
-    // Initialize page
     initializePageWithFilters();
 });
 </script>

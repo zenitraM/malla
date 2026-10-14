@@ -8,17 +8,6 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 {% include 'components/openfreemap_css.html' %}
 <style>
-    .card-metric {
-        text-align: center;
-    }
-    .metric-value {
-        font-size: 2rem;
-        font-weight: bold;
-    }
-    .metric-label {
-        color: #6c757d;
-        font-size: 0.875rem;
-    }
     .signal-indicator {
         padding: 2px 8px;
         border-radius: 12px;
@@ -30,7 +19,7 @@
         padding: 4px 8px;
     }
     .neighbor-card {
-        border-left: 4px solid #007bff;
+        border-left: 4px solid var(--malla-primary);
         margin-bottom: 0.5rem;
     }
     .vertical-header {
@@ -50,69 +39,68 @@
 
 {% block content %}
 <div class="container mt-4">
-    <!-- Header -->
-    <div class="row mb-4">
-        <div class="col">
-            <nav aria-label="breadcrumb">
-                <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="/">Home</a></li>
-                    <li class="breadcrumb-item"><a href="/nodes">Nodes</a></li>
-                    <li class="breadcrumb-item active">{{ node.node_name }}</li>
-                </ol>
-            </nav>
-            <h1>
-                <i class="bi bi-router"></i> {{ node.node_name }}
-                {% if node.last_seen_relative == "Just now" or "minute" in node.last_seen_relative %}
-                    <span class="badge bg-success">Online</span>
-                {% elif "hour" in node.last_seen_relative %}
-                    <span class="badge bg-warning">Recent</span>
-                {% else %}
-                    <span class="badge bg-secondary">Offline</span>
-                {% endif %}
-            </h1>
-            <p class="text-muted">
-                Node ID: {{ node.hex_id }} ({{ node.node_id }})
-                • Last seen: {{ node.last_seen_relative }}
-            </p>
+    <!-- Hero header -->
+    <div class="node-hero">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb small mb-2">
+                <li class="breadcrumb-item"><a href="/">Home</a></li>
+                <li class="breadcrumb-item"><a href="/nodes">Nodes</a></li>
+                <li class="breadcrumb-item active" aria-current="page">{{ node.node_name }}</li>
+            </ol>
+        </nav>
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+            <div>
+                <h1 class="hero-title">
+                    <span class="stat-icon position-static" aria-hidden="true"><i class="bi bi-router"></i></span>
+                    {{ node.node_name }}
+                    {% if node.last_seen_relative == "Just now" or "minute" in node.last_seen_relative %}
+                        <span class="pill pill-success presence-online"><span class="pill-dot" aria-hidden="true"></span>Online</span>
+                    {% elif "hour" in node.last_seen_relative %}
+                        <span class="pill pill-warning presence-recent"><span class="pill-dot" aria-hidden="true"></span>Recent</span>
+                    {% else %}
+                        <span class="pill pill-neutral presence-offline"><span class="pill-dot" aria-hidden="true"></span>Offline</span>
+                    {% endif %}
+                </h1>
+                <div class="hero-meta">
+                    <span>Node <strong>{{ node.hex_id }}</strong> <span class="text-secondary-emphasis">({{ node.node_id }})</span></span>
+                    <span>Last seen <strong class="timestamp-display" data-timestamp="{{ node.last_seen_timestamp }}">{{ node.last_seen }}</strong>
+                        <span class="text-secondary-emphasis">({{ node.last_seen_relative }})</span>
+                    </span>
+                    {% if node.hw_model %}<span>Hardware <strong>{{ node.hw_model }}</strong></span>{% endif %}
+                    {% if node.role %}<span>Role <strong>{{ node.role }}</strong></span>{% endif %}
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- Overview Cards -->
-    <div class="row mb-4">
-        <div class="col-md-3">
-            <div class="card card-metric">
-                <div class="card-body">
-                    <div class="metric-value">{{ node.total_packets }}</div>
-                    <div class="metric-label">Total Packets</div>
-                </div>
+    <!-- Metric tiles -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="stat-tile h-100">
+                <span class="stat-icon" aria-hidden="true"><i class="bi bi-envelope-paper"></i></span>
+                <div class="stat-label">Total Packets</div>
+                <div class="stat-value">{{ node.total_packets }}</div>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="card card-metric">
-                <div class="card-body">
-                    <div class="metric-value">{{ node.unique_destinations or 0 }}</div>
-                    <div class="metric-label">Destinations</div>
-                </div>
+        <div class="col-6 col-md-3">
+            <div class="stat-tile h-100">
+                <span class="stat-icon" aria-hidden="true"><i class="bi bi-geo"></i></span>
+                <div class="stat-label">Destinations</div>
+                <div class="stat-value">{{ node.unique_destinations or 0 }}</div>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="card card-metric">
-                <div class="card-body">
-                    <div class="metric-value">
-                        {% if node.avg_rssi %}{{ node.avg_rssi|format_rssi }}{% else %}?{% endif %}
-                    </div>
-                    <div class="metric-label">Avg RSSI (dBm)</div>
-                </div>
+        <div class="col-6 col-md-3">
+            <div class="stat-tile h-100">
+                <span class="stat-icon" aria-hidden="true"><i class="bi bi-reception-4"></i></span>
+                <div class="stat-label">Avg RSSI</div>
+                <div class="stat-value">{% if node.avg_rssi %}{{ node.avg_rssi|format_rssi }}{% else %}?{% endif %}<span class="stat-hint d-inline ms-1">dBm</span></div>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="card card-metric">
-                <div class="card-body">
-                    <div class="metric-value">
-                        {% if node.avg_hops %}{{ node.avg_hops }}{% else %}?{% endif %}
-                    </div>
-                    <div class="metric-label">Avg Hops</div>
-                </div>
+        <div class="col-6 col-md-3">
+            <div class="stat-tile h-100">
+                <span class="stat-icon" aria-hidden="true"><i class="bi bi-signpost-split"></i></span>
+                <div class="stat-label">Avg Hops</div>
+                <div class="stat-value">{% if node.avg_hops %}{{ node.avg_hops }}{% else %}?{% endif %}</div>
             </div>
         </div>
     </div>
@@ -123,7 +111,7 @@
             <!-- Basic Information -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5><i class="bi bi-info-circle"></i> Node Information</h5>
+                    <h2 class="h5"><i class="bi bi-info-circle"></i> Node Information</h2>
                 </div>
                 <div class="card-body">
                     <div class="row">
@@ -232,7 +220,7 @@
             <!-- Telemetry History -->
             <div class="card mb-4" id="telemetry-card" data-node-id="{{ node.node_id }}">
                 <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                    <h5 class="mb-0"><i class="bi bi-thermometer-half"></i> Telemetry History</h5>
+                    <h2 class="h5 mb-0"><i class="bi bi-thermometer-half"></i> Telemetry History</h2>
                     <div class="d-flex flex-wrap gap-2">
                         <div class="btn-group btn-group-sm" role="group" id="telemetry-range" aria-label="Telemetry time range">
                             <button type="button" class="btn btn-outline-primary" data-range="1d">1D</button>
@@ -272,7 +260,7 @@
             {% if location %}
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5><i class="bi bi-geo-alt"></i> Location Information</h5>
+                    <h2 class="h5"><i class="bi bi-geo-alt"></i> Location Information</h2>
                 </div>
                 <div class="card-body">
                     <div class="row">
@@ -310,7 +298,7 @@
 
                     <!-- Current Location Map -->
                     <div class="mt-3">
-                        <div id="current-location-map" style="height: 300px; border: 1px solid #dee2e6; border-radius: 0.375rem; margin-bottom: 15px;"></div>
+                        <div id="current-location-map" style="height: 300px; border: 1px solid var(--malla-border); border-radius: 0.375rem; margin-bottom: 15px;"></div>
                         <a href="https://www.google.com/maps?q={{ location.latitude }},{{ location.longitude }}"
                            target="_blank" class="btn btn-sm btn-outline-primary">
                             <i class="bi bi-map"></i> View on Google Maps
@@ -323,11 +311,11 @@
             <!-- Location History Map -->
             <div class="card mb-4" id="location-history-card" style="display: none;">
                 <div class="card-header">
-                    <h5><i class="bi bi-map"></i> Location History Map</h5>
+                    <h2 class="h5"><i class="bi bi-map"></i> Location History Map</h2>
                     <small class="text-muted">Historical GPS coordinates sent by this node</small>
                 </div>
                 <div class="card-body">
-                    <div id="location-history-map" style="height: 400px; border: 1px solid #dee2e6; border-radius: 0.375rem;">
+                    <div id="location-history-map" style="height: 400px; border: 1px solid var(--malla-border); border-radius: 0.375rem;">
                         <div class="d-flex align-items-center justify-content-center h-100">
                             <div class="text-center">
                                 <div class="spinner-border text-primary" role="status">
@@ -368,7 +356,7 @@
             {% if protocols %}
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5><i class="bi bi-graph-up"></i> Protocol Usage</h5>
+                    <h2 class="h5"><i class="bi bi-graph-up"></i> Protocol Usage</h2>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
@@ -424,7 +412,7 @@
             {% if recent_packets or recent_reported_packets %}
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5><i class="bi bi-clock-history"></i> Recent Packets</h5>
+                    <h2 class="h5"><i class="bi bi-clock-history"></i> Recent Packets</h2>
                 </div>
                 <div class="card-body">
                     <!-- Tab selector -->
@@ -665,14 +653,14 @@
             {% if received_gateways %}
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5><i class="bi bi-broadcast"></i> Received Gateways</h5>
+                    <h2 class="h5"><i class="bi bi-broadcast"></i> Received Gateways</h2>
                     <small class="text-muted">Gateways that have received packets from this node</small>
                 </div>
                 <div class="card-body">
                     {% for gateway in received_gateways %}
                     <div class="neighbor-card card">
                         <div class="card-body p-2">
-                            <h6 class="card-title mb-1">
+                            <h3 class="h6 card-title mb-1">
                                 {% if gateway.gateway_node_id %}
                                     {{ node_link(gateway.gateway_node_id, gateway.display_name) }}
                                 {% else %}
@@ -681,7 +669,7 @@
                                 {% if gateway.is_direct %}
                                     <span class="badge bg-success ms-1" title="Direct connection (0 hops)">Direct</span>
                                 {% endif %}
-                            </h6>
+                            </h3>
                             <div class="row">
                                 <div class="col-6">
                                     <small><strong>Packets:</strong> {{ gateway.packet_count }}</small>
@@ -734,7 +722,7 @@
             <!-- Quick Actions -->
             <div class="card">
                 <div class="card-header">
-                    <h5><i class="bi bi-lightning"></i> Quick Actions</h5>
+                    <h2 class="h5"><i class="bi bi-lightning"></i> Quick Actions</h2>
                 </div>
                 <div class="card-body">
                     <div class="d-grid gap-2">
@@ -790,6 +778,17 @@
 {% endif %}
 
 <script data-node-id="{{ node.node_id }}">
+// Landmarks must be uniquely named, but the map library stamps its own
+// aria-label on the canvas during init — re-apply ours a few times so it wins.
+function setMapCanvasLabel(containerId, label) {
+    const apply = () => {
+        const canvas = document.querySelector(`#${containerId} canvas`);
+        if (canvas) canvas.setAttribute('aria-label', label);
+    };
+    apply();
+    [200, 600, 1500].forEach((delay) => setTimeout(apply, delay));
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Set progress bar widths from data attributes
     document.querySelectorAll('.progress-bar[data-width]').forEach(function(bar) {
@@ -893,6 +892,8 @@ function loadCurrentLocationMap() {
         currentLocation.latitude,
         currentLocation.longitude
     ], 15);
+    // Landmarks must be uniquely named: this page embeds two maps.
+    setMapCanvasLabel('current-location-map', 'Current location map');
 
     // Add OpenFreeMap vector basemap (WebGL)
     const overlay = createOpenFreeMapOverlay();
@@ -913,14 +914,27 @@ async function loadLocationHistoryMap() {
 
     try {
         // Fetch location history data
-        const response = await fetch(`/api/node/${nodeId}/location-history?limit=100`);
-        const data = await response.json();
+        const response = await fetch(`/api/v1/nodes/${nodeId}/locations?limit=100`);
+        const body = await response.json();
+        // v1 envelope: {data:{node_id,hex_id,locations[]},meta}
+        const data = body && body.data ? body.data : body;
 
-        if (data.error) {
-            throw new Error(data.error);
+        if (body && body.error) {
+            throw new Error(body.error.message || 'Failed to load locations');
         }
 
-        if (!data.location_history || data.location_history.length === 0) {
+        // v1 returns `locations` with ISO timestamps; the age maths and
+        // formatTimestamp below expect epoch seconds.
+        const locationHistory = (data.locations || data.location_history || []).map((loc) => {
+            let epoch = loc.timestamp;
+            if (typeof epoch === 'string') {
+                const ms = Date.parse(epoch);
+                epoch = Number.isNaN(ms) ? epoch : ms / 1000;
+            }
+            return { ...loc, timestamp: epoch };
+        });
+
+        if (!locationHistory || locationHistory.length === 0) {
             // No location data available, hide the card
             return;
         }
@@ -932,11 +946,12 @@ async function loadLocationHistoryMap() {
         mapContainer.replaceChildren();
 
         // Initialize map centered on the most recent location
-        const mostRecentLocation = data.location_history[0];
+        const mostRecentLocation = locationHistory[0];
         const map = L.map('location-history-map', {...window.openFreeMapLeafletMapOptions}).setView([
             mostRecentLocation.latitude,
             mostRecentLocation.longitude
         ], 13);
+        setMapCanvasLabel('location-history-map', 'Location history map');
 
         // Add OpenFreeMap vector basemap (WebGL)
         const overlay = createOpenFreeMapOverlay();
@@ -944,13 +959,13 @@ async function loadLocationHistoryMap() {
 
         // Calculate age-based colors and add markers
         const now = Date.now() / 1000; // Current time in seconds
-        const oldestTime = Math.min(...data.location_history.map(loc => loc.timestamp));
-        const newestTime = Math.max(...data.location_history.map(loc => loc.timestamp));
+        const oldestTime = Math.min(...locationHistory.map(loc => loc.timestamp));
+        const newestTime = Math.max(...locationHistory.map(loc => loc.timestamp));
         const timeRange = newestTime - oldestTime;
 
         const pathCoords = [];
 
-        data.location_history.forEach((location, index) => {
+        locationHistory.forEach((location, index) => {
             // Calculate age-based color (green for recent, red for old)
             const age = (now - location.timestamp) / 3600; // Age in hours
             let markerColor;
@@ -988,7 +1003,7 @@ async function loadLocationHistoryMap() {
 
             marker.bindPopup(
                 buildLocationHistoryPopup(
-                    data.location_history.length - index,
+                    locationHistory.length - index,
                     formattedTime,
                     location
                 )
@@ -1010,15 +1025,15 @@ async function loadLocationHistoryMap() {
 
         // Fit map to show all markers (skip zero-area bounds: a stationary node makes
         // fitBounds compute an infinite zoom, which crashes with "Invalid LatLng (NaN, NaN)")
-        if (data.location_history.length > 1) {
-            const bounds = L.latLngBounds(data.location_history.map(loc => [loc.latitude, loc.longitude]));
+        if (locationHistory.length > 1) {
+            const bounds = L.latLngBounds(locationHistory.map(loc => [loc.latitude, loc.longitude]));
             if (bounds.isValid() && !bounds.getNorthEast().equals(bounds.getSouthWest())) {
                 map.fitBounds(bounds, { padding: [20, 20] });
             }
         }
 
         // Update location count
-        locationCount.textContent = `${data.location_history.length} location points found`;
+        locationCount.textContent = `${locationHistory.length} location points found`;
 
     } catch (error) {
         console.error('Error loading location history:', error);

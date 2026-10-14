@@ -22,6 +22,7 @@ import importlib.metadata
 import json
 import logging
 import os
+import sqlite3
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -150,6 +151,24 @@ def _handle_value_error(exc: ValueError) -> Response:
 
 @api_v1_bp.errorhandler(Exception)
 def _handle_uncaught(exc: Exception) -> Response:
+    # An uninitialized database has a dedicated, actionable response: the
+    # app-level guidance handler owns it (503 + database_not_initialized), the
+    # same page HTML users get outside /api.
+    if isinstance(exc, sqlite3.OperationalError):
+        from ..database.connection import required_tables_missing
+
+        missing = required_tables_missing()
+        if missing is None or not missing:
+            pass  # initialized (or undeterminable): generic 500 below
+        else:
+            return _error_response(
+                _error_payload(
+                    "database_not_initialized",
+                    "Database not initialized. Run the capture daemon once "
+                    "(malla-capture) to bootstrap it, then retry.",
+                ),
+                503,
+            )
     logger.exception("Unhandled error in API v1: %s", exc)
     return _error_response(_error_payload("internal_error", str(exc)), 500)
 

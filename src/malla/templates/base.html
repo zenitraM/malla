@@ -5,6 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}{{ APP_NAME }}{% endblock %}</title>
 
+    <!-- Apply persisted theme before first paint to avoid a light flash -->
+    <script>
+        (function () {
+            try {
+                var theme = localStorage.getItem('malla-theme-preference');
+                if (theme === 'auto') {
+                    theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                }
+                if (theme === 'dark' || theme === 'light') {
+                    document.documentElement.setAttribute('data-bs-theme', theme);
+                }
+            } catch (e) { /* no storage */ }
+        })();
+    </script>
+    <meta name="theme-color" content="#0d1218">
+
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
     <!-- Bootstrap Icons -->
@@ -20,46 +36,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- Global 2025 theme overrides -->
+    <!-- Malla design system -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/malla.css') }}">
-
-    <style>
-        .navbar-brand {
-            font-weight: bold;
-        }
-        .card-metric {
-            text-align: center;
-            padding: 1.5rem;
-        }
-        .metric-value {
-            font-size: 2rem;
-            font-weight: bold;
-            color: #0d6efd;
-        }
-        .metric-label {
-            color: #6c757d;
-            font-size: 0.9rem;
-        }
-        .signal-excellent { color: #198754; }
-        .signal-good { color: #ffc107; }
-        .signal-fair { color: #fd7e14; }
-        .signal-poor { color: #dc3545; }
-        .table-responsive {
-            max-height: 70vh;
-        }
-        .footer {
-            margin-top: 3rem;
-            padding: 2rem 0;
-            border-top: 1px solid #dee2e6;
-            color: #6c757d;
-            text-align: center;
-        }
-
-        .table-responsive {
-            height: 100%;
-            max-height: 100%;
-        }
-    </style>
 
     {% block extra_css %}{% endblock %}
 
@@ -68,19 +46,27 @@
     {% if APP_CONFIG and APP_CONFIG.custom_html_head %}{{ APP_CONFIG.custom_html_head | safe }}{% endif %}
 </head>
 <body>
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary" style="z-index: 1040;">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    <!-- App shell: refined top navigation.
+         A sidebar was considered and rejected: this is a data-dense monitoring UI
+         where tables and charts want full width, the top-level IA is flat
+         (7 entries + a tools group), and several pages (map, graph, table filters)
+         already manage their own sidecars — a persistent global sidebar would
+         compete with them on every screen. -->
+    <nav class="navbar navbar-expand-lg sticky-top app-navbar" style="z-index: 1040;" aria-label="Primary">
         <div class="container">
             <a class="navbar-brand" href="{{ url_for('main.dashboard') }}">
-                <i class="bi bi-radio"></i> {{ APP_NAME }}
+                <span class="navbar-text fw-bold fs-5 me-1">{{ APP_NAME }}</span>
             </a>
 
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
+                    aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
 
             <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
+                <ul class="navbar-nav me-auto" id="primary-nav">
                     <!-- Dashboard -->
                     <li class="nav-item">
                         <a class="nav-link {{ 'active' if request.endpoint == 'main.dashboard' }}" href="{{ url_for('main.dashboard') }}">
@@ -133,10 +119,10 @@
                     <!-- Tools dropdown -->
                     <li class="nav-item dropdown">
                         {% set tools_active = request.endpoint in ['traceroute.traceroute_hops', 'gateway.gateway_compare', 'main.longest_links', 'main.line_of_sight'] %}
-                        <a class="nav-link dropdown-toggle {{ 'active' if tools_active }}" href="#" id="toolsDropdown" role="button" data-bs-toggle="dropdown">
+                        <a class="nav-link dropdown-toggle {{ 'active' if tools_active }}" href="#" id="toolsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="bi bi-tools"></i> Tools
                         </a>
-                        <ul class="dropdown-menu">
+                        <ul class="dropdown-menu" aria-labelledby="toolsDropdown">
                             <li>
                                 <a class="dropdown-item" href="{{ url_for('traceroute.traceroute_hops') }}">
                                     <i class="bi bi-graph-up"></i> Hop Analysis
@@ -162,14 +148,14 @@
                 </ul>
 
                 <!-- Timezone Toggle and Dark Mode Toggle -->
-                <div class="navbar-nav d-flex flex-row gap-2">
-                    <button id="timezone-toggle" class="btn btn-outline-light btn-sm" type="button"
+                <div class="navbar-nav flex-row gap-2 ms-lg-2 mt-2 mt-lg-0" aria-label="Display preferences">
+                    <button id="timezone-toggle" class="nav-control" type="button"
                             data-bs-toggle="tooltip" data-bs-placement="bottom"
                             title="Toggle timezone"
                             aria-label="Toggle timezone">
                         <i class="bi bi-globe"></i>
                     </button>
-                    <button id="theme-toggle" class="btn btn-outline-light btn-sm" type="button"
+                    <button id="theme-toggle" class="nav-control" type="button"
                             data-bs-toggle="tooltip" data-bs-placement="bottom"
                             title="Toggle theme mode"
                             aria-label="Toggle theme mode">
@@ -181,18 +167,18 @@
     </nav>
 
     <!-- Main Content -->
-    <div class="container mt-4">
+    <main id="main-content" class="container mt-4" tabindex="-1">
         {% block content %}{% endblock %}
-    </div>
+    </main>
 
     <!-- Footer -->
-    <footer class="footer">
-        <div class="container">
-            <div class="row">
-                <div class="col-md-6">
-                    <small>Powered by <a href="https://github.com/zenitraM/malla">Malla</a></small>
-                </div>
-            </div>
+    <footer class="app-footer">
+        <div class="container d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <span>Powered by <a href="https://github.com/zenitraM/malla">Malla</a></span>
+            <span class="footer-live">
+                <span class="live-dot" aria-hidden="true"></span>
+                <span id="footer-node-count" title="Nodes known to the network">…</span> nodes
+            </span>
         </div>
     </footer>
 
@@ -204,6 +190,8 @@
     <script src="{{ url_for('static', filename='js/url-filter-manager.js') }}"></script>
     <!-- NodeCache utility (shared across pages) -->
     <script src="{{ url_for('static', filename='js/node-cache.js') }}"></script>
+    <!-- Filter metadata (one cached /api/v1/meta/filters fetch per page) -->
+    <script src="{{ url_for('static', filename='js/meta-filters.js') }}"></script>
     <!-- Dark Mode Toggle -->
     <script src="{{ url_for('static', filename='js/dark-mode-toggle.js') }}"></script>
     <!-- Timezone Utilities (must load before timezone toggle) -->
@@ -212,6 +200,10 @@
     <script src="{{ url_for('static', filename='js/timezone-toggle.js') }}"></script>
 
     <script src="{{ url_for('static', filename='js/dom.js') }}"></script>
+
+    <!-- Shared modules: toasts + API client (envelope-aware fetch wrapper) -->
+    <script type="module" src="{{ url_for('static', filename='js/toast.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='js/api-client.js') }}"></script>
 
     <!-- Node tooltip functionality -->
     <script>
@@ -269,18 +261,19 @@
                 }
             }
 
-            // Fallback to API
-            const response = await fetch(`/api/node/${nodeId}/info`);
+            // Fallback to the v1 node detail (envelope: {data:{node,…}}).
+            const response = await fetch(`/api/v1/nodes/${nodeId}`);
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-            const data = await response.json();
+            const body = await response.json();
+            const node = body && body.data ? (body.data.node || body.data) : body;
 
             // Merge into NodeCache for future lookups
-            if (window.NodeCache && (data.node || data).node_id !== undefined) {
-                window.NodeCache.addNode(data.node || data);
+            if (window.NodeCache && node && node.node_id !== undefined) {
+                window.NodeCache.addNode(node);
             }
-            return data;
+            return node;
         }
 
         // Update tooltip content with node information
@@ -329,7 +322,11 @@
                 addRow('Node ID', node.hex_id || 'Unknown', true);
                 if (node.hw_model) addRow('Hardware', node.hw_model);
                 if (node.firmware_version) addRow('Firmware', node.firmware_version);
-                if (node.last_packet_str) addRow('Last seen', node.last_packet_str);
+                // v1 Node carries last_seen (ISO); the legacy info endpoint
+                // (cache-miss fallback) provides preformatted last_packet_str.
+                const lastSeen = node.last_packet_str
+                    || (node.last_seen ? formatTimestamp(node.last_seen) : null);
+                if (lastSeen) addRow('Last seen', lastSeen);
                 if (node.packet_count_24h !== undefined) addRow('24h pkts', String(node.packet_count_24h));
                 if (node.gateway_count_24h !== undefined && node.gateway_count_24h > 0) {
                     addRow('Heard by', `${node.gateway_count_24h} gateway${node.gateway_count_24h > 1 ? 's' : ''}`);
@@ -369,6 +366,19 @@
             const timezoneToggle = document.getElementById('timezone-toggle');
             if (timezoneToggle) {
                 new bootstrap.Tooltip(timezoneToggle);
+            }
+
+            // Footer: live node count (best effort, silent on failure)
+            const footerCount = document.getElementById('footer-node-count');
+            if (footerCount && window.MallaAPI) {
+                window.MallaAPI.get('/api/v1/meta', { silent: true })
+                    .then(meta => {
+                        const count = meta && typeof meta.node_count !== 'undefined'
+                            ? meta.node_count
+                            : null;
+                        footerCount.textContent = count !== null ? Number(count).toLocaleString() : '—';
+                    })
+                    .catch(() => { footerCount.textContent = '—'; });
             }
         });
 

@@ -4,9 +4,10 @@
 {% macro sidebar_container(sidebar_id, title, icon_class, toggle_button_id) %}
 <div id="{{ sidebar_id }}" class="sidebar">
     <div class="sidebar-header">
-        <h5><i class="{{ icon_class }}"></i> {{ title }}</h5>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="{{ toggle_button_id }}">
-            <i class="bi bi-chevron-right"></i>
+        <h2 class="h5"><i class="{{ icon_class }}"></i> {{ title }}</h2>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="{{ toggle_button_id }}"
+                aria-label="Collapse sidebar" title="Collapse sidebar">
+            <i class="bi bi-chevron-right" aria-hidden="true"></i>
         </button>
     </div>
     {{ caller() }}
@@ -17,7 +18,7 @@
 {% macro selected_details_section(clear_button_id) %}
 <div class="sidebar-section" id="selectedDetails" style="display: none;">
     <div class="d-flex justify-content-between align-items-center mb-2">
-        <h6 class="mb-0"><i class="bi bi-info-circle"></i> Selected Item</h6>
+        <h3 class="h6 mb-0"><i class="bi bi-info-circle"></i> Selected Item</h3>
         <button type="button" class="btn btn-sm btn-outline-secondary" id="{{ clear_button_id }}" title="Clear selection">
             <i class="bi bi-x"></i>
         </button>
@@ -31,11 +32,12 @@
 {# Search section #}
 {% macro search_section(search_input_id, clear_search_id, search_results_id) %}
 <div class="sidebar-section">
-    <h6><i class="bi bi-search"></i> Search</h6>
+    <h3 class="h6"><i class="bi bi-search"></i> Search</h3>
     <div class="input-group input-group-sm">
         <input type="text" class="form-control" id="{{ search_input_id }}" placeholder="Search...">
-        <button class="btn btn-outline-secondary" type="button" id="{{ clear_search_id }}">
-            <i class="bi bi-x"></i>
+        <button class="btn btn-outline-secondary" type="button" id="{{ clear_search_id }}"
+                aria-label="Clear search" title="Clear search">
+            <i class="bi bi-x" aria-hidden="true"></i>
         </button>
     </div>
     <div id="{{ search_results_id }}" class="search-results mt-2"></div>
@@ -45,7 +47,7 @@
 {# Controls section #}
 {% macro controls_section(controls) %}
 <div class="sidebar-section">
-    <h6><i class="bi bi-gear"></i> Controls</h6>
+    <h3 class="h6"><i class="bi bi-gear"></i> Controls</h3>
     <div class="d-grid gap-2">
         {% for control in controls %}
         <button type="button" class="btn {{ control.class }} btn-sm" onclick="{{ control.onclick }}" {% if control.id %}id="{{ control.id }}"{% endif %}>
@@ -59,7 +61,7 @@
 {# Stats section #}
 {% macro stats_section(stats_id, stats_items) %}
 <div class="sidebar-section">
-    <h6><i class="bi bi-bar-chart"></i> Statistics</h6>
+    <h3 class="h6"><i class="bi bi-bar-chart"></i> Statistics</h3>
     <div id="{{ stats_id }}" class="stats-content">
         {% for item in stats_items %}
         <div><strong>{{ item.label }}:</strong> <span id="{{ item.id }}">{{ item.default }}</span></div>
@@ -71,7 +73,7 @@
 {# Legend section #}
 {% macro legend_section(legend_items) %}
 <div class="sidebar-section">
-    <h6><i class="bi bi-palette"></i> Legend</h6>
+    <h3 class="h6"><i class="bi bi-palette"></i> Legend</h3>
     <div class="legend-content">
         {% for item in legend_items %}
         <div class="legend-item">
