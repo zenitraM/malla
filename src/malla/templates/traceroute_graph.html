@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% from "components/sidebar_macros.html" import sidebar_container, selected_details_section, search_section, controls_section, stats_section, legend_section, sidebar_styles %}
+{% from "components/sidebar_macros.html" import sidebar_container, selected_details_section, controls_section, stats_section, legend_section, sidebar_styles %}
+{% from "macros.html" import node_picker %}
 
 {% block content %}
 <!-- Override the base template's container to make this page full-width/full-height -->
@@ -60,7 +61,7 @@
             </div>
         </div>
 
-        {{ search_section("nodeSearch", "clearSearch", "searchResults") }}
+        {{ node_picker("nodeSearch", label="Jump to node", placeholder="Search graph nodes", additional_classes="mb-2") }}
 
         {% set graph_controls = [
             {"class": "btn-outline-secondary", "onclick": "centerGraph()", "icon": "bi bi-arrows-move", "text": "Center Graph"},
@@ -238,13 +239,13 @@
 
 <link rel="stylesheet" href="{{ url_for('static', filename='css/link-timeline.css') }}">
 <script src="{{ url_for('static', filename='js/link-timeline.js') }}"></script>
+<script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
 let currentGraph = null;
 let simulation = null;
 let selectedNode = null;
 let selectedLink = null;
-let searchResults = [];
 let hopFilterEnabled = true;
 let maxHopDistance = 3;
 let visibleNodeIds = null;
@@ -358,19 +359,21 @@ function initializeInterface() {
         }
     });
 
-    // Handle node search
-    $('#nodeSearch').on('input', function() {
-        const query = this.value.toLowerCase().trim();
-        if (query.length > 0) {
-            searchNodes(query);
-        } else {
-            clearSearchResults();
+    // Shared NodePicker: jump straight to the node in the current graph.
+    $('#nodeSearch_value').on('change', function() {
+        const nodeId = Number(this.value);
+        if (!nodeId || !currentGraph || !currentGraph.nodes) return;
+        const node = currentGraph.nodes.find(n => n.id === nodeId);
+        if (node) {
+            selectNode(node);
+            focusOnNode(node);
+        } else if (window.MallaToast) {
+            window.MallaToast.info('That node has no vertices in the current graph window.', { title: 'Not in graph' });
         }
     });
 
     $('#clearSearch').on('click', function() {
-        $('#nodeSearch').val('');
-        clearSearchResults();
+        document.querySelectorAll('.node-picker-clear').forEach(b => b.click());
         clearSelection();
     });
 
@@ -808,56 +811,6 @@ function renderGraph(data) {
     }
 }
 
-function searchNodes(query) {
-    if (!currentGraph || !currentGraph.nodes) {
-        return;
-    }
-
-    const results = currentGraph.nodes.filter(node => {
-        const nodeIdHex = node.id.toString(16).padStart(8, '0');
-        return node.name.toLowerCase().includes(query) ||
-               nodeIdHex.includes(query) ||
-               node.id.toString().includes(query);
-    }).slice(0, 10); // Limit to 10 results
-
-    searchResults = results;
-    displaySearchResults(results);
-}
-
-function displaySearchResults(results) {
-    const container = document.getElementById('searchResults');
-
-    if (results.length === 0) {
-        setChildren(container, el('small', { className: 'text-muted' }, 'No nodes found'));
-        return;
-    }
-
-    container.replaceChildren();
-    results.forEach((node, index) => {
-        const nodeIdHex = node.id.toString(16).padStart(8, '0');
-        const item = el('div', { className: 'search-result-item' },
-            el('div', null, el('strong', null, node.name)),
-            el('small', { className: 'text-muted' }, `!${nodeIdHex} • ${node.connections} connections`)
-        );
-        item.addEventListener('click', () => selectSearchResult(index));
-        container.appendChild(item);
-    });
-}
-
-function selectSearchResult(index) {
-    const node = searchResults[index];
-    if (!node) return;
-
-    // Highlight the selected result
-    document.querySelectorAll('.search-result-item').forEach((item, i) => {
-        item.classList.toggle('selected', i === index);
-    });
-
-    // Focus on the node in the graph and select it
-    focusOnNode(node);
-    selectNode(node);
-}
-
 function focusOnNode(targetNode) {
     console.log('focusOnNode called with:', targetNode);
 
@@ -1090,11 +1043,6 @@ function clearSelection() {
     d3.selectAll('.link').classed('selected', false);
     d3.selectAll('.node-label').classed('highlighted', false);
 
-    // Clear search result highlights
-    document.querySelectorAll('.search-result-item').forEach(item => {
-        item.classList.remove('selected');
-    });
-
     // Hide selected details
     document.getElementById('selectedDetails').style.display = 'none';
 
@@ -1125,8 +1073,6 @@ function clearSelection() {
 }
 
 function clearSearchResults() {
-    document.getElementById('searchResults').replaceChildren();
-    searchResults = [];
 }
 
 function setSelectedDetails(title, ...content) {

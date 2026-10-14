@@ -35,10 +35,10 @@ class TestGraphBasicFunctionality:
         search_input.fill("Test")
 
         # Wait for search results
-        page.wait_for_selector(".search-result-item", timeout=5000)
+        page.wait_for_selector(".node-picker-item", timeout=8000)
 
         # Check that search results appear
-        search_results = page.locator(".search-result-item")
+        search_results = page.locator(".node-picker-item")
         expect(search_results.first).to_be_visible()
 
     def test_node_selection_and_centering(self, page: Page, traceroute_graph_url: str):
@@ -53,7 +53,20 @@ class TestGraphBasicFunctionality:
         search_input.fill("Test")
 
         # Wait for search results
-        page.wait_for_selector(".search-result-item", timeout=5000)
+        page.wait_for_selector(".node-picker-item", timeout=8000)
+
+        # Pick a result that exists in the current graph window: the shared
+        # picker searches every node, the graph only renders the window's.
+        result_idx = page.evaluate(
+            """() => {
+                const ids = new Set(currentGraph.nodes.map((n) => n.id));
+                const items = [...document.querySelectorAll('.node-picker-item')];
+                for (let i = 0; i < items.length; i++) {
+                    if (ids.has(Number(items[i].dataset.nodeId))) return i;
+                }
+                return 0;
+            }"""
+        )
 
         # Get the initial transform and viewport center
         initial_state = page.evaluate("""
@@ -85,7 +98,7 @@ class TestGraphBasicFunctionality:
         """)
 
         # Click on the search result
-        search_result = page.locator(".search-result-item").first
+        search_result = page.locator(".node-picker-item").nth(result_idx)
         search_result.click()
 
         # Wait for the centering animation to complete
@@ -226,38 +239,45 @@ class TestGraphInteractivity:
         center_x = svg_box["x"] + svg_box["width"] / 2
         center_y = svg_box["y"] + svg_box["height"] / 2
 
-        # Drag from center to offset position
-        page.mouse.move(center_x, center_y)
-        page.mouse.down()
-        page.mouse.move(center_x + 100, center_y + 100)
-        page.mouse.up()
+        # Drag from center to offset position. The pan handler binds once the
+        # force simulation settles, so move in real steps and retry a couple of
+        # times instead of relying on a single instantaneous jump.
+        final_state = None
+        for _attempt in range(3):
+            page.mouse.move(center_x, center_y, steps=5)
+            page.mouse.down()
+            page.mouse.move(center_x + 100, center_y + 100, steps=10)
+            page.mouse.up()
+            page.wait_for_timeout(400)
 
-        # Wait for the drag to complete
-        page.wait_for_timeout(500)
-
-        # Get final transform
-        final_state = page.evaluate("""
-            () => {
-                const svg = document.querySelector('#networkGraph svg g');
-                const transform = svg ? svg.getAttribute('transform') : null;
-                if (transform) {
-                    const match = transform.match(/translate\\(([^,]+),([^)]+)\\).*scale\\(([^)]+)\\)/);
-                    if (match) {
-                        return {
-                            transform: transform,
-                            translateX: parseFloat(match[1]),
-                            translateY: parseFloat(match[2]),
-                            scale: parseFloat(match[3])
-                        };
+            final_state = page.evaluate("""
+                () => {
+                    const svg = document.querySelector('#networkGraph svg g');
+                    const transform = svg ? svg.getAttribute('transform') : null;
+                    if (transform) {
+                        const match = transform.match(/translate\\(([^,]+),([^)]+)\\).*scale\\(([^)]+)\\)/);
+                        if (match) {
+                            return {
+                                transform: transform,
+                                translateX: parseFloat(match[1]),
+                                translateY: parseFloat(match[2]),
+                                scale: parseFloat(match[3])
+                            };
+                        }
                     }
+                    return {transform: null, translateX: 0, translateY: 0, scale: 1};
                 }
-                return {transform: null, translateX: 0, translateY: 0, scale: 1};
-            }
-        """)
+            """)
+            if (
+                final_state["translateX"] != initial_state["translateX"]
+                or final_state["translateY"] != initial_state["translateY"]
+            ):
+                break
+            page.wait_for_timeout(500)
         print(f"Final state after drag: {final_state}")
 
         # Verify that the graph moved
-        assert (
+        assert final_state is not None and (
             final_state["translateX"] != initial_state["translateX"]
             or final_state["translateY"] != initial_state["translateY"]
         ), "Graph should have moved after dragging"
@@ -596,8 +616,19 @@ class TestGraphAdvancedFeatures:
         page.fill("#nodeSearch", "Test")
         page.wait_for_timeout(500)
 
-        # Click on the first search result (graph uses different structure than map)
-        page.click("#searchResults .search-result-item:first-child")
+        # Click on a search result that exists in the current graph window
+        page.wait_for_selector(".node-picker-item", timeout=8000)
+        result_idx = page.evaluate(
+            """() => {
+                const ids = new Set(currentGraph.nodes.map((n) => n.id));
+                const items = [...document.querySelectorAll('.node-picker-item')];
+                for (let i = 0; i < items.length; i++) {
+                    if (ids.has(Number(items[i].dataset.nodeId))) return i;
+                }
+                return 0;
+            }"""
+        )
+        page.locator(".node-picker-item").nth(result_idx).click()
 
         # Wait for the focus animation to complete
         page.wait_for_timeout(1000)

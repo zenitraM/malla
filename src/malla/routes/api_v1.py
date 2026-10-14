@@ -124,6 +124,43 @@ def _error_payload(
     return {"error": error}
 
 
+# Route-level TTL cache for heavy aggregate GETs (node detail, node packet
+# history, locations enrichment, grouped traceroutes). Keys include the
+# database path (via the configured app) so test/app instances never share
+# entries; TTLs below bound staleness - the capture daemon is the writer.
+_ROUTE_CACHE: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
+_ROUTE_CACHE_MAX_ENTRIES = 128
+
+
+def _route_db_key() -> str:
+    from ..database.connection import _resolve_db_path
+
+    return _resolve_db_path()
+
+
+def _route_cache_get(bucket: str, key: str, ttl: float) -> dict | None:
+    hit = _ROUTE_CACHE.get((bucket, _route_db_key(), key))
+    if not hit:
+        return None
+    created, payload = hit
+    if time.time() - created > ttl:
+        _ROUTE_CACHE.pop((bucket, _route_db_key(), key), None)
+        return None
+    return payload
+
+
+def _route_cache_put(bucket: str, key: str, payload: dict[str, Any]) -> None:
+    now = time.time()
+    full = (bucket, _route_db_key(), key)
+    if len(_ROUTE_CACHE) > _ROUTE_CACHE_MAX_ENTRIES:
+        cutoff = now - 120
+        for k in [k for k, v in _ROUTE_CACHE.items() if v[0] < cutoff]:
+            _ROUTE_CACHE.pop(k, None)
+        while len(_ROUTE_CACHE) > _ROUTE_CACHE_MAX_ENTRIES:
+            _ROUTE_CACHE.pop(next(iter(_ROUTE_CACHE)), None)
+    _ROUTE_CACHE[full] = (now, payload)
+
+
 def _error_response(payload: dict[str, Any], status: int) -> Response:
     response: Response = jsonify(_sanitize(payload))
     response.status_code = status
@@ -170,7 +207,9 @@ def _handle_uncaught(exc: Exception) -> Response:
                 503,
             )
     logger.exception("Unhandled error in API v1: %s", exc)
-    return _error_response(_error_payload("internal_error", str(exc)), 500)
+    return _error_response(
+        _error_payload("internal_error", "Internal server error"), 500
+    )
 
 
 @api_v1_bp.app_errorhandler(404)
@@ -308,9 +347,20 @@ def _parse_timestamp(name: str) -> float | None:
         return None
     value = raw.strip()
     try:
-        return float(value)
+        ts = float(value)
     except ValueError:
         pass
+    else:
+        # Reject non-finite / absurd values: _iso() raises OverflowError on
+        # them and the handlers only catch ValueError -> 500.
+        if not (0 <= ts <= 32503680000):  # 1970..3000
+            raise APIError(
+                "invalid_parameter",
+                f"{name} out of range",
+                400,
+                **{name: raw},
+            )
+        return ts
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
     except ValueError:
@@ -353,12 +403,31 @@ def _parse_int(name: str, default: int | None = None) -> int | None:
     if raw is None or not raw.strip():
         return default
     try:
-        return int(raw)
+        parsed = int(raw)
     except ValueError:
         details: dict[str, Any] = {name: raw}
         raise APIError(
             "invalid_parameter", f"{name} must be an integer", **details
         ) from None
+    if not (-(2**63) <= parsed < 2**63):
+        raise APIError("invalid_parameter", f"{name} out of range", 400, **{name: raw})
+    return parsed
+
+
+def _parse_int_list(name: str) -> list[int] | None:
+    """Comma/separately repeated integer query parameter."""
+    values: list[int] = []
+    raw = request.args.getlist(name)
+    for chunk in raw:
+        for part in chunk.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                values.append(_parse_node_id(part))
+            except APIError:
+                raise
+    return values or None
 
 
 def _parse_node_id(value: str) -> int:
@@ -1096,6 +1165,11 @@ def node_detail(node_id: str) -> Response:
     ``hex_id``.
     """
     node_id_int = _parse_node_id(node_id)
+    _dc = _route_cache_get(
+        "node_detail", f"d:{node_id_int}:{request.query_string.decode()}", 60
+    )
+    if _dc is not None:
+        return _ok(_dc["data"], _dc["meta"])
     details = NodeService.get_node_info(node_id_int)
     node = details.get("node")
     if isinstance(node, dict):
@@ -1113,6 +1187,11 @@ def node_detail(node_id: str) -> Response:
                 "packet_count_24h",
                 int(basic["packet_count_24h"]) if basic else 0,
             )
+    _route_cache_put(
+        "node_detail",
+        f"d:{node_id_int}:{request.query_string.decode()}",
+        {"data": details, "meta": {"query": {"node_id": f"!{node_id_int:08x}"}}},
+    )
     return _ok(details, {"query": {"node_id": f"!{node_id_int:08x}"}})
 
 
@@ -1235,6 +1314,11 @@ def node_telemetry(node_id: str) -> Response:
 def node_packets(node_id: str) -> Response:
     """Packets sent by or addressed to a node (direction selectable)."""
     node_id_int = _parse_node_id(node_id)
+    _pc = _route_cache_get(
+        "node_packets", f"np:{node_id_int}:{request.query_string.decode()}", 60
+    )
+    if _pc is not None:
+        return _ok(_pc["data"], _pc["meta"])
     _require_node(node_id_int)
     page, page_size = _pagination_params()
     direction = _parse_enum("direction", ("all", "sent", "received"), "all")
@@ -1328,6 +1412,11 @@ def node_packets(node_id: str) -> Response:
     if search:
         query["q"] = search
 
+    _route_cache_put(
+        "node_packets",
+        f"np:{node_id_int}:{request.query_string.decode()}",
+        {"data": packets, "meta": _pagination_meta(total, page, page_size, query)},
+    )
     return _ok(packets, _pagination_meta(total, page, page_size, query))
 
 
@@ -1528,6 +1617,24 @@ def packet_detail(packet_id: int) -> Response:
 # ---------------------------------------------------------------------------
 
 
+def _gateway_hours() -> int:
+    hours = _parse_int("hours", 24) or 24
+    if not 1 <= hours <= 168:
+        raise APIError(
+            "invalid_parameter", "hours must be between 1 and 168", hours=hours
+        )
+    return hours
+
+
+def _gateway_statistics_map(hours: int) -> dict[str, dict[str, Any]]:
+    try:
+        stats = GatewayService.get_gateway_statistics(hours=hours)
+    except Exception as exc:  # pragma: no cover - stats are supplementary
+        logger.warning("Gateway statistics unavailable: %s", exc)
+        return {}
+    return {row["gateway_id"]: row for row in stats.get("gateway_distribution", [])}
+
+
 def _enhance_traceroute(row: dict[str, Any]) -> dict[str, Any]:
     """Apply the same enrichment TracerouteService adds to list results."""
     packet = TraceroutePacket(packet_data=row, resolve_names=True)
@@ -1562,7 +1669,12 @@ def traceroutes_list() -> Response:
 
     ``group_by=mesh_packet_id`` collapses receptions onto the most recent
     one (the legacy grouped rule) and counts groups in the pagination meta.
+    Grouped responses cache 60s (the aggregation scans the window).
     """
+    if request.args.get("group_by"):
+        _tc = _route_cache_get("trac_grouped", request.query_string.decode(), 60)
+        if _tc is not None:
+            return _ok(_tc["data"], _tc["meta"])
     page, page_size = _pagination_params()
 
     since = _parse_timestamp("since")
@@ -1653,6 +1765,12 @@ def traceroutes_list() -> Response:
         query["gateway"] = gateway_id
     if search:
         query["q"] = search
+    if group_by:
+        _route_cache_put(
+            "trac_grouped",
+            request.query_string.decode(),
+            {"data": rows, "meta": _pagination_meta(total, page, page_size, query)},
+        )
     return _ok(rows, _pagination_meta(total, page, page_size, query))
 
 
@@ -1670,28 +1788,6 @@ def traceroute_detail(packet_id: int) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# Gateways
-# ---------------------------------------------------------------------------
-
-
-def _gateway_hours() -> int:
-    hours = _parse_int("hours", 24) or 24
-    if not 1 <= hours <= 168:
-        raise APIError(
-            "invalid_parameter", "hours must be between 1 and 168", hours=hours
-        )
-    return hours
-
-
-def _gateway_statistics_map(hours: int) -> dict[str, dict[str, Any]]:
-    try:
-        stats = GatewayService.get_gateway_statistics(hours=hours)
-    except Exception as exc:  # pragma: no cover - stats are supplementary
-        logger.warning("Gateway statistics unavailable: %s", exc)
-        return {}
-    return {row["gateway_id"]: row for row in stats.get("gateway_distribution", [])}
-
-
 @api_v1_bp.route("/gateways")
 def gateways_list() -> Response:
     """Known gateways with optional statistics and name/id search."""
@@ -1796,6 +1892,19 @@ def _legacy_payload(view, *args, **kwargs):
     if isinstance(response, tuple):
         response, status = response[0], response[1]
     payload = response.get_json(silent=True)
+    if status == 500:
+        # Legacy views swallow DB errors into a bare 500; surface the
+        # actionable guidance when the database is the actual problem.
+        from ..database.connection import required_tables_missing
+
+        missing = required_tables_missing()
+        if missing:
+            raise APIError(
+                "database_not_initialized",
+                "Database not initialized. Run the capture daemon once "
+                "(malla-capture) to bootstrap it, then retry.",
+                503,
+            )
     if status != 200:
         message = payload.get("error") if isinstance(payload, dict) else None
         code = {
@@ -2088,13 +2197,27 @@ def locations_list() -> Response:
             until=_iso(until),
         )
 
-    gateway_id = _node_id_param("gateway_id")
+    gateway_id = _gateway_id_param()
     filters: dict[str, Any] = {"start_time": since, "end_time": until}
     if gateway_id is not None:
         filters["gateway_id"] = gateway_id
+    node_ids_filter = _parse_int_list("node_ids")
+    if node_ids_filter:
+        filters["node_ids"] = node_ids_filter
 
     include_links = bool(_parse_bool("include_links", False))
     enrich = _parse_bool("enrich", True)
+    _lc = (
+        _route_cache_get("loc_enriched", request.query_string.decode(), 60)
+        if enrich is not False
+        else None
+    )
+    if _lc is not None:
+        if "links" in _lc:
+            return jsonify(
+                {"data": _lc["data"], "meta": _lc["meta"], "links": _lc["links"]}
+            )
+        return _ok(_lc["data"], _lc["meta"])
     if enrich is False:
         # Positions-only fast path: hand the service empty enrichment inputs so
         # it skips the per-request 24h network-graph build and link lookups
@@ -2120,7 +2243,7 @@ def locations_list() -> Response:
         "until": _iso(until),
     }
     if gateway_id is not None:
-        query["gateway_id"] = f"!{gateway_id:08x}"
+        query["gateway_id"] = gateway_id
     if include_links:
         query["include_links"] = True
     if request.args.get("enrich") is not None:
@@ -2128,6 +2251,12 @@ def locations_list() -> Response:
 
     meta = _pagination_meta(total, page, page_size, query)
     if not include_links:
+        if enrich is not False:
+            _route_cache_put(
+                "loc_enriched",
+                request.query_string.decode(),
+                {"data": _sanitize(page_rows), "meta": _sanitize(meta)},
+            )
         return _ok(page_rows, meta)
 
     # Opt-in link overlays: built with the exact helpers the legacy
@@ -2162,6 +2291,12 @@ def locations_list() -> Response:
             {"traceroute_links": traceroute_links, "packet_links": packet_links}
         ),
     }
+    if enrich is not False:
+        _route_cache_put(
+            "loc_enriched",
+            request.query_string.decode(),
+            {"data": body["data"], "meta": body["meta"], "links": body["links"]},
+        )
     return jsonify(body)
 
 
@@ -2229,6 +2364,7 @@ def meta_info() -> Response:
         "database_size_bytes": int(db_size),
         "database_file": database_file,
         "server_time_utc": _iso(time.time()),
+        "data_retention_hours": int(cfg.data_retention_hours or 0),
         "last_packet_time_utc": _iso(last_packet_ts) if last_packet_ts else None,
         "ingest_lag_seconds": round(ingest_lag, 1) if ingest_lag is not None else None,
     }
@@ -3069,7 +3205,21 @@ def _build_openapi() -> dict[str, Any]:
                     "legacy neighbourhood enrichment; use page/page_size for "
                     "large networks.",
                     "parameters": [
-                        *_PAGE_PARAMS,
+                        {
+                            "name": "page",
+                            "in": "query",
+                            "schema": {"type": "integer", "minimum": 1, "default": 1},
+                        },
+                        {
+                            "name": "page_size",
+                            "in": "query",
+                            "schema": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 5000,
+                                "default": 1000,
+                            },
+                        },
                         _query_param(
                             "since",
                             {"type": "string"},
