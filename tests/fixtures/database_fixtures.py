@@ -50,7 +50,7 @@ class DatabaseFixtures:
             run_migrations(
                 conn,
                 MIGRATIONS,
-                phases=(Phase.SCHEMA, Phase.BLOCKING),
+                phases=(Phase.SCHEMA, Phase.BLOCKING, Phase.DERIVED),
                 take_lock=False,
             )
 
