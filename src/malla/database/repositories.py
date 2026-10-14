@@ -351,6 +351,160 @@ class DashboardRepository:
             raise
 
 
+def _packet_history_conditions(
+    filters: dict[str, Any], search: str | None
+) -> tuple[list[str], list[Any]]:
+    """WHERE fragments for packet-history queries, shared by both paths.
+
+    Covers the packets-page filter contract; callers append their own
+    mesh-id/grouping constraints on top.
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    if filters.get("start_time"):
+        conditions.append("timestamp >= ?")
+        params.append(filters["start_time"])
+
+    if filters.get("end_time"):
+        conditions.append("timestamp <= ?")
+        params.append(filters["end_time"])
+
+    if filters.get("from_node"):
+        conditions.append("from_node_id = ?")
+        params.append(filters["from_node"])
+
+    if filters.get("to_node"):
+        conditions.append("to_node_id = ?")
+        params.append(filters["to_node"])
+
+    if filters.get("portnum"):
+        conditions.append("portnum_name = ?")
+        params.append(filters["portnum"])
+
+    if filters.get("min_rssi"):
+        conditions.append("rssi >= ?")
+        params.append(filters["min_rssi"])
+
+    if filters.get("max_rssi"):
+        conditions.append("rssi <= ?")
+        params.append(filters["max_rssi"])
+
+    if filters.get("gateway_id"):
+        conditions.append("gateway_id = ?")
+        params.append(filters["gateway_id"])
+
+    # New: filter by primary_channel when provided (matches ServiceEnvelope channel_id)
+    if filters.get("primary_channel"):
+        conditions.append("channel_id = ?")
+        params.append(filters["primary_channel"])
+
+    if filters.get("hop_count") is not None:
+        conditions.append("(hop_start - hop_limit) = ?")
+        params.append(filters["hop_count"])
+
+    # Generic exclusion filters for from/to node IDs
+    if filters.get("exclude_from") is not None:
+        # Exclude packets whose sender matches the specified node ID
+        # Optimized: Use simple != condition to allow index usage
+        conditions.append("from_node_id != ?")
+        params.append(filters["exclude_from"])
+
+    if filters.get("exclude_to") is not None:
+        # Exclude packets whose destination matches the specified node ID
+        # Optimized: Use simple != condition to allow index usage
+        conditions.append("to_node_id != ?")
+        params.append(filters["exclude_to"])
+
+    # Search functionality
+    if search:
+        # Search in multiple text fields
+        search_condition = """(
+            portnum_name LIKE ? OR
+            gateway_id LIKE ? OR
+            channel_id LIKE ? OR
+            CAST(from_node_id AS TEXT) LIKE ? OR
+            CAST(to_node_id AS TEXT) LIKE ?
+        )"""
+        search_param = f"%{search}%"
+        params.extend([search_param] * 5)
+        conditions.append(search_condition)
+
+    return conditions, params
+
+
+def _traceroute_history_conditions(
+    filters: dict[str, Any], search: str | None
+) -> tuple[list[str], list[Any]]:
+    """WHERE fragments for traceroute-history queries, shared by both paths."""
+    conditions: list[str] = ["portnum_name = 'TRACEROUTE_APP'"]
+    params: list[Any] = []
+
+    if filters.get("start_time"):
+        conditions.append("timestamp >= ?")
+        params.append(filters["start_time"])
+
+    if filters.get("end_time"):
+        conditions.append("timestamp <= ?")
+        params.append(filters["end_time"])
+
+    if filters.get("from_node"):
+        conditions.append("from_node_id = ?")
+        params.append(filters["from_node"])
+
+    if filters.get("to_node"):
+        conditions.append("to_node_id = ?")
+        params.append(filters["to_node"])
+
+    if filters.get("gateway_id"):
+        conditions.append("gateway_id = ?")
+        params.append(filters["gateway_id"])
+
+    # New: Optional filtering by primary_channel (matches packet.channel_id field)
+    if filters.get("primary_channel"):
+        conditions.append("channel_id = ?")
+        params.append(filters["primary_channel"])
+
+    if filters.get("processed_successfully_only"):
+        conditions.append("processed_successfully = 1")
+
+    # Add search functionality
+    if search:
+        search_conditions = [
+            "gateway_id LIKE ?",
+            "CAST(from_node_id AS TEXT) LIKE ?",
+            "CAST(to_node_id AS TEXT) LIKE ?",
+        ]
+        search_param = f"%{search}%"
+        conditions.append(f"({' OR '.join(search_conditions)})")
+        params.extend([search_param] * len(search_conditions))
+
+    return conditions, params
+
+
+# Aggregate ORDER BY fragments for the group-by-mesh-id listings. The
+# timestamp key tracks the representative reception (earliest for packets,
+# latest for traceroutes); packet signal keys take the minimum over the
+# group's filtered receptions, mirroring the legacy grouped sort columns, and
+# the gateway key orders by distinct-gateway count.
+_PACKET_GROUP_SORTS: dict[str, str] = {
+    "timestamp": "MIN(timestamp)",
+    "from_node_id": "MIN(from_node_id)",
+    "to_node_id": "MIN(to_node_id)",
+    "portnum_name": "MIN(portnum_name)",
+    "gateway_id": "COUNT(DISTINCT NULLIF(gateway_id, ''))",
+    "rssi": "MIN(rssi)",
+    "snr": "MIN(snr)",
+    "payload_length": "MIN(payload_length)",
+    "hop_count": "MIN(hop_start - hop_limit)",
+}
+
+_TRACEROUTE_GROUP_SORTS: dict[str, str] = {
+    "timestamp": "MAX(timestamp)",
+    "id": "MAX(id)",
+}
+
+
 class PacketRepository:
     """Repository for packet operations."""
 
@@ -457,77 +611,8 @@ class PacketRepository:
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            # Build WHERE clause
-            where_conditions = []
-            params = []
-
-            if filters.get("start_time"):
-                where_conditions.append("timestamp >= ?")
-                params.append(filters["start_time"])
-
-            if filters.get("end_time"):
-                where_conditions.append("timestamp <= ?")
-                params.append(filters["end_time"])
-
-            if filters.get("from_node"):
-                where_conditions.append("from_node_id = ?")
-                params.append(filters["from_node"])
-
-            if filters.get("to_node"):
-                where_conditions.append("to_node_id = ?")
-                params.append(filters["to_node"])
-
-            if filters.get("portnum"):
-                where_conditions.append("portnum_name = ?")
-                params.append(filters["portnum"])
-
-            if filters.get("min_rssi"):
-                where_conditions.append("rssi >= ?")
-                params.append(filters["min_rssi"])
-
-            if filters.get("max_rssi"):
-                where_conditions.append("rssi <= ?")
-                params.append(filters["max_rssi"])
-
-            if filters.get("gateway_id"):
-                where_conditions.append("gateway_id = ?")
-                params.append(filters["gateway_id"])
-
-            # New: filter by primary_channel when provided (matches ServiceEnvelope channel_id)
-            if filters.get("primary_channel"):
-                where_conditions.append("channel_id = ?")
-                params.append(filters["primary_channel"])
-
-            if filters.get("hop_count") is not None:
-                where_conditions.append("(hop_start - hop_limit) = ?")
-                params.append(filters["hop_count"])
-
-            # Generic exclusion filters for from/to node IDs
-            if filters.get("exclude_from") is not None:
-                # Exclude packets whose sender matches the specified node ID
-                # Optimized: Use simple != condition to allow index usage
-                where_conditions.append("from_node_id != ?")
-                params.append(filters["exclude_from"])
-
-            if filters.get("exclude_to") is not None:
-                # Exclude packets whose destination matches the specified node ID
-                # Optimized: Use simple != condition to allow index usage
-                where_conditions.append("to_node_id != ?")
-                params.append(filters["exclude_to"])
-
-            # Search functionality
-            if search:
-                # Search in multiple text fields
-                search_condition = """(
-                    portnum_name LIKE ? OR
-                    gateway_id LIKE ? OR
-                    channel_id LIKE ? OR
-                    CAST(from_node_id AS TEXT) LIKE ? OR
-                    CAST(to_node_id AS TEXT) LIKE ?
-                )"""
-                where_conditions.append(search_condition)
-                search_param = f"%{search}%"
-                params.extend([search_param] * 5)
+            # Build WHERE clause (filter fragments shared with the grouped path)
+            where_conditions, params = _packet_history_conditions(filters, search)
 
             where_clause = (
                 "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
@@ -927,6 +1012,144 @@ class PacketRepository:
 
         except Exception as e:
             logger.error(f"Error getting packets: {e}")
+            raise
+
+    @staticmethod
+    def get_packets_grouped(
+        limit: int = 100,
+        offset: int = 0,
+        filters: dict | None = None,
+        order_by: str = "timestamp",
+        order_dir: str = "desc",
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        """One row per distinct ``mesh_packet_id`` under the request filters.
+
+        Server-side backbone for the packets page's grouped view, with honest
+        pagination: ``total_count`` is the exact number of distinct mesh
+        packet ids. The representative row is the earliest reception (the
+        legacy grouped selection rule); ``group`` carries the reception count
+        plus the distinct non-empty gateway ids over the filtered receptions.
+        """
+        if filters is None:
+            filters = {}
+
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            conditions, params = _packet_history_conditions(filters, search)
+            conditions.extend(("mesh_packet_id IS NOT NULL", "mesh_packet_id != 0"))
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+            cursor.execute(
+                "SELECT COUNT(DISTINCT mesh_packet_id) "
+                f"FROM packet_history {where_clause}",
+                params,
+            )
+            total_count = int(cursor.fetchone()[0])
+
+            order_expr = _PACKET_GROUP_SORTS.get(
+                order_by, _PACKET_GROUP_SORTS["timestamp"]
+            )
+            order_sql = "DESC" if order_dir.lower() == "desc" else "ASC"
+
+            # One page of group keys. mesh_packet_id breaks aggregation ties
+            # so consecutive pages never overlap or skip a group.
+            cursor.execute(
+                f"""
+                SELECT mesh_packet_id, COUNT(*) AS reception_count
+                FROM packet_history
+                {where_clause}
+                GROUP BY mesh_packet_id
+                ORDER BY {order_expr} {order_sql}, mesh_packet_id
+                LIMIT ? OFFSET ?
+                """,
+                [*params, limit, offset],
+            )
+            group_rows = cursor.fetchall()
+
+            packets: list[dict[str, Any]] = []
+            mesh_ids = [row["mesh_packet_id"] for row in group_rows]
+            reception_counts = {
+                row["mesh_packet_id"]: int(row["reception_count"]) for row in group_rows
+            }
+
+            if mesh_ids:
+                placeholders = ", ".join("?" for _ in mesh_ids)
+                cursor.execute(
+                    f"""
+                    SELECT
+                        id, timestamp, from_node_id, to_node_id, portnum, portnum_name,
+                        gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_limit, hop_start,
+                        payload_length, processed_successfully, raw_payload,
+                        via_mqtt, want_ack, priority, delayed, channel_index, rx_time,
+                        pki_encrypted, next_hop, relay_node, tx_after,
+                        datetime(timestamp, 'unixepoch') as timestamp_str,
+                        (hop_start - hop_limit) as hop_count
+                    FROM packet_history
+                    WHERE mesh_packet_id IN ({placeholders})
+                    AND {" AND ".join(conditions)}
+                    ORDER BY timestamp ASC, id ASC
+                    """,
+                    [*mesh_ids, *params],
+                )
+
+                receptions: dict[str, list[dict[str, Any]]] = {}
+                for row in cursor.fetchall():
+                    packet = dict(row)
+                    receptions.setdefault(packet["mesh_packet_id"], []).append(packet)
+
+                for mesh_id in mesh_ids:  # preserve the exact page order
+                    members = receptions.get(mesh_id)
+                    if not members:  # pragma: no cover - consistent snapshot
+                        continue
+
+                    # Legacy grouped rule: the earliest reception represents
+                    # the group (ties by lowest row id).
+                    representative = members[0]
+                    gateways: list[str] = []
+                    for member in members:
+                        gateway_id = member.get("gateway_id")
+                        if gateway_id and gateway_id not in gateways:
+                            gateways.append(gateway_id)
+
+                    if representative["timestamp_str"] is None:
+                        representative["timestamp_str"] = datetime.fromtimestamp(
+                            representative["timestamp"], UTC
+                        ).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+                    if (
+                        representative["hop_count"] is None
+                        and representative["hop_start"] is not None
+                        and representative["hop_limit"] is not None
+                    ):
+                        representative["hop_count"] = (
+                            representative["hop_start"] - representative["hop_limit"]
+                        )
+
+                    representative["success"] = representative["processed_successfully"]
+                    representative["is_grouped"] = True
+                    representative["text_content"] = (
+                        PacketRepository._decode_text_content(representative)
+                    )
+                    representative["group"] = {
+                        "reception_count": reception_counts[mesh_id],
+                        "gateways": gateways,
+                    }
+                    packets.append(representative)
+
+            conn.close()
+
+            return {
+                "packets": packets,
+                "total_count": total_count,
+                "has_more": total_count > (offset + limit),
+                "is_grouped": True,
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting grouped packets: {e}")
             raise
 
     @staticmethod
@@ -3396,6 +3619,149 @@ class TracerouteRepository:
             raise
 
     @staticmethod
+    def get_traceroutes_grouped(
+        limit: int = 100,
+        offset: int = 0,
+        filters: dict | None = None,
+        order_by: str = "timestamp",
+        order_dir: str = "desc",
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        """One row per distinct traceroute ``mesh_packet_id``.
+
+        Grouped twin of :meth:`get_traceroute_packets` with honest
+        pagination: ``total_count`` is the exact number of distinct mesh
+        packet ids. The representative is the most recent reception (the
+        legacy grouped rule) and ``group`` carries the reception count plus
+        distinct gateways over the filtered receptions.
+        """
+        if filters is None:
+            filters = {}
+
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            conditions, params = _traceroute_history_conditions(filters, search)
+            conditions.extend(("mesh_packet_id IS NOT NULL", "mesh_packet_id != 0"))
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+            cursor.execute(
+                "SELECT COUNT(DISTINCT mesh_packet_id) "
+                f"FROM packet_history {where_clause}",
+                params,
+            )
+            total_count = int(cursor.fetchone()[0])
+
+            order_expr = _TRACEROUTE_GROUP_SORTS.get(
+                order_by, _TRACEROUTE_GROUP_SORTS["timestamp"]
+            )
+            order_sql = "DESC" if order_dir.lower() == "desc" else "ASC"
+
+            # One page of group keys; mesh_packet_id keeps pages stable.
+            cursor.execute(
+                f"""
+                SELECT mesh_packet_id, COUNT(*) AS reception_count
+                FROM packet_history
+                {where_clause}
+                GROUP BY mesh_packet_id
+                ORDER BY {order_expr} {order_sql}, mesh_packet_id
+                LIMIT ? OFFSET ?
+                """,
+                [*params, limit, offset],
+            )
+            group_rows = cursor.fetchall()
+
+            packets: list[dict[str, Any]] = []
+            mesh_ids = [row["mesh_packet_id"] for row in group_rows]
+            reception_counts = {
+                row["mesh_packet_id"]: int(row["reception_count"]) for row in group_rows
+            }
+
+            if mesh_ids:
+                placeholders = ", ".join("?" for _ in mesh_ids)
+                cursor.execute(
+                    f"""
+                    SELECT
+                        id, timestamp, from_node_id, to_node_id, gateway_id,
+                        channel_id, hop_start, hop_limit, rssi, snr, payload_length, raw_payload,
+                        processed_successfully, mesh_packet_id,
+                        datetime(timestamp, 'unixepoch') as timestamp_str,
+                        (hop_start - hop_limit) AS hop_count
+                    FROM packet_history
+                    WHERE mesh_packet_id IN ({placeholders})
+                    AND {" AND ".join(conditions)}
+                    ORDER BY timestamp DESC, id DESC
+                    """,
+                    [*mesh_ids, *params],
+                )
+
+                receptions: dict[Any, list[dict[str, Any]]] = {}
+                for row in cursor.fetchall():
+                    packet = dict(row)
+                    receptions.setdefault(packet["mesh_packet_id"], []).append(packet)
+
+                for mesh_id in mesh_ids:  # preserve the exact page order
+                    members = receptions.get(mesh_id)
+                    if not members:  # pragma: no cover - consistent snapshot
+                        continue
+
+                    # Legacy grouped rule: the most recent reception
+                    # represents the group (ties by highest row id).
+                    representative = members[0]
+                    gateways: list[str] = []
+                    for member in members:
+                        gateway_id = member.get("gateway_id")
+                        if gateway_id and gateway_id not in gateways:
+                            gateways.append(gateway_id)
+
+                    if representative["timestamp_str"] is None:
+                        representative["timestamp_str"] = datetime.fromtimestamp(
+                            representative["timestamp"], UTC
+                        ).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+                    representative["success"] = representative["processed_successfully"]
+                    representative["is_grouped"] = True
+
+                    # Mirror the ungrouped rows' derived route field.
+                    representative["route"] = None
+                    if representative.get("raw_payload"):
+                        try:
+                            from ..models.traceroute import TraceroutePacket
+
+                            tr_packet = TraceroutePacket(
+                                representative, resolve_names=False
+                            )
+                            if tr_packet.route_data["route_nodes"]:
+                                representative["route"] = json.dumps(
+                                    tr_packet.route_data["route_nodes"]
+                                )
+                        except Exception as e:  # noqa: BLE001
+                            logger.debug(
+                                "Failed to parse route for grouped traceroute "
+                                f"{representative['id']}: {e}"
+                            )
+
+                    representative["group"] = {
+                        "reception_count": reception_counts[mesh_id],
+                        "gateways": gateways,
+                    }
+                    packets.append(representative)
+
+            conn.close()
+
+            return {
+                "packets": packets,
+                "total_count": total_count,
+                "has_more": total_count > (offset + limit),
+                "is_grouped": True,
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting grouped traceroutes: {e}")
+            raise
+
+    @staticmethod
     def get_traceroute_packets(
         limit: int = 100,
         offset: int = 0,
@@ -3413,52 +3779,12 @@ class TracerouteRepository:
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            # Build WHERE clause
-            where_conditions = ["portnum_name = 'TRACEROUTE_APP'"]
-            params = []
-
-            if filters.get("start_time"):
-                where_conditions.append("timestamp >= ?")
-                params.append(filters["start_time"])
-
-            if filters.get("end_time"):
-                where_conditions.append("timestamp <= ?")
-                params.append(filters["end_time"])
-
-            if filters.get("from_node"):
-                where_conditions.append("from_node_id = ?")
-                params.append(filters["from_node"])
-
-            if filters.get("to_node"):
-                where_conditions.append("to_node_id = ?")
-                params.append(filters["to_node"])
-
-            if filters.get("gateway_id"):
-                where_conditions.append("gateway_id = ?")
-                params.append(filters["gateway_id"])
-
-            # New: Optional filtering by primary_channel (matches packet.channel_id field)
-            if filters.get("primary_channel"):
-                where_conditions.append("channel_id = ?")
-                params.append(filters["primary_channel"])
-
-            if filters.get("processed_successfully_only"):
-                where_conditions.append("processed_successfully = 1")
+            # Build WHERE clause (filter fragments shared with the grouped path)
+            where_conditions, params = _traceroute_history_conditions(filters, search)
 
             # Check if route_node filtering is needed
             route_node_filter = filters.get("route_node")
             needs_route_filtering = route_node_filter is not None
-
-            # Add search functionality
-            if search:
-                search_conditions = [
-                    "gateway_id LIKE ?",
-                    "CAST(from_node_id AS TEXT) LIKE ?",
-                    "CAST(to_node_id AS TEXT) LIKE ?",
-                ]
-                search_param = f"%{search}%"
-                where_conditions.append(f"({' OR '.join(search_conditions)})")
-                params.extend([search_param] * len(search_conditions))
 
             where_clause = "WHERE " + " AND ".join(where_conditions)
 

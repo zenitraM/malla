@@ -41,6 +41,7 @@ _chat_relay_candidate_cache: dict[
     tuple[int, int], tuple[float, list[dict[str, Any]]]
 ] = {}
 
+
 def _clamp_limit(default: int, maximum: int) -> int:
     """Read and bound the untrusted ``?limit=`` query parameter to [1, maximum].
 
@@ -731,8 +732,10 @@ def api_locations():
         # Gateway filter (keep this server-side for performance)
         gateway_id_arg = request.args.get("gateway_id")
         if gateway_id_arg is not None:
+            # gateway_id is stored as TEXT '!xxxxxxxx': normalize the hex and
+            # the decimal form alike so the filter can match rows.
             try:
-                filters["gateway_id"] = int(gateway_id_arg)
+                filters["gateway_id"] = f"!{convert_node_id(gateway_id_arg):08x}"
             except ValueError:
                 return jsonify({"error": "Invalid gateway_id format"}), 400
 
@@ -1051,9 +1054,9 @@ def api_traceroute_hops_nodes():
                 p.longitude,
                 p.altitude
             FROM traceroute_endpoint te
-            JOIN node_info ni ON ni.node_id = te.node_id
+            LEFT JOIN node_info ni ON ni.node_id = te.node_id
             LEFT JOIN node_latest_position p ON p.node_id = te.node_id
-            ORDER BY ni.long_name, ni.short_name
+            ORDER BY LOWER(COALESCE(ni.long_name, printf('!%08x', te.node_id))) COLLATE NOCASE
         """
 
         cursor.execute(query)

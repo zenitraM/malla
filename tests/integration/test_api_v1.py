@@ -894,3 +894,103 @@ class TestApiV1LegacyParityEndpoints:
         legacy = client.get("/api/traceroute/related-nodes/12345678").get_json()
         assert v1_body["data"] == legacy
         assert v1_body["data"]["related_nodes"] == []
+
+
+class TestApiV1GroupedModes:
+    """Server-side grouping: group_by=mesh_packet_id must have honest totals."""
+
+    @staticmethod
+    def _fetch_all(client: object, base: str) -> list[dict]:
+        rows: list[dict] = []
+        page = 1
+        while True:
+            body = client.get(f"{base}page={page}&page_size=500").get_json()
+            rows.extend(body["data"])
+            if not body["meta"]["pagination"]["has_next"]:
+                return rows
+            page += 1
+
+    @staticmethod
+    def _distinct_mesh(rows: list[dict]) -> int:
+        return len(
+            {
+                row["mesh_packet_id"]
+                for row in rows
+                if row["mesh_packet_id"] is not None and row["mesh_packet_id"] != 0
+            }
+        )
+
+    @pytest.mark.integration
+    def test_grouped_packet_total_equals_distinct_mesh_ids(self, client):
+        ungrouped = self._fetch_all(client, "/api/v1/packets?")
+        expected = self._distinct_mesh(ungrouped)
+        assert expected < len(ungrouped), "fixture must contain shared mesh ids"
+
+        body = client.get("/api/v1/packets?group_by=mesh_packet_id&page_size=500")
+        assert body.status_code == 200
+        body = body.get_json()
+        assert body["meta"]["pagination"]["total"] == expected
+        assert body["meta"]["query"]["group_by"] == "mesh_packet_id"
+        assert len(body["data"]) == min(expected, 500)
+        for row in body["data"]:
+            assert row["mesh_packet_id"] is not None
+            assert set(row["group"].keys()) == {"reception_count", "gateways"}
+
+    @pytest.mark.integration
+    def test_grouped_reception_counts_sum_to_ungrouped_rows(self, client):
+        ungrouped = self._fetch_all(client, "/api/v1/packets?")
+        meshed = [
+            row
+            for row in ungrouped
+            if row["mesh_packet_id"] is not None and row["mesh_packet_id"] != 0
+        ]
+
+        grouped = self._fetch_all(client, "/api/v1/packets?group_by=mesh_packet_id&")
+        assert sum(row["group"]["reception_count"] for row in grouped) == len(meshed)
+
+        multi = [row for row in grouped if row["group"]["reception_count"] > 1]
+        assert multi, "fixture must contain multi-reception mesh ids"
+        for row in multi:
+            assert len(row["group"]["gateways"]) >= 2
+            entry = row["group"]["gateways"][0]
+            assert entry["hex_id"].startswith("!")
+
+    @pytest.mark.integration
+    def test_grouped_rows_carry_ungrouped_shape_plus_group(self, client):
+        ungrouped = client.get("/api/v1/packets?page_size=5").get_json()["data"]
+        grouped = client.get(
+            "/api/v1/packets?group_by=mesh_packet_id&page_size=5"
+        ).get_json()["data"]
+        assert grouped
+        assert set(grouped[0].keys()) == set(ungrouped[0].keys()) | {"group"}
+        assert grouped[0]["is_grouped"] is True
+
+    @pytest.mark.integration
+    def test_grouped_traceroutes_mirror_ungrouped_counts(self, client):
+        ungrouped = self._fetch_all(client, "/api/v1/traceroutes?")
+        expected = self._distinct_mesh(ungrouped)
+
+        grouped = self._fetch_all(
+            client, "/api/v1/traceroutes?group_by=mesh_packet_id&"
+        )
+        total = client.get(
+            "/api/v1/traceroutes?group_by=mesh_packet_id&page_size=1"
+        ).get_json()["meta"]["pagination"]["total"]
+        assert total == expected
+        assert len(grouped) == expected
+        assert sum(row["group"]["reception_count"] for row in grouped) == len(
+            [
+                row
+                for row in ungrouped
+                if row["mesh_packet_id"] is not None and row["mesh_packet_id"] != 0
+            ]
+        )
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("path", ["/api/v1/packets", "/api/v1/traceroutes"])
+    def test_unknown_group_by_rejected(self, client, path):
+        response = client.get(f"{path}?group_by=banana")
+        assert response.status_code == 400
+        error = response.get_json()["error"]
+        assert error["code"] == "invalid_parameter"
+        assert error["details"] == {"group_by": "banana"}

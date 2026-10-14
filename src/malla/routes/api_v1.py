@@ -90,6 +90,8 @@ PACKET_SORTS = {
 # (timestamp/id are served by idx_packet_portnum_name without a temp b-tree;
 # mesh_packet_id and payload_length need a temp b-tree, so they are not offered).
 TRACEROUTE_SORTS = {"timestamp": "timestamp", "id": "id"}
+# Server-side grouping modes for the listing endpoints (the ``group_by`` param).
+GROUP_BY_MODES = ("mesh_packet_id",)
 TELEMETRY_METRIC_NAMES = sorted(field for _, field, _, _ in _TELEMETRY_METRICS)
 STATS_RANGES = ("24h", "7d", "30d", "all")
 
@@ -313,6 +315,20 @@ def _parse_enum(name: str, allowed: tuple[str, ...] | set[str], default: str) ->
     return raw
 
 
+def _group_by_param() -> str | None:
+    """Optional ``group_by``; ``None`` keeps the ungrouped response shape."""
+    raw = request.args.get("group_by")
+    if raw is None:
+        return None
+    if raw not in GROUP_BY_MODES:
+        raise APIError(
+            "invalid_parameter",
+            f"group_by must be one of: {', '.join(GROUP_BY_MODES)}",
+            group_by=raw,
+        )
+    return raw
+
+
 def _parse_int(name: str, default: int | None = None) -> int | None:
     raw = request.args.get(name)
     if raw is None or not raw.strip():
@@ -527,6 +543,47 @@ def _attach_traceroute_names(rows: list[dict[str, Any]]) -> None:
                 if entry is not None
             ],
         }
+
+
+def _resolve_group_gateways(rows: list[dict[str, Any]]) -> None:
+    """Swap raw group gateway ids for PacketNameEntry enrichment, in place.
+
+    The repositories attach each group's distinct gateway ids as stored
+    (``!xxxxxxxx``); the public shape reuses the ``names.gateway`` entry
+    schema for them.
+    """
+
+    def _gateway_node_id(gateway: Any) -> int | None:
+        if isinstance(gateway, str) and gateway.startswith("!"):
+            try:
+                return int(gateway[1:], 16)
+            except ValueError:
+                return None
+        return None
+
+    grouped = [row for row in rows if isinstance(row.get("group"), dict)]
+    if not grouped:
+        return
+
+    node_ids = {
+        node_id
+        for row in grouped
+        for gateway in row["group"].get("gateways", [])
+        if (node_id := _gateway_node_id(gateway)) is not None
+    }
+    display = get_bulk_node_names(list(node_ids)) if node_ids else {}
+    short = get_bulk_node_short_names(list(node_ids)) if node_ids else {}
+
+    for row in grouped:
+        entries = []
+        for gateway in row["group"].get("gateways", []):
+            node_id = _gateway_node_id(gateway)
+            if node_id is None:
+                continue
+            entry = _name_entry(node_id, display, short)
+            if entry is not None:
+                entries.append(entry)
+        row["group"]["gateways"] = entries
 
 
 def _node_public(node_id: int, **fields: Any) -> dict[str, Any]:
@@ -1348,29 +1405,48 @@ def packets_list() -> Response:
 
     Uses the optimized packet repository; the plain repository is only
     engaged for ``primary_channel``, which the optimized path does not
-    filter on. Packets are returned ungrouped.
+    filter on, and for ``group_by`` grouping. Without ``group_by`` rows are
+    ungrouped; ``group_by=mesh_packet_id`` collapses receptions onto the
+    earliest one (the legacy grouped rule) and counts groups in the
+    pagination meta.
     """
     page, page_size = _pagination_params()
     descending = _parse_enum("order", ("asc", "desc"), "desc") == "desc"
     sort_key = _parse_enum("sort", tuple(PACKET_SORTS), "timestamp")
+    group_by = _group_by_param()
 
     filters, search, query = _packet_filters()
-    repository = (
-        PacketRepository if "primary_channel" in filters else PacketRepositoryOptimized
-    )
-    result = repository.get_packets(
-        limit=page_size,
-        offset=(page - 1) * page_size,
-        filters=filters,
-        order_by=PACKET_SORTS[sort_key],
-        order_dir="desc" if descending else "asc",
-        search=search,
-    )
+    if group_by:
+        result = PacketRepository.get_packets_grouped(
+            limit=page_size,
+            offset=(page - 1) * page_size,
+            filters=filters,
+            order_by=PACKET_SORTS[sort_key],
+            order_dir="desc" if descending else "asc",
+            search=search,
+        )
+    else:
+        repository = (
+            PacketRepository
+            if "primary_channel" in filters
+            else PacketRepositoryOptimized
+        )
+        result = repository.get_packets(
+            limit=page_size,
+            offset=(page - 1) * page_size,
+            filters=filters,
+            order_by=PACKET_SORTS[sort_key],
+            order_dir="desc" if descending else "asc",
+            search=search,
+        )
 
     raw_packets = list(result.get("packets", []))
     _attach_packet_names(raw_packets)
+    _resolve_group_gateways(raw_packets)
     packets = [_packet_public(packet) for packet in raw_packets]
     total = int(result.get("total_count") or 0)
+    if group_by:
+        query["group_by"] = group_by
     query.update(
         {
             "page": page,
@@ -1446,7 +1522,11 @@ def _normalize_traceroutes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 @api_v1_bp.route("/traceroutes")
 def traceroutes_list() -> Response:
-    """Traceroute packets with time, endpoint and gateway filters."""
+    """Traceroute packets with time, endpoint and gateway filters.
+
+    ``group_by=mesh_packet_id`` collapses receptions onto the most recent
+    one (the legacy grouped rule) and counts groups in the pagination meta.
+    """
     page, page_size = _pagination_params()
 
     since = _parse_timestamp("since")
@@ -1459,15 +1539,18 @@ def traceroutes_list() -> Response:
     gateway_id = _normalize_gateway_id(gateway_raw) if gateway_raw else None
     search = (request.args.get("q") or "").strip() or None
 
-    if (
-        since is not None
+    group_by = _group_by_param()
+    use_repository = (
+        group_by is not None
+        or since is not None
         or until is not None
         or sort_key != "timestamp"
         or not descending
-    ):
-        # TracerouteService exposes neither a time upper bound nor sorting; use
-        # the repository directly and apply the same model-level enrichment
-        # the service uses.
+    )
+    if use_repository:
+        # TracerouteService exposes neither a time upper bound nor grouping;
+        # use the repository directly and apply the same model-level
+        # enrichment the service uses.
         filters: dict[str, Any] = {}
         if since is not None:
             filters["start_time"] = since
@@ -1479,14 +1562,24 @@ def traceroutes_list() -> Response:
             filters["to_node"] = to_node
         if gateway_id:
             filters["gateway_id"] = gateway_id
-        result = TracerouteRepository.get_traceroute_packets(
-            limit=page_size,
-            offset=(page - 1) * page_size,
-            filters=filters,
-            search=search,
-            order_by=TRACEROUTE_SORTS[sort_key],
-            order_dir="desc" if descending else "asc",
-        )
+        if group_by:
+            result = TracerouteRepository.get_traceroutes_grouped(
+                limit=page_size,
+                offset=(page - 1) * page_size,
+                filters=filters,
+                search=search,
+                order_by=TRACEROUTE_SORTS[sort_key],
+                order_dir="desc" if descending else "asc",
+            )
+        else:
+            result = TracerouteRepository.get_traceroute_packets(
+                limit=page_size,
+                offset=(page - 1) * page_size,
+                filters=filters,
+                search=search,
+                order_by=TRACEROUTE_SORTS[sort_key],
+                order_dir="desc" if descending else "asc",
+            )
         rows = [_enhance_traceroute(row) for row in result.get("packets", [])]
         total = int(result.get("total_count") or 0)
     else:
@@ -1502,6 +1595,7 @@ def traceroutes_list() -> Response:
         total = int(result.get("total_count") or 0)
 
     _attach_traceroute_names(rows)
+    _resolve_group_gateways(rows)
 
     query: dict[str, Any] = {
         "page": page,
@@ -1509,6 +1603,8 @@ def traceroutes_list() -> Response:
         "sort": sort_key,
         "order": "desc" if descending else "asc",
     }
+    if group_by:
+        query["group_by"] = group_by
     if since is not None:
         query["since"] = _iso(since)
     if until is not None:
@@ -2094,6 +2190,24 @@ _PACKET_NAME_ENTRY_SCHEMA = {
     "required": ["node_id", "hex_id"],
 }
 
+_GROUP_INFO_SCHEMA = {
+    "type": "object",
+    "description": "Server-side group aggregates; present only when "
+    "group_by=mesh_packet_id is requested.",
+    "properties": {
+        "reception_count": {
+            "type": "integer",
+            "description": "Receptions of this mesh packet under the request filters.",
+        },
+        "gateways": {
+            "type": "array",
+            "description": "Distinct receiving gateways, first-seen order.",
+            "items": {"$ref": "#/components/schemas/PacketNameEntry"},
+        },
+    },
+    "required": ["reception_count", "gateways"],
+}
+
 _PACKET_SCHEMA = {
     "type": "object",
     "properties": {
@@ -2128,6 +2242,7 @@ _PACKET_SCHEMA = {
                 "gateway": {"$ref": "#/components/schemas/PacketNameEntry"},
             },
         },
+        "group": {"$ref": "#/components/schemas/GroupInfo"},
     },
     "required": ["id", "timestamp"],
 }
@@ -2159,6 +2274,7 @@ _TRACEROUTE_SCHEMA = {
                 },
             },
         },
+        "group": {"$ref": "#/components/schemas/GroupInfo"},
     },
     "required": ["id", "timestamp"],
 }
@@ -2458,9 +2574,15 @@ def _build_openapi() -> dict[str, Any]:
                     "summary": "Query packet history",
                     "description": "Full packets-page filter set plus free-text "
                     "q. Rows carry legacy-level name enrichment (names.from/to/"
-                    "gateway) and a decoded text_content preview. Returned "
-                    "ungrouped; use /api/v1/packets/{id} for the reception "
-                    "detail of one packet.",
+                    "gateway) and a decoded text_content preview. Ungrouped by "
+                    "default; group_by=mesh_packet_id collapses receptions onto "
+                    "the earliest one (legacy rule; NULL/0 mesh ids excluded) "
+                    "and counts groups in meta.pagination, adding group."
+                    "{reception_count,gateways}. Group sort keys act on "
+                    "aggregates: timestamp uses the representative reception, "
+                    "rssi/snr/payload_length/hop_count take the group minimum "
+                    "and gateway the distinct-gateway count. Use "
+                    "/api/v1/packets/{id} for the reception detail of one packet.",
                     "parameters": [
                         *_PAGE_PARAMS,
                         _query_param(
@@ -2530,6 +2652,13 @@ def _build_openapi() -> dict[str, Any]:
                             {"type": "string", "enum": ["asc", "desc"]},
                             "Sort direction.",
                         ),
+                        _query_param(
+                            "group_by",
+                            {"type": "string", "enum": list(GROUP_BY_MODES)},
+                            "Collapse receptions into one row per mesh packet "
+                            "id (NULL/0 mesh ids excluded, as in the legacy "
+                            "grouped view); meta.pagination then counts groups.",
+                        ),
                     ],
                     "responses": {
                         "200": _json_response(
@@ -2566,7 +2695,11 @@ def _build_openapi() -> dict[str, Any]:
                     "summary": "List traceroutes",
                     "description": "Traceroute packets with parsed path "
                     "summaries and legacy-level name enrichment (names.from/to/"
-                    "gateway/route), newest first.",
+                    "gateway/route), newest first. group_by=mesh_packet_id "
+                    "collapses receptions onto the most recent one (legacy "
+                    "rule), counts groups in meta.pagination and adds group."
+                    "{reception_count,gateways}; the timestamp sort follows "
+                    "the representative.",
                     "parameters": [
                         *_PAGE_PARAMS,
                         _query_param(
@@ -2602,6 +2735,14 @@ def _build_openapi() -> dict[str, Any]:
                             "gateway", {"type": "string"}, "Gateway id (!hex or raw)."
                         ),
                         _query_param("q", {"type": "string"}, "Free-text filter."),
+                        _query_param(
+                            "group_by",
+                            {"type": "string", "enum": list(GROUP_BY_MODES)},
+                            "Collapse receptions into one row per mesh packet "
+                            "id; meta.pagination then counts groups. The "
+                            "representative is the most recent reception "
+                            "(legacy rule) and the timestamp sort follows it.",
+                        ),
                     ],
                     "responses": {
                         "200": _json_response(
@@ -3067,6 +3208,7 @@ def _build_openapi() -> dict[str, Any]:
                 "Error": _ERROR_SCHEMA,
                 "PaginationMeta": _PAGINATION_META_SCHEMA,
                 "PacketNameEntry": _PACKET_NAME_ENTRY_SCHEMA,
+                "GroupInfo": _GROUP_INFO_SCHEMA,
                 "Node": _NODE_SCHEMA,
                 "Packet": _PACKET_SCHEMA,
                 "Traceroute": _TRACEROUTE_SCHEMA,

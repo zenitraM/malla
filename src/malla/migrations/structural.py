@@ -238,6 +238,7 @@ def tables(conn: sqlite3.Connection) -> set[str]:
         )
     }
 
+
 def indexes(conn: sqlite3.Connection) -> set[str]:
     """Names of every index in the database."""
     return {
@@ -495,7 +496,6 @@ ROLLUP_TABLE_NAMES: tuple[str, ...] = (
     "link_day_rollup",
     "route_day_rollup",
 )
-
 
 
 def _capture_rollup_tables_pending(conn: sqlite3.Connection, _wm: Watermark) -> bool:
