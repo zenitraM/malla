@@ -115,6 +115,7 @@
 <script src="{{ url_for('static', filename='js/table-filter-controller.js') }}"></script>
 <script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modern-table.js') }}"></script>
+<script src="{{ url_for('static', filename='js/saved-views.js') }}"></script>
 <script src="{{ url_for('static', filename='js/grouped-rows.js') }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -206,6 +207,12 @@ document.addEventListener('DOMContentLoaded', function() {
             if (f.end_time) {
                 const d = new Date(f.end_time);
                 if (!Number.isNaN(d.getTime())) params.set('until', d.toISOString());
+            }
+            // Global range context fills the gaps; page times override it.
+            if (window.MallaRange) {
+                const rng = window.MallaRange.get();
+                if (!f.start_time && rng.sinceEpoch) params.set('since', new Date(rng.sinceEpoch * 1000).toISOString());
+                if (!f.end_time && rng.untilEpoch) params.set('until', new Date(rng.untilEpoch * 1000).toISOString());
             }
             // v1 traceroute sorts: timestamp | id (index-backed).
             const sortMap = { timestamp: 'timestamp', id: 'id' };
@@ -405,6 +412,15 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('statsFiltered').textContent = table.state.data.length || '0';
         document.getElementById('statsGrouped').textContent = groupPacketsCheckbox.checked ? 'Yes' : 'No';
         document.getElementById('statsLastUpdate').textContent = new Date().toLocaleTimeString();
+    }
+
+    // Global range changes re-query the table; page-level times take precedence
+    // until the next global change.
+    if (window.MallaRange) {
+        window.MallaRange.onRangeChange((range, meta) => {
+            if (meta && meta.via === 'override') return;
+            table.loadData();
+        });
     }
 
     const controller = new TableFilterController({

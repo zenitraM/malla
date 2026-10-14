@@ -2194,6 +2194,20 @@ def meta_info() -> Response:
 
     node_count = NodeRepository.get_nodes(limit=1, order_by="node_id")["total_count"]
 
+    # Ingest health: age of the newest packet. MAX(timestamp) is served by the
+    # leading timestamp index; the empty-DB path returns None fields.
+    conn = get_db_connection()
+    try:
+        last_packet_row = conn.execute(
+            "SELECT MAX(timestamp) FROM packet_history"
+        ).fetchone()
+    finally:
+        conn.close()
+    last_packet_ts = (
+        float(last_packet_row[0]) if last_packet_row and last_packet_row[0] else None
+    )
+    ingest_lag = max(0.0, time.time() - last_packet_ts) if last_packet_ts else None
+
     database_file = str(cfg.database_file)
     try:
         db_size = os.path.getsize(database_file)
@@ -2215,6 +2229,8 @@ def meta_info() -> Response:
         "database_size_bytes": int(db_size),
         "database_file": database_file,
         "server_time_utc": _iso(time.time()),
+        "last_packet_time_utc": _iso(last_packet_ts) if last_packet_ts else None,
+        "ingest_lag_seconds": round(ingest_lag, 1) if ingest_lag is not None else None,
     }
     return _ok(data)
 
@@ -3100,7 +3116,8 @@ def _build_openapi() -> dict[str, Any]:
                     "tags": ["meta"],
                     "summary": "Instance metadata",
                     "description": "App name/version, node count, database "
-                    "size and server time; intended for footers/healthchecks.",
+                    "size, server time and ingest health (age of the newest "
+                    "packet) for footers/healthchecks.",
                     "parameters": [],
                     "responses": {
                         "200": _json_response("Instance metadata.", {"type": "object"}),

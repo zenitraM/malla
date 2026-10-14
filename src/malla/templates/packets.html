@@ -145,6 +145,7 @@
 <script src="{{ url_for('static', filename='js/table-filter-controller.js') }}"></script>
 <script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modern-table.js') }}"></script>
+<script src="{{ url_for('static', filename='js/saved-views.js') }}"></script>
 <script src="{{ url_for('static', filename='js/grouped-rows.js') }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -478,6 +479,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 const d = new Date(f.end_time);
                 if (!Number.isNaN(d.getTime())) params.set('until', d.toISOString());
             }
+            // Global range context: fills gaps the page filters leave, and is
+            // overridden (and flagged) by explicit page-level times.
+            if (window.MallaRange) {
+                const rng = window.MallaRange.get();
+                if (!f.start_time && rng.sinceEpoch) params.set('since', new Date(rng.sinceEpoch * 1000).toISOString());
+                if (!f.end_time && rng.untilEpoch) params.set('until', new Date(rng.untilEpoch * 1000).toISOString());
+                if (rng.key === 'all' && !f.start_time && !f.end_time) params.delete('since');
+                window.MallaRange.setOverrideVisible(!!(f.start_time || f.end_time));
+            }
             // channel_id / relay_node are intentionally NOT sortable: v1
             // rejects those keys by design (400).
             const sortMap = {
@@ -505,6 +515,15 @@ document.addEventListener('DOMContentLoaded', function() {
         refineRows: (rows) => rows,
         columns: getDynamicColumns()
     });
+
+    // Global range changes re-query the table (page-local times win until the
+    // next global change; the range chip flags the override).
+    if (window.MallaRange) {
+        window.MallaRange.onRangeChange((range, meta) => {
+            if (meta && meta.via === 'override') return;
+            table.loadData();
+        });
+    }
 
     window.table = table;
 

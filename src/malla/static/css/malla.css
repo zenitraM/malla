@@ -1285,10 +1285,54 @@ code, kbd, pre, samp {
   word-break: break-word;
 }
 
+/* Bootstrap tooltips keep dark chrome even in the light theme, so node
+   tooltip text must follow the tooltip surface, not the page scheme
+   (dark-on-dark otherwise). */
+.tooltip .node-tooltip-header,
+.tooltip .node-tooltip-value { color: inherit; }
+
+.tooltip .node-tooltip-label {
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.tooltip .node-tooltip-header {
+  border-bottom-color: color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.tooltip .node-tooltip-row + .node-tooltip-row {
+  border-top-color: color-mix(in srgb, currentColor 22%, transparent);
+}
+
 .node-tooltip-mono {
   font-family: var(--bs-font-monospace);
   font-size: 0.76rem;
 }
+
+/* Capture-health chip (navbar) */
+.capture-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--malla-text-muted);
+  cursor: default;
+}
+.capture-health-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--malla-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--malla-success) 22%, transparent);
+}
+.capture-health[data-state="warn"] .capture-health-dot {
+  background: var(--malla-warning-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--malla-warning-strong) 25%, transparent);
+}
+.capture-health[data-state="stale"] .capture-health-dot {
+  background: var(--malla-danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--malla-danger) 22%, transparent);
+}
+.capture-health[data-state="stale"] { color: var(--malla-text); }
 
 /* Table containers (modern-table.js and static pages) */
 .modern-table-container,

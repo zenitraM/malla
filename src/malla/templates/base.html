@@ -147,8 +147,14 @@
                     </li>
                 </ul>
 
-                <!-- Timezone Toggle and Dark Mode Toggle -->
-                <div class="navbar-nav flex-row gap-2 ms-lg-2 mt-2 mt-lg-0" aria-label="Display preferences">
+                <!-- Ingest health, timezone and dark mode -->
+                <div class="navbar-nav flex-row align-items-center gap-2 ms-lg-2 mt-2 mt-lg-0" aria-label="Status and display preferences">
+                    <span id="captureHealth" class="capture-health d-none" role="status" aria-live="polite"
+                          data-bs-toggle="tooltip" data-bs-placement="bottom"
+                          data-bs-title="Ingest health: age of the newest stored packet">
+                        <span class="capture-health-dot" aria-hidden="true"></span>
+                        <span id="captureHealthText" class="small">…</span>
+                    </span>
                     <button id="timezone-toggle" class="nav-control" type="button"
                             data-bs-toggle="tooltip" data-bs-placement="bottom"
                             title="Toggle timezone"
@@ -196,6 +202,7 @@
     <script src="{{ url_for('static', filename='js/dark-mode-toggle.js') }}"></script>
     <!-- Timezone Utilities (must load before timezone toggle) -->
     <script src="{{ url_for('static', filename='js/timezone-utils.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/range-context.js') }}"></script>
     <!-- Timezone Toggle -->
     <script src="{{ url_for('static', filename='js/timezone-toggle.js') }}"></script>
 
@@ -379,6 +386,34 @@
                         footerCount.textContent = count !== null ? Number(count).toLocaleString() : '—';
                     })
                     .catch(() => { footerCount.textContent = '—'; });
+            }
+
+            // Capture-health chip: age of the newest stored packet.
+            // ok < 5m, warn < 30m, stale otherwise; hidden without data.
+            const health = document.getElementById('captureHealth');
+            function renderHealth(meta) {
+                if (!health) return;
+                const lag = meta && meta.ingest_lag_seconds;
+                if (lag == null) { health.classList.add('d-none'); return; }
+                health.classList.remove('d-none');
+                const mins = lag / 60;
+                const text = mins < 60 ? `${Math.max(1, Math.round(mins))}m` : `${Math.round(mins / 60)}h`;
+                document.getElementById('captureHealthText').textContent = `▲ ${text}`;
+                const state = mins < 5 ? 'ok' : mins < 30 ? 'warn' : 'stale';
+                health.dataset.state = state;
+                if (window.bootstrap && bootstrap.Tooltip.getInstance(health)) {
+                    const tip = bootstrap.Tooltip.getInstance(health);
+                    tip.setContent({ '.tooltip-inner': `Ingest ${state} — newest packet ${Math.round(mins)} min ago` });
+                }
+            }
+            function refreshHealth() {
+                if (!health || !window.MallaAPI) return;
+                window.MallaAPI.get('/api/v1/meta', { silent: true }).then(renderHealth).catch(() => {});
+            }
+            if (health && window.MallaAPI) {
+                refreshHealth();
+                setInterval(refreshHealth, 60000);
+                document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshHealth(); });
             }
         });
 
