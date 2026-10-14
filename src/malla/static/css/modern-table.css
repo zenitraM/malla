@@ -184,6 +184,10 @@
   border-top: 1px solid var(--malla-border);
 }
 
+.modern-pagination .table-toolbar { flex: 0 1 auto; }
+.modern-pagination .table-toolbar .page-size-selector { white-space: nowrap; }
+.modern-pagination .table-toolbar .page-size-selector select { min-width: 4.5rem; }
+
 .pagination-info {
   color: var(--malla-text-muted);
   font-size: 0.85rem;
@@ -422,30 +426,13 @@
   padding: 0.25rem 0.35rem;
 }
 
-.group-reception {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  font-size: 0.8125rem;
-}
 
-.group-reception-gw {
-  min-width: 12ch;
-}
 
 .group-reception-tag {
   font-size: 0.65rem;
 }
 
-.group-reception-metric {
-  font-variant-numeric: tabular-nums;
-}
 
-.group-reception-offset {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-}
 
 /* Per-reception deep link inside expanded grouped rows */
 a.group-reception-open {

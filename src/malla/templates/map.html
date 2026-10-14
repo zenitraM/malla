@@ -79,15 +79,9 @@
             <h3 class="h6"><i class="bi bi-funnel"></i> Filters</h3>
             <form id="locationFilterForm">
                 <div class="mb-3">
-                    <label for="maxAge" class="form-label">Max Age</label>
-                    <select class="form-select form-select-sm" id="maxAge" name="maxAge">
-                        <option value="">No Limit</option>
-                        <option value="1">1 Hour</option>
-                        <option value="6">6 Hours</option>
-                        <option value="24" selected>24 Hours</option>
-                        <option value="72">3 Days</option>
-                        <option value="168">1 Week</option>
-                    </select>
+                    <span class="form-label d-block text-muted small">Time Window</span>
+                    <div id="mapWindowChip" class="fw-semibold small" data-window-key=""
+                         title="Set globally from the range selector in the navbar"><span class="text-muted">…</span></div>
                 </div>
                 <div class="mb-3">
                     <label for="roleFilter" class="form-label">Node Role</label>
@@ -110,19 +104,6 @@
                         <option value="">All Channels</option>
                         <!-- Options loaded dynamically -->
                     </select>
-                </div>
-                <div class="mb-3">
-                    <label for="startDateTime" class="form-label">Start Date & Time</label>
-                    <input type="datetime-local" class="form-control form-control-sm" id="startDateTime" name="startDateTime">
-                </div>
-                <div class="mb-3">
-                    <label for="endDateTime" class="form-label">End Date & Time</label>
-                    <input type="datetime-local" class="form-control form-control-sm" id="endDateTime" name="endDateTime">
-                </div>
-                <div class="d-flex justify-content-end mb-2">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="clearDateRange">
-                        <i class="bi bi-x-circle"></i> Clear Dates
-                    </button>
                 </div>
                 <div class="mb-3">
                     <label for="minContacts" class="form-label">Min Contacts</label>
@@ -206,7 +187,7 @@
 
 .map-container {
     position: fixed;
-    top: 56px; /* Height of navbar */
+    top: var(--malla-nav-h, 56px);
     left: 0;
     right: 0;
     bottom: 0;
@@ -379,7 +360,7 @@
 @media (max-width: 768px) {
     .map-container {
         flex-direction: column;
-        top: 56px;
+        top: var(--malla-nav-h, 56px);
     }
 
     .map-main {
@@ -596,6 +577,27 @@ function initializeInterface() {
         clearNodeSelection();
     });
 
+    // The global range is the map's only time control. The fetch is bound to
+    // it (see buildFilterParams): widening past the loaded snapshot refetches
+    // (debounced); narrowing filters the rows already in memory.
+    let _refetchTimer = null;
+    let _lastFetchWindow = '';
+    if (window.MallaRange) {
+        window.MallaRange.onRangeChange(function (range, meta) {
+            if (meta && meta.via === 'override') return;
+            updateWindowChip();
+            applyClientSideFilters();
+            const key = rangeKey();
+            if (key !== _lastFetchWindow) {
+                if (_refetchTimer) clearTimeout(_refetchTimer);
+                _refetchTimer = setTimeout(() => {
+                    _lastFetchWindow = key;
+                    if (typeof loadNodeLocations === 'function') loadNodeLocations();
+                }, 400);
+            }
+        });
+    }
+
     // Handle filter form submission
     $('#locationFilterForm').on('submit', function(e) {
         e.preventDefault();
@@ -626,37 +628,9 @@ function initializeInterface() {
     });
 
     // Sync MaxAge select with date-time pickers
-    function toLocalInputValue(dateObj) {
-        const pad = (n)=> n.toString().padStart(2,'0');
-        return `${dateObj.getFullYear()}-${pad(dateObj.getMonth()+1)}-${pad(dateObj.getDate())}T${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
-    }
+    // Reflect the global range on load (after handlers are bound).
+    updateWindowChip();
 
-    $('#maxAge').on('change', function() {
-        const val = this.value;
-        if (!val) {
-            // No Limit selected – clear date inputs
-            $('#startDateTime').val('');
-            $('#endDateTime').val('');
-        } else {
-            const hours = parseInt(val,10);
-            if (!isNaN(hours)) {
-                const now = new Date();
-                const start = new Date(now.getTime() - hours*3600*1000);
-                $('#startDateTime').val(toLocalInputValue(start));
-                // Don't set end date - leave it empty to show all data up to present
-                $('#endDateTime').val('');
-            }
-        }
-        applyClientSideFilters();
-    });
-
-    // Clear dates button
-    $('#clearDateRange').on('click', function() {
-        $('#startDateTime').val('');
-        $('#endDateTime').val('');
-        $('#maxAge').val('');
-        applyClientSideFilters();
-    });
 
     // Move hop depth section just below the selected details container
     $('#hopDepthSection').insertAfter($('#selectedDetails'));
@@ -688,6 +662,9 @@ function initializeInterface() {
 
     // Load channels on interface init
     loadPrimaryChannels();
+
+    // Baseline the fetched window once the first load settles.
+    setTimeout(() => { _lastFetchWindow = rangeKey(); }, 2500);
 
     // Trigger change events for all form fields to initialize them based on default values
     const formFields = document.querySelectorAll('#locationFilterForm select, #locationFilterForm input');
@@ -738,13 +715,17 @@ function initMap() {
 
 // Build filter parameters from form
 function buildFilterParams() {
-    const form = document.getElementById('locationFilterForm');
-    const formData = new FormData(form);
     const params = new URLSearchParams();
 
-    // Only send server-side filters (gateway, search, etc.)
-    // Age and role filtering is now done client-side
+    // Bound the server window to the shared range as well: the endpoint
+    // caps at 14 days, so wider selections need the explicit window.
+    if (window.MallaRange && window.MallaRange.get) {
+        const r = window.MallaRange.get();
+        if (r.sinceEpoch) params.set('since', new Date(r.sinceEpoch * 1000).toISOString());
+        if (r.untilEpoch) params.set('until', new Date(r.untilEpoch * 1000).toISOString());
+    }
 
+    // Role/etc filtering stays client-side
     return params;
 }
 
@@ -828,17 +809,37 @@ async function loadNodeLocations() {
     }
 }
 
+// Time window: the global range is the map's only time control; the window
+// is never edited here, only reflected (data is fetched window-less and
+// filtered client-side; wider windows refetch (see the range listener).)
+function rangeKey() {
+    if (!window.MallaRange || !window.MallaRange.get) return "";
+    const r = window.MallaRange.get();
+    return `${r.key}:${Math.round((r.sinceEpoch || 0) / 60)}:${Math.round((r.untilEpoch || 0) / 60)}`;
+}
+
+function mapWindow() {
+    if (!window.MallaRange || !window.MallaRange.get) return { since: null, until: null };
+    const r = window.MallaRange.get();
+    return { since: r.sinceEpoch || null, until: r.untilEpoch || null, key: r.key };
+}
+
+function updateWindowChip() {
+    const chip = document.getElementById('mapWindowChip');
+    if (!chip || !window.MallaRange) return;
+    const r = window.MallaRange.get();
+    chip.textContent = window.MallaRange.describe ? window.MallaRange.describe() : String(r.key);
+    chip.dataset.windowKey = String(r.key);
+}
+
 // Apply client-side filters to the data
 function applyClientSideFilters() {
     const form = document.getElementById('locationFilterForm');
     const formData = new FormData(form);
 
     // Get filter values
-    const maxAge = formData.get('maxAge'); // still read to sync UI but no longer used for filtering
     const roleFilter = formData.get('roleFilter');
     const channelFilter = formData.get('channelFilter');
-    const startDateTime = formData.get('startDateTime');
-    const endDateTime = formData.get('endDateTime');
     const minContacts = formData.get('minContacts');
 
     // Start with all data
@@ -864,16 +865,14 @@ function applyClientSideFilters() {
         filteredNodes = filteredNodes.filter(node => node.primary_channel === channelFilter);
     }
 
-    // Convert date inputs to timestamps for comparison
-    let startTimestamp = null;
-    let endTimestamp = null;
-    if (startDateTime) {
-        startTimestamp = new Date(startDateTime).getTime() / 1000;
+    // Time window comes from the global range (single source of truth).
+    const windowBounds = mapWindow();
+    const startTimestamp = windowBounds.since;
+    const endTimestamp = windowBounds.until;
+    if (startTimestamp !== null) {
         filteredNodes = filteredNodes.filter(node => node.timestamp >= startTimestamp);
     }
-
-    if (endDateTime) {
-        endTimestamp = new Date(endDateTime).getTime() / 1000;
+    if (endTimestamp !== null) {
         filteredNodes = filteredNodes.filter(node => node.timestamp <= endTimestamp);
     }
 

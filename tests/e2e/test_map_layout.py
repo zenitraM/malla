@@ -246,18 +246,14 @@ class TestMapLayout:
         # Wait for loading to complete
         page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
-        # Select age filter
-        age_select = page.locator("#maxAge")
-        age_select.select_option("24")
+        # Window comes from the shared range now
+        page.evaluate("() => window.MallaRange.set('24h')")
 
-        # Submit filter form
-        filter_form = page.locator("#locationFilterForm")
-        filter_form.locator("button[type='submit']").click()
+        # Wait for the client-side filter pass
+        page.wait_for_timeout(1200)
 
-        # Wait for reload
-        page.wait_for_timeout(2000)
-
-        # The count varies with the fixture clock; assert structurally.
+        # Verify the filter kept the recent fixture nodes visible. The exact
+        # count varies with the fixture clock, so assert structurally.
         node_count_text = page.locator("#nodeCount").text_content() or "0"
         node_count_int = int("".join(ch for ch in node_count_text if ch.isdigit()) or 0)
         assert node_count_int >= 15, (
@@ -362,7 +358,8 @@ class TestMapLayout:
         stats_section = page.locator("#mapStats")
         expect(stats_section).to_be_visible()
 
-        # Node counts vary with the fixture clock; located must equal total.
+        # Node counts vary with the fixture clock; nodes and located nodes
+        # must at least agree and be non-trivial.
         stats_nodes = int(page.locator("#statsNodes").text_content() or 0)
         stats_loc = int(page.locator("#statsWithLocation").text_content() or 0)
         assert stats_nodes >= 15, f"unexpected node count {stats_nodes}"
@@ -621,8 +618,7 @@ class TestMapLayout:
         initial_count_int = int(initial_count) if initial_count else 0
 
         # Select 1 hour age filter (should filter out most nodes)
-        age_filter = page.locator("#maxAge")
-        age_filter.select_option("1")
+        page.evaluate("() => window.MallaRange.set('1h')")
 
         # Apply filters
         apply_button = page.locator("button[type='submit']")
@@ -641,7 +637,7 @@ class TestMapLayout:
         )
 
         # Clear filter and check count returns
-        age_filter.select_option("")
+        page.evaluate("() => window.MallaRange.set('all')")
         apply_button.click()
         page.wait_for_timeout(2000)
 
@@ -664,8 +660,7 @@ class TestMapLayout:
         initial_count_int = int(initial_count) if initial_count else 0
 
         # Apply both age and role filters
-        age_filter = page.locator("#maxAge")
-        age_filter.select_option("168")  # 1 week
+        page.evaluate("() => window.MallaRange.set('7d')")
 
         role_filter = page.locator("#roleFilter")
         role_filter.select_option("CLIENT")
@@ -699,8 +694,7 @@ class TestMapLayout:
         initial_links_int = int(initial_links) if initial_links else 0
 
         # Apply a restrictive filter
-        age_filter = page.locator("#maxAge")
-        age_filter.select_option("1")  # 1 hour
+        page.evaluate("() => window.MallaRange.set('1h')")  # 1 hour
 
         # Apply filters
         apply_button = page.locator("button[type='submit']")

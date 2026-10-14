@@ -18,6 +18,7 @@ test-cov: ## Run tests with coverage
 	uv run pytest --cov=src/malla --cov-report=html --cov-report=term
 
 lint: ## Run linting tools
+	uv run ruff format --check src tests
 	uv run ruff check src tests
 	uv run basedpyright src
 
