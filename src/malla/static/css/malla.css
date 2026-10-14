@@ -1606,3 +1606,4 @@ tr:hover .row-actions { opacity: 1; }
 [data-bs-theme=dark] .app-navbar .nav-link:hover { color: var(--malla-text); }
 [data-bs-theme=dark] .app-navbar .nav-link.active { color: var(--malla-primary); }
 [data-bs-theme=dark] .app-navbar .navbar-brand { color: var(--malla-text); }
+
