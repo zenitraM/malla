@@ -142,7 +142,7 @@
                     </div>
                     <div id="activityTimelinePanelsError" class="text-center py-4 text-muted" style="display: none;">
                         <i class="bi bi-exclamation-triangle"></i> Could not load activity data.
-                        <a href="#" onclick="loadActivityTimeline(timelineRange); return false;">Retry</a>
+                        <a href="#" onclick="refreshDashboard(); return false;">Retry</a>
                     </div>
                     <div id="activityTimelinePanels" class="row g-3" style="display: none;">
                         <div class="col-6">
@@ -1390,6 +1390,10 @@ async function refreshSummary({ silent = false } = {}) {
     } catch (error) {
         if (!silent) {
             hideAllLoadingSpinners();
+            // Surface the timeline failure with a working retry (the old
+            // loadActivityTimeline global is gone).
+            const errBox = document.getElementById('activityTimelinePanelsError');
+            if (errBox) errBox.style.display = '';
             console.error('Summary load failed:', error);
         }
         return false;
@@ -1441,7 +1445,31 @@ document.addEventListener('DOMContentLoaded', function () {
                 setRangeInUrl(range);
                 syncRangeButtons(range);
                 refreshSummary();
+                // Keep the global context in lock-step (marks overridden so
+                // table pages do not loop back onto us).
+                if (window.MallaRange) {
+                    window.MallaRange.set(range, null, { via: 'override' });
+                }
             }
+        });
+    }
+
+    // Global range drives this page when changed from the navbar: map the
+    // preset onto the dashboard selector (custom/15m/6h fall back to the
+    // nearest of 24h/7d for the timeline; the KPI tiles re-query either way).
+    if (window.MallaRange) {
+        window.MallaRange.onRangeChange(function (range, meta) {
+            if (meta && meta.via === 'override') return; // this page caused it
+            var key = range.key;
+            var mapped = ['24h', '7d', '30d', 'all'].includes(key) ? key
+                : (key === '15m' || key === '1h' || key === '6h') ? '24h' : '7d';
+            if (mapped !== timelineRange) {
+                timelineRange = mapped;
+                try { localStorage.setItem('mallaTimelineRange', mapped); } catch (e) { /* private mode */ }
+                setRangeInUrl(mapped);
+                syncRangeButtons(mapped);
+            }
+            refreshSummary();
         });
     }
 
