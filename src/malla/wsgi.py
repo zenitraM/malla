@@ -7,6 +7,7 @@ that starts Gunicorn with appropriate configuration for production deployment.
 """
 
 import logging
+import os
 import sys
 
 from .config import get_config
@@ -71,7 +72,37 @@ def get_application():
 # WSGI application callable for servers - use a callable that defers execution
 def application(*args, **kwargs):
     """WSGI application entry point."""
-    return get_application()(*args, **kwargs)
+    app = get_application()
+    _rearm_workers(app)
+    return app(*args, **kwargs)
+
+
+_CREATION_PID = None
+
+
+def _rearm_workers(app):
+    """After a preload fork, the workers inherited the master's warmer guard.
+
+    Threads do not survive fork: re-arm the per-process background helpers
+    once per worker pid (the guards in web_ui are pid-keyed and dedupe).
+    """
+    global _CREATION_PID
+    pid = os.getpid()
+    creator = app.config.get("_CREATOR_PID") if hasattr(app, "config") else None
+    if creator is None:
+        return
+    if pid == creator:
+        return
+    marker = f"_worker_threads_pid_{pid}"
+    if getattr(app, marker, False):
+        return
+    setattr(app, marker, True)
+    try:
+        from .web_ui import start_dashboard_warmer
+
+        start_dashboard_warmer(app)
+    except Exception as exc:  # noqa: BLE001 - best effort per worker
+        logger.warning("Worker background threads failed to start: %s", exc)
 
 
 def main():
@@ -98,6 +129,23 @@ def main():
         print()
 
         gunicorn_config = _build_gunicorn_config(cfg)
+
+        def _post_fork(server, worker):  # pragma: no cover - worker process
+            app_obj = getattr(worker, "wsgi", None)
+            if app_obj is None:
+                app_obj = getattr(worker, "app", None)
+            if app_obj is not None and hasattr(app_obj, "application"):
+                app_obj = app_obj.application
+            if app_obj is None:
+                return
+            try:
+                from .web_ui import start_dashboard_warmer
+
+                start_dashboard_warmer(app_obj)
+            except Exception as exc:  # noqa: BLE001 - best effort
+                logger.warning("Worker background threads failed: %s", exc)
+
+        gunicorn_config["post_fork"] = _post_fork
 
         # Create Gunicorn application
         class MallaWSGIApplication(WSGIApplication):

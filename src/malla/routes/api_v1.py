@@ -2343,6 +2343,38 @@ def meta_info() -> Response:
     )
     ingest_lag = max(0.0, time.time() - last_packet_ts) if last_packet_ts else None
 
+    # Rollup freshness: every per-node aggregate the API serves comes from
+    # the capture-maintained rollups, so a missing/stale rollup must be
+    # distinguishable from a quiet mesh. Newest hourly bucket vs now; stale
+    # once the last completed hour is more than two hours unrefreshed.
+    rollup_freshness: dict[str, Any] = {
+        "newest_hour_epoch": None,
+        "age_seconds": None,
+        "stale": None,
+    }
+    try:
+        rollup_conn = get_db_connection()
+        try:
+            rollup_row = rollup_conn.execute(
+                "SELECT MAX(hour_epoch) FROM node_hour_rollup"
+            ).fetchone()
+        finally:
+            rollup_conn.close()
+    except sqlite3.OperationalError:
+        rollup_row = None
+    if rollup_row and rollup_row[0] is not None:
+        # hour_epoch is a hour INDEX (epoch // 3600), not seconds: the fold
+        # writes ``ts // 3600`` buckets and only covers completed hours.
+        newest_hour = int(rollup_row[0])
+        newest_ts = newest_hour * 3600
+        age = max(0.0, time.time() - newest_ts)
+        rollup_freshness = {
+            "newest_hour_epoch": newest_ts,
+            "age_seconds": round(age, 1),
+            # completed-hour lag (up to 2h) + the configured grace hour.
+            "stale": bool(age > 2 * 3600 + 3600),
+        }
+
     database_file = str(cfg.database_file)
     try:
         db_size = os.path.getsize(database_file)
@@ -2367,6 +2399,7 @@ def meta_info() -> Response:
         "data_retention_hours": int(cfg.data_retention_hours or 0),
         "last_packet_time_utc": _iso(last_packet_ts) if last_packet_ts else None,
         "ingest_lag_seconds": round(ingest_lag, 1) if ingest_lag is not None else None,
+        "rollup_freshness": rollup_freshness,
     }
     return _ok(data)
 
@@ -3266,8 +3299,9 @@ def _build_openapi() -> dict[str, Any]:
                     "tags": ["meta"],
                     "summary": "Instance metadata",
                     "description": "App name/version, node count, database "
-                    "size, server time and ingest health (age of the newest "
-                    "packet) for footers/healthchecks.",
+                    "size, server time, ingest health (age of the newest "
+                    "packet) and rollup freshness (age of the newest hourly "
+                    "aggregate bucket) for footers/healthchecks.",
                     "parameters": [],
                     "responses": {
                         "200": _json_response("Instance metadata.", {"type": "object"}),

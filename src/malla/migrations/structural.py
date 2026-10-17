@@ -203,6 +203,9 @@ INDEX_SPECS: tuple[tuple[str, str, str], ...] = (
         "ON packet_history(mesh_packet_id, timestamp, id)",
     ),
     (
+        # Covers the bounded recent-page scan (WHERE timestamp >= ? ORDER BY
+        # timestamp DESC); the plain time index cannot serve the covering
+        # variant the planner prefers for the unfiltered listing page.
         "idx_packet_history_ts_mesh",
         "packet_history",
         "CREATE INDEX IF NOT EXISTS idx_packet_history_ts_mesh "

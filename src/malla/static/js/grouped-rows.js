@@ -18,6 +18,41 @@
     /** mesh_packet_id -> Promise<reception[]>; cleared on failure so it can retry. */
     const detailCache = new Map();
 
+    // Parity with the grouped badge: the N-gateways count comes from the
+    // page's filtered grouped query, so the expansion must ask with the same
+    // window and membership or the two disagree on screen. Mirrors the
+    // table query builders: global range first, explicit form bounds win,
+    // "all" clears the window; gateway/portnum from the form filters.
+    function expansionQuery() {
+        const params = new URLSearchParams();
+        const range = window.MallaRange && window.MallaRange.get ? window.MallaRange.get() : null;
+        if (range && range.sinceEpoch) {
+            params.set('since', new Date(range.sinceEpoch * 1000).toISOString());
+        }
+        if (range && range.untilEpoch) {
+            params.set('until', new Date(range.untilEpoch * 1000).toISOString());
+        }
+        if (range && range.key === 'all') params.delete('since');
+        const um = window.urlManager;
+        const filters = um && typeof um.getCurrentFilters === 'function' ? um.getCurrentFilters() : null;
+        if (filters) {
+            // datetime-local strings need ISO conversion, mirroring the table
+            // builder; explicit page times override the global range.
+            if (filters.start_time) {
+                const d = new Date(filters.start_time);
+                if (!Number.isNaN(d.getTime())) params.set('since', d.toISOString());
+            }
+            if (filters.end_time) {
+                const d = new Date(filters.end_time);
+                if (!Number.isNaN(d.getTime())) params.set('until', d.toISOString());
+            }
+            if (filters.gateway_id) params.set('gateway_id', String(filters.gateway_id));
+            if (filters.portnum) params.set('portnum', String(filters.portnum));
+        }
+        const qs = params.toString();
+        return qs ? `?${qs}` : '';
+    }
+
     function getJSON(path) {
         if (window.MallaAPI && typeof window.MallaAPI.get === 'function') {
             // silent: the failure UI below is the surfaced error path.
@@ -336,7 +371,7 @@
         try {
             const receptions = await loadReceptions(
                 cacheKey,
-                `/api/v1/packets/${encodeURIComponent(packetId)}`
+                `/api/v1/packets/${encodeURIComponent(packetId)}${expansionQuery()}`
             );
             if (button.getAttribute('aria-expanded') !== 'true') return; // collapsed meanwhile
             renderReceptions(cell, receptions, sortStates.get(cell));
