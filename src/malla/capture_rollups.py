@@ -132,10 +132,14 @@ def _cursor_value(conn: sqlite3.Connection, name: str) -> int:
 
 
 def _set_cursor(conn: sqlite3.Connection, name: str, packet_id: int) -> None:
+    # Monotonic: with two runners (capture maintenance + the web-side backup
+    # refresher) a lagging process must never rewind a cursor the other
+    # already advanced; the fold is idempotent, but re-folding is waste.
     conn.execute(
         f"INSERT INTO {CURSOR_TABLE} (name, last_packet_id, updated_at) VALUES (?, ?, ?)"
         " ON CONFLICT(name) DO UPDATE SET"
-        " last_packet_id = excluded.last_packet_id, updated_at = excluded.updated_at",
+        " last_packet_id = MAX(last_packet_id, excluded.last_packet_id),"
+        " updated_at = excluded.updated_at",
         (name, int(packet_id), time.time()),
     )
 

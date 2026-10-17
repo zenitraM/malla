@@ -419,15 +419,6 @@
   border-bottom: 1px solid var(--malla-border);
 }
 
-.group-receptions-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.25rem 0.35rem;
-}
-
-
-
 .group-reception-tag {
   font-size: 0.65rem;
 }
