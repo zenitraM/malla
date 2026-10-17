@@ -491,9 +491,9 @@
                                             <td>
                                                 {% if packet.snr %}
                                                     {% if packet.is_grouped %}
-                                                        <span class="text-info">{{ packet.snr }}</span>
+                                                        <span class="text-info">{{ packet.snr|format_snr }}</span>
                                                     {% else %}
-                                                        {{ packet.snr }} dB
+                                                        {{ packet.snr|format_snr }} dB
                                                     {% endif %}
                                                 {% else %}
                                                     -
@@ -566,7 +566,7 @@
                                             </td>
                                             <td>
                                                 {% if packet.snr is not none %}
-                                                    {{ packet.snr }} dB
+                                                    {{ packet.snr|format_snr }} dB
                                                 {% else %}
                                                     -
                                                 {% endif %}
@@ -624,7 +624,7 @@
                                                 {% if gw_entry %}
                                                     {% if gw_entry.hop_count == 0 %}
                                                         <td class="text-center">
-                                                            <span class="text-success fw-bold" data-bs-toggle="tooltip" title="{% if gw_entry.rssi is not none %}RSSI: {{ gw_entry.rssi }} dBm {% endif %}{% if gw_entry.snr is not none %}SNR: {{ gw_entry.snr }} dB{% endif %}">0</span>
+                                                            <span class="text-success fw-bold" data-bs-toggle="tooltip" title="{% if gw_entry.rssi is not none %}RSSI: {{ gw_entry.rssi }} dBm {% endif %}{% if gw_entry.snr is not none %}SNR: {{ '%.2f'|format(gw_entry.snr) }} dB{% endif %}">0</span>
                                                         </td>
                                                     {% else %}
                                                         <td class="text-center">{{ gw_entry.hop_count }}</td>
