@@ -7,6 +7,10 @@ via the standard ``client`` fixture.
 """
 
 import math
+import sqlite3
+import time
+from collections import Counter
+from datetime import datetime
 
 import pytest
 
@@ -650,14 +654,33 @@ class TestApiV1Locations:
     @pytest.mark.integration
     def test_bulk_locations_gateway_filter_narrows(self, client):
         everything = client.get("/api/v1/locations?page_size=5000").get_json()
-        filtered_response = client.get("/api/v1/locations?gateway_id=1128074276")
+        assert everything["meta"]["pagination"]["total"] > 0
+        # The stored gateway_id is TEXT '!xxxxxxxx'; filtering must actually
+        # match rows (an int here silently matched nothing).
+        common = Counter(
+            row["gateway_id"] for row in everything["data"] if row.get("gateway_id")
+        ).most_common(1)[0][0]
+        assert common.startswith("!")
+        filtered_response = client.get(
+            f"/api/v1/locations?page_size=5000&gateway_id={common}"
+        )
         assert filtered_response.status_code == 200
         filtered = filtered_response.get_json()
+        assert filtered["meta"]["query"]["gateway_id"] == common
         assert (
-            filtered["meta"]["pagination"]["total"]
-            <= everything["meta"]["pagination"]["total"]
+            0
+            < filtered["meta"]["pagination"]["total"]
+            < everything["meta"]["pagination"]["total"]
         )
-        assert filtered["meta"]["query"]["gateway_id"] == "!433d0c24"
+        assert all(row["gateway_id"] == common for row in filtered["data"])
+        # The decimal form of the same node resolves to the same rows.
+        decimal = client.get(
+            f"/api/v1/locations?page_size=5000&gateway_id={int(common[1:], 16)}"
+        ).get_json()
+        assert (
+            decimal["meta"]["pagination"]["total"]
+            == filtered["meta"]["pagination"]["total"]
+        )
 
     @pytest.mark.integration
     def test_bulk_locations_invalid_params(self, client):
@@ -1013,3 +1036,101 @@ class TestApiV1GroupedModes:
         error = response.get_json()["error"]
         assert error["code"] == "invalid_parameter"
         assert error["details"] == {"group_by": "banana"}
+
+
+@pytest.mark.integration
+class TestApiV1LocationsHistoricalWindow:
+    """Regression: a historical end_time must return the latest position
+    *inside* the window (window-argmax), not filter the current snapshot."""
+
+    @staticmethod
+    def _seed_old_position(
+        db_path, node_id, age_s, lat=404160000, lon=-3700000, gateway_id="!seed"
+    ):
+        from meshtastic import mesh_pb2
+
+        p = mesh_pb2.Position()
+        p.latitude_i = lat
+        p.longitude_i = lon
+        p.altitude = 650
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "INSERT INTO packet_history (timestamp, topic, from_node_id,"
+                " to_node_id, portnum, portnum_name, gateway_id, channel_id,"
+                " raw_payload, processed_successfully) VALUES (?,?,?,?,?,?,?,?,?,1)",
+                (
+                    time.time() - age_s,
+                    "!seed",
+                    node_id,
+                    1128074277,
+                    3,  # POSITION_APP
+                    "POSITION_APP",
+                    gateway_id,
+                    0,
+                    p.SerializeToString(),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_historical_window_returns_in_window_positions(self, client, app):
+        now = time.time()
+        # A position 3h old: inside the window, NEWER than the latest-state
+        # rows can represent (the fixture's newest is ~20m ago? no—older
+        # nodes exist); decisive for the overlay.
+        self._seed_old_position(
+            app.config["DATABASE_FILE"], 1128074276, age_s=3 * 3600 + 60
+        )
+        response = client.get(
+            f"/api/v1/locations?since={now - 5 * 3600:.0f}&until={now - 2 * 3600:.0f}"
+        )
+        assert response.status_code == 200
+        data = response.get_json()["data"]
+        assert data, "historical window should return the seeded position"
+        for row in data:
+            ts = datetime.fromisoformat(
+                row["timestamp"].replace("Z", "+00:00")
+            ).timestamp()
+            assert now - 5 * 3600 <= ts <= now - 2 * 3600 + 5
+        seeded = next((r for r in data if r["node_id"] == 1128074276), None)
+        assert seeded is not None
+        assert abs(seeded["latitude"] - 40.416) < 1e-4
+
+    def test_historical_window_respects_gateway_filter(self, client, app):
+        now = time.time()
+        db = app.config["DATABASE_FILE"]
+        self._seed_old_position(
+            db, 1128074276, age_s=3 * 3600 + 60, gateway_id="!aaaa0001"
+        )
+        self._seed_old_position(
+            db,
+            1128074277,
+            age_s=3 * 3600 + 60,
+            lat=404170000,
+            gateway_id="!bbbb0002",
+        )
+        response = client.get(
+            f"/api/v1/locations?since={now - 5 * 3600:.0f}&until={now - 2 * 3600:.0f}"
+            "&gateway_id=!aaaa0001"
+        )
+        assert response.status_code == 200
+        data = response.get_json()["data"]
+        assert data, "gateway-filtered historical window should return the node"
+        assert [row["node_id"] for row in data] == [1128074276]
+        assert all(row["gateway_id"] == "!aaaa0001" for row in data)
+
+    def test_historical_window_respects_node_filter(self, client, app):
+        now = time.time()
+        self._seed_old_position(
+            app.config["DATABASE_FILE"], 1128074276, age_s=3 * 3600 + 60
+        )
+        response = client.get(
+            f"/api/v1/locations?since={now - 5 * 3600:.0f}&until={now - 2 * 3600:.0f}"
+            "&node_ids=1128074276"
+        )
+        assert response.status_code == 200
+        data = response.get_json()["data"]
+        assert data, "node-filtered historical window should return the node"
+        assert all(row["node_id"] == 1128074276 for row in data)

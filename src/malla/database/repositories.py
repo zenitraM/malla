@@ -6,6 +6,7 @@ This module provides data access layer with business logic for different entitie
 
 import json
 import logging
+import sqlite3
 import time
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -171,6 +172,48 @@ def _aggregate(
 RELAY_CANDIDATE_CACHE_TTL_SECONDS = 1800
 RELAY_CANDIDATE_CACHE_MAX_ENTRIES = 4096
 _relay_candidate_cache: dict[tuple[int, int], tuple[float, list[dict[str, Any]]]] = {}
+
+# Process-wide result cache for expensive aggregate endpoints (grouped
+# listings, dashboard tiles). Keyed by (bucket, db path, serialized args);
+# value (created_ts, payload). Same pattern/lifecycle as the relay cache:
+# tests flush these dicts wholesale (see tests/integration/test_empty_database).
+RESULT_CACHE_TTL_SECONDS = 300
+_RESULT_CACHE: dict[tuple[str, str, str], tuple[float, Any]] = {}
+
+
+def _result_cache_get(bucket: str, key: str) -> Any | None:
+    hit = _RESULT_CACHE.get((bucket, _result_db_key(), key))
+    if not hit:
+        return None
+    created, payload = hit
+    if time.time() - created > RESULT_CACHE_TTL_SECONDS:
+        _RESULT_CACHE.pop((bucket, _result_db_key(), key), None)
+        return None
+    return payload
+
+
+RESULT_CACHE_MAX_ENTRIES = 256
+
+
+def _result_cache_put(bucket: str, key: str, payload: Any) -> None:
+    now = time.time()
+    if len(_RESULT_CACHE) > RESULT_CACHE_MAX_ENTRIES:
+        cutoff = now - RESULT_CACHE_TTL_SECONDS
+        for k in [k for k, v in _RESULT_CACHE.items() if v[0] < cutoff]:
+            _RESULT_CACHE.pop(k, None)
+        # Fresh entries accumulate too (bursty distinct keys); evict
+        # oldest-inserted until bounded. dict preserves insertion order.
+        while len(_RESULT_CACHE) > RESULT_CACHE_MAX_ENTRIES:
+            _RESULT_CACHE.pop(next(iter(_RESULT_CACHE)), None)
+    _RESULT_CACHE[(bucket, _result_db_key(), key)] = (now, payload)
+
+
+def _result_db_key() -> str:
+    # Same resolution order as get_db_connection(): the serving app first,
+    # so two apps over different databases never share cache entries.
+    from ..database.connection import _resolve_db_path
+
+    return _resolve_db_path()
 
 
 def _prune_relay_candidate_cache(now: float) -> None:
@@ -382,11 +425,11 @@ def _packet_history_conditions(
         conditions.append("portnum_name = ?")
         params.append(filters["portnum"])
 
-    if filters.get("min_rssi"):
+    if filters.get("min_rssi") is not None:
         conditions.append("rssi >= ?")
         params.append(filters["min_rssi"])
 
-    if filters.get("max_rssi"):
+    if filters.get("max_rssi") is not None:
         conditions.append("rssi <= ?")
         params.append(filters["max_rssi"])
 
@@ -666,7 +709,7 @@ class PacketRepository:
                 query = f"""
                     SELECT
                         id, timestamp, from_node_id, to_node_id, portnum, portnum_name,
-                        gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_limit, hop_start,
+                        gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_start - hop_limit AS hop_count, hop_limit, hop_start,
                         payload_length, processed_successfully, raw_payload,
                         via_mqtt, want_ack, priority, delayed, channel_index, rx_time,
                         pki_encrypted, next_hop, relay_node, tx_after,
@@ -925,7 +968,7 @@ class PacketRepository:
                 query = f"""
                     SELECT
                         id, timestamp, from_node_id, to_node_id, portnum, portnum_name,
-                        gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_limit, hop_start,
+                        gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_start - hop_limit AS hop_count, hop_limit, hop_start,
                         payload_length, processed_successfully, raw_payload,
                         via_mqtt, want_ack, priority, delayed, channel_index, rx_time,
                         pki_encrypted, next_hop, relay_node, tx_after,
@@ -1030,9 +1073,31 @@ class PacketRepository:
         packet ids. The representative row is the earliest reception (the
         legacy grouped selection rule); ``group`` carries the reception count
         plus the distinct non-empty gateway ids over the filtered receptions.
+
+        One filtered scan feeds both the page keys (with the representative
+        row id) and the grand totals; the representative rows then come off
+        the primary key and members off the mesh index - the expensive part
+        is the single window aggregation, whose result is TTL-cached because
+        auto-refresh and multiple viewers repeat it verbatim.
         """
         if filters is None:
             filters = {}
+
+        cache_key = json.dumps(
+            [limit, offset, filters, order_by, order_dir, search], default=str
+        )
+        cached = _result_cache_get("packets_grouped", cache_key)
+        if cached is not None:
+            # Copy the row dicts: callers enrich them in place; keep the
+            # cached objects clean for the next consumer.
+            import copy as _copy
+
+            return {
+                "packets": _copy.deepcopy(cached["packets"]),
+                "total_count": cached["total_count"],
+                "has_more": cached["has_more"],
+                "is_grouped": True,
+            }
 
         try:
             conn = get_db_connection()
@@ -1042,32 +1107,53 @@ class PacketRepository:
             conditions.extend(("mesh_packet_id IS NOT NULL", "mesh_packet_id != 0"))
             where_clause = "WHERE " + " AND ".join(conditions)
 
-            cursor.execute(
-                "SELECT COUNT(DISTINCT mesh_packet_id) "
-                f"FROM packet_history {where_clause}",
-                params,
-            )
-            total_count = int(cursor.fetchone()[0])
-
-            order_expr = _PACKET_GROUP_SORTS.get(
-                order_by, _PACKET_GROUP_SORTS["timestamp"]
-            )
-            order_sql = "DESC" if order_dir.lower() == "desc" else "ASC"
-
-            # One page of group keys. mesh_packet_id breaks aggregation ties
-            # so consecutive pages never overlap or skip a group.
+            # One scan: per-group reception count, first-seen and representative
+            # row id; the outer SELECT derives the distinct-group total.
             cursor.execute(
                 f"""
-                SELECT mesh_packet_id, COUNT(*) AS reception_count
+                SELECT
+                    mesh_packet_id,
+                    COUNT(*) AS reception_count,
+                    MIN(id) AS representative_id,
+                    MIN(timestamp) AS first_seen
                 FROM packet_history
                 {where_clause}
                 GROUP BY mesh_packet_id
-                ORDER BY {order_expr} {order_sql}, mesh_packet_id
+                ORDER BY
+                    {_PACKET_GROUP_SORTS.get(order_by, _PACKET_GROUP_SORTS["timestamp"])}
+                    {"DESC" if order_dir.lower() == "desc" else "ASC"},
+                    mesh_packet_id
                 LIMIT ? OFFSET ?
                 """,
                 [*params, limit, offset],
             )
             group_rows = cursor.fetchall()
+
+            envelope_total: int | None = None
+            if offset == 0 and group_rows:
+                # Exact total only alongside the first page: the aggregate over
+                # the same grouped set, one more indexed pass, cached with it.
+                cursor.execute(
+                    f"""
+                    SELECT COUNT(*), SUM(reception_count) FROM (
+                        SELECT mesh_packet_id, COUNT(*) AS reception_count
+                        FROM packet_history
+                        {where_clause}
+                        GROUP BY mesh_packet_id
+                    )
+                    """,
+                    params,
+                )
+                total_row = cursor.fetchone()
+                total_count = int(total_row[0] or 0)
+                envelope_total = total_count
+            else:
+                cursor.execute(
+                    "SELECT COUNT(DISTINCT mesh_packet_id) "
+                    f"FROM packet_history {where_clause}",
+                    params,
+                )
+                total_count = int(cursor.fetchone()[0])
 
             packets: list[dict[str, Any]] = []
             mesh_ids = [row["mesh_packet_id"] for row in group_rows]
@@ -1076,43 +1162,62 @@ class PacketRepository:
             }
 
             if mesh_ids:
-                placeholders = ", ".join("?" for _ in mesh_ids)
+                repr_ids = [int(row["representative_id"]) for row in group_rows]
+                placeholders = ", ".join("?" for _ in repr_ids)
                 cursor.execute(
                     f"""
                     SELECT
                         id, timestamp, from_node_id, to_node_id, portnum, portnum_name,
-                        gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_limit, hop_start,
+                        gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_start - hop_limit AS hop_count, hop_limit, hop_start,
                         payload_length, processed_successfully, raw_payload,
                         via_mqtt, want_ack, priority, delayed, channel_index, rx_time,
                         pki_encrypted, next_hop, relay_node, tx_after,
-                        datetime(timestamp, 'unixepoch') as timestamp_str,
-                        (hop_start - hop_limit) as hop_count
+                        datetime(timestamp, 'unixepoch') as timestamp_str
                     FROM packet_history
-                    WHERE mesh_packet_id IN ({placeholders})
+                    WHERE id IN ({placeholders})
+                    """,
+                    repr_ids,
+                )
+                by_id = {row["id"]: dict(row) for row in cursor.fetchall()}
+
+                # Gateway diversity per group over the filtered receptions.
+                ph = ", ".join("?" for _ in mesh_ids)
+                cursor.execute(
+                    f"""
+                    SELECT mesh_packet_id, gateway_id
+                    FROM packet_history
+                    WHERE mesh_packet_id IN ({ph})
                     AND {" AND ".join(conditions)}
-                    ORDER BY timestamp ASC, id ASC
+                    AND gateway_id IS NOT NULL AND gateway_id != ''
+                    ORDER BY timestamp ASC
                     """,
                     [*mesh_ids, *params],
                 )
-
-                receptions: dict[str, list[dict[str, Any]]] = {}
+                gw_map: dict[Any, list[str]] = {}
                 for row in cursor.fetchall():
-                    packet = dict(row)
-                    receptions.setdefault(packet["mesh_packet_id"], []).append(packet)
+                    gw_map.setdefault(row["mesh_packet_id"], []).append(
+                        row["gateway_id"]
+                    )
 
                 for mesh_id in mesh_ids:  # preserve the exact page order
-                    members = receptions.get(mesh_id)
-                    if not members:  # pragma: no cover - consistent snapshot
+                    representative = by_id.get(
+                        int(repr_ids[0])
+                        if False
+                        else next(
+                            r["representative_id"]
+                            for r in group_rows
+                            if r["mesh_packet_id"] == mesh_id
+                        )
+                    )
+                    if representative is None:  # pragma: no cover - consistent snapshot
                         continue
 
-                    # Legacy grouped rule: the earliest reception represents
-                    # the group (ties by lowest row id).
-                    representative = members[0]
+                    seen: set[str] = set()
                     gateways: list[str] = []
-                    for member in members:
-                        gateway_id = member.get("gateway_id")
-                        if gateway_id and gateway_id not in gateways:
-                            gateways.append(gateway_id)
+                    for gw in gw_map.get(mesh_id, []):
+                        if gw not in seen:
+                            seen.add(gw)
+                            gateways.append(gw)
 
                     if representative["timestamp_str"] is None:
                         representative["timestamp_str"] = datetime.fromtimestamp(
@@ -1141,12 +1246,26 @@ class PacketRepository:
 
             conn.close()
 
-            return {
+            result = {
                 "packets": packets,
                 "total_count": total_count,
                 "has_more": total_count > (offset + limit),
                 "is_grouped": True,
             }
+            if envelope_total is not None:
+                result["ungrouped_total"] = envelope_total
+            import copy as _copy
+
+            _result_cache_put(
+                "packets_grouped",
+                cache_key,
+                {
+                    "packets": _copy.deepcopy(packets),
+                    "total_count": total_count,
+                    "has_more": result["has_more"],
+                },
+            )
+            return result
 
         except Exception as e:
             logger.error(f"Error getting grouped packets: {e}")
@@ -4374,17 +4493,25 @@ class LocationRepository:
                     node_ids_clause = f"AND p.node_id IN ({placeholders})"
                     node_ids_params = node_ids_int
 
+            window_start = filters.get("start_time")
+            window_end = filters.get("end_time")
+            gateway_id = filters.get("gateway_id")
+            now = time.time()
+            historical = bool(window_end and window_end < now - 3600)
+
             extra_conditions: list[str] = []
             extra_params: list[Any] = []
-            if filters.get("start_time"):
-                extra_conditions.append("p.last_seen >= ?")
-                extra_params.append(filters["start_time"])
-            if filters.get("end_time"):
-                extra_conditions.append("p.last_seen <= ?")
-                extra_params.append(filters["end_time"])
-            if filters.get("gateway_id"):
+            group_suffix = "ORDER BY p.last_seen DESC"
+            if not historical:
+                if window_start:
+                    extra_conditions.append("p.last_seen >= ?")
+                    extra_params.append(window_start)
+                if window_end:
+                    extra_conditions.append("p.last_seen <= ?")
+                    extra_params.append(window_end)
+            if gateway_id:
                 extra_conditions.append("p.gateway_id = ?")
-                extra_params.append(filters["gateway_id"])
+                extra_params.append(gateway_id)
 
             extra_where = ""
             if extra_conditions:
@@ -4399,6 +4526,7 @@ class LocationRepository:
                     p.altitude,
                     p.precision_bits,
                     p.sats_in_view,
+                    p.gateway_id,
                     ni.long_name,
                     ni.short_name,
                     ni.hw_model,
@@ -4410,11 +4538,10 @@ class LocationRepository:
                 WHERE 1=1
                 {node_ids_clause}
                 {extra_where}
-                ORDER BY p.last_seen DESC
+                {group_suffix}
             """
 
             rows = cursor.execute(query, [*node_ids_params, *extra_params]).fetchall()
-            conn.close()
 
             locations = []
             for row in rows:
@@ -4454,14 +4581,99 @@ class LocationRepository:
                         "precision_bits": precision_bits,
                         "precision_meters": _position_precision_meters(precision_bits),
                         "sats_in_view": row["sats_in_view"],
+                        "gateway_id": row["gateway_id"],
                     }
                 )
+
+            if historical:
+                # A historical end_time must return the latest position *inside
+                # the window; the latest-position rollup keeps only the newest
+                # overall. Overlay each node's newest in-window POSITION_APP
+                # packet (decoded here) on the latest-row metadata.
+                meta_by_node = {loc["node_id"]: loc for loc in locations}
+                hist_conditions = [
+                    "portnum_name = 'POSITION_APP'",
+                    "raw_payload IS NOT NULL",
+                ]
+                hist_params: list[Any] = []
+                if window_start:
+                    hist_conditions.append("timestamp >= ?")
+                    hist_params.append(window_start)
+                if window_end:
+                    hist_conditions.append("timestamp <= ?")
+                    hist_params.append(window_end)
+                if node_ids_params:
+                    placeholders = ",".join("?" * len(node_ids_params))
+                    hist_conditions.append(f"from_node_id IN ({placeholders})")
+                    hist_params.extend(node_ids_params)
+                gateway_id = filters.get("gateway_id")
+                if gateway_id:
+                    hist_conditions.append("gateway_id = ?")
+                    hist_params.append(gateway_id)
+                best: dict[int, tuple[float, sqlite3.Row]] = {}
+                for hrow in cursor.execute(
+                    "SELECT id, from_node_id, timestamp, gateway_id, raw_payload"
+                    " FROM packet_history WHERE "
+                    + " AND ".join(hist_conditions)
+                    + " ORDER BY id DESC",
+                    hist_params,
+                ):
+                    node_id = hrow["from_node_id"]
+                    prev = best.get(node_id)
+                    # timestamp argmax: insertion order lies about when the
+                    # position was taken.
+                    if prev is not None and hrow["timestamp"] <= prev[0]:
+                        continue
+                    best[node_id] = (hrow["timestamp"], hrow)
+
+                hist_locations: list[dict[str, Any]] = []
+                for node_id, (_ts, hrow) in sorted(best.items()):
+                    try:
+                        position = mesh_pb2.Position()
+                        position.ParseFromString(hrow["raw_payload"])
+                        lat = position.latitude_i / 1e7 if position.latitude_i else None
+                        lon = (
+                            position.longitude_i / 1e7 if position.longitude_i else None
+                        )
+                    except Exception as exc:  # noqa: BLE001 - skip bad payload
+                        logger.warning(
+                            f"Failed to decode historical position {hrow['id']}: {exc}"
+                        )
+                        continue
+                    if not lat or not lon:
+                        continue
+                    meta = meta_by_node.get(node_id, {})
+                    hist_locations.append(
+                        {
+                            "node_id": node_id,
+                            "hex_id": f"!{node_id:08x}",
+                            "display_name": meta.get("display_name")
+                            or f"Node {node_id:08x}",
+                            "long_name": meta.get("long_name"),
+                            "short_name": meta.get("short_name"),
+                            "hw_model": meta.get("hw_model"),
+                            "role": meta.get("role"),
+                            "primary_channel": meta.get("primary_channel"),
+                            "latitude": lat,
+                            "longitude": lon,
+                            "altitude": position.altitude or None,
+                            "timestamp": hrow["timestamp"],
+                            "precision_bits": getattr(position, "precision_bits", None),
+                            "precision_meters": _position_precision_meters(
+                                getattr(position, "precision_bits", None)
+                            ),
+                            "sats_in_view": getattr(position, "sats_in_view", None),
+                            "gateway_id": hrow["gateway_id"],
+                        }
+                    )
+                locations = hist_locations
 
             total_time = time.time() - start_time
             logger.info(
                 "get_node_locations: %.3fs - %d locations", total_time, len(locations)
             )
 
+            conn.close()
             return locations
 
         except Exception as e:

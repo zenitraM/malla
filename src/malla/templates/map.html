@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% from "components/sidebar_macros.html" import sidebar_container, selected_details_section, search_section, controls_section, stats_section, legend_section, sidebar_styles %}
+{% from "macros.html" import node_picker %}
 
 {% block title %}Node Map - Malla{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/node-picker.css') }}">
 <!-- Leaflet CSS -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <!-- Leaflet MarkerCluster CSS -->
@@ -40,7 +42,7 @@
         <div class="sidebar-section">
             <h3 class="h6"><i class="bi bi-search"></i> Search & Filter Nodes</h3>
             <div class="input-group input-group-sm mb-2">
-                <input type="text" class="form-control" id="nodeSearch" placeholder="Search by node name or ID...">
+                {{ node_picker("nodeSearch", label="Focus node", placeholder="Search name or !id", additional_classes="mb-2") }}
                 <button class="btn btn-outline-secondary" type="button" id="clearSearch"
                         aria-label="Clear node search" title="Clear node search">
                     <i class="bi bi-x" aria-hidden="true"></i>
@@ -412,6 +414,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
 <!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!-- Leaflet MarkerCluster JS -->
@@ -571,17 +574,24 @@ function initializeInterface() {
     });
 
     // Handle node search with unified list
-    $('#nodeSearch').on('input', function() {
-        const query = this.value.toLowerCase().trim();
-        if (query.length > 0) {
-            searchNodes(query);
+    // Shared NodePicker: on selection, focus + select on the map when the
+    // node has a known position; informational toast otherwise.
+    $('#nodeSearch_value').on('change', function() {
+        const nodeId = Number(this.value);
+        if (!nodeId) { showAllNodes(); return; }
+        const node = allNodes.find(n => n.node_id === nodeId);
+        if (node && node.latitude != null && node.longitude != null) {
+            focusOnNode(node);
+            selectNode(node);
         } else {
-            showAllNodes();
+            if (window.MallaToast) {
+                window.MallaToast.info(`!${nodeId.toString(16).padStart(8, '0')}: no plotted position in the current window`, { title: 'Node selected' });
+            }
         }
     });
 
     $('#clearSearch').on('click', function() {
-        $('#nodeSearch').val('');
+        document.querySelectorAll('.node-picker-clear').forEach(b => b.click());
         showAllNodes();
         clearNodeSelection();
     });
