@@ -68,8 +68,17 @@ def sort_receptions_for_display(
     return sorted(receptions, key=_sort_key)
 
 
-def get_packet_details(packet_id: int) -> dict[str, Any] | None:
-    """Get comprehensive details for a specific packet including all receptions."""
+def get_packet_details(
+    packet_id: int,
+    reception_filters: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Get comprehensive details for a specific packet including all receptions.
+
+    ``reception_filters`` (``since``/``until`` epoch seconds, ``gateway_id``,
+    ``portnum_name``) narrows the correlated receptions to the page's active
+    grouped query: the grouped badge counts only rows matching those, so the
+    expansion must ask with the same membership or the counts disagree.
+    """
     logger.info(f"Getting packet details for packet {packet_id}")
 
     try:
@@ -164,48 +173,79 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
         receptions: list[dict[str, Any]] = []
         if packet["mesh_packet_id"] is not None:
             # Use mesh_packet_id for accurate correlation
+            receipt_where = "WHERE mesh_packet_id = ? AND id != ?"
+            receipt_params: list[Any] = [packet["mesh_packet_id"], packet_id]
+            filters = reception_filters or {}
+            if filters.get("since") is not None:
+                receipt_where += " AND timestamp >= ?"
+                receipt_params.append(filters["since"])
+            if filters.get("until") is not None:
+                receipt_where += " AND timestamp <= ?"
+                receipt_params.append(filters["until"])
+            if filters.get("gateway_id"):
+                receipt_where += " AND gateway_id = ?"
+                receipt_params.append(filters["gateway_id"])
+            if filters.get("portnum_name"):
+                receipt_where += " AND portnum_name = ?"
+                receipt_params.append(filters["portnum_name"])
             cursor.execute(
-                """
+                f"""
                 SELECT
                     id, timestamp, gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
                     payload_length, processed_successfully,
                     raw_payload, from_node_id, to_node_id, portnum, portnum_name, relay_node,
                     mesh_packet_id
                 FROM packet_history
-                WHERE mesh_packet_id = ?
-                AND id != ?
+                {receipt_where}
                 ORDER BY timestamp ASC
             """,
-                (packet["mesh_packet_id"], packet_id),
+                receipt_params,
             )
 
             logger.info(
                 f"Correlating packets using mesh_packet_id: {packet['mesh_packet_id']}"
             )
         else:
-            # Fallback to time-based correlation for older packets without mesh_packet_id
+            # Fallback to time-based correlation for older packets without
+            # (integer) mesh_packet_id: honour the same reception filters so
+            # both correlation paths stay in parity with the grouped counts.
             time_window = 2
+            receipt_where = (
+                "WHERE from_node_id = ? AND timestamp BETWEEN ? AND ?"
+                " AND portnum = ? AND id != ?"
+            )
+            receipt_params: list[Any] = [
+                packet["from_node_id"],
+                packet["timestamp"] - time_window,
+                packet["timestamp"] + time_window,
+                packet["portnum"],
+                packet_id,
+            ]
+            filters = dict(reception_filters or {})
+            if filters.get("since") is not None:
+                receipt_where += " AND timestamp >= ?"
+                receipt_params.append(filters["since"])
+            if filters.get("until") is not None:
+                receipt_where += " AND timestamp <= ?"
+                receipt_params.append(filters["until"])
+            if filters.get("gateway_id"):
+                receipt_where += " AND gateway_id = ?"
+                receipt_params.append(filters["gateway_id"])
+            if filters.get("portnum_name"):
+                receipt_where += " AND portnum_name = ?"
+                receipt_params.append(filters["portnum_name"])
             cursor.execute(
-                """
+                f"""
                 SELECT
                     id, timestamp, gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
                     payload_length, processed_successfully,
                     raw_payload, from_node_id, to_node_id, portnum, portnum_name, relay_node,
                     mesh_packet_id
                 FROM packet_history
-                WHERE from_node_id = ?
-                AND timestamp BETWEEN ? AND ?
-                AND portnum = ?
-                AND id != ?
+                {receipt_where}
                 ORDER BY timestamp ASC
             """,
-                (
-                    packet["from_node_id"],
-                    packet["timestamp"] - time_window,
-                    packet["timestamp"] + time_window,
-                    packet["portnum"],
-                    packet_id,
-                ),
+                receipt_params,
             )
 
             logger.info(

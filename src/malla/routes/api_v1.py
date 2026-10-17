@@ -1461,7 +1461,24 @@ def packets_list() -> Response:
 @api_v1_bp.route("/packets/<int:packet_id>")
 def packet_detail(packet_id: int) -> Response:
     """Full detail for one packet, including receptions and relay candidates."""
-    details = get_packet_details(packet_id)
+    # Grouped-expansion parity: the grouped badge counts only rows inside the
+    # page's filtered query, so honour the same window/membership here when
+    # the expansion forwards it (grouped-rows.js).
+    reception_filters: dict[str, Any] = {}
+    since = _parse_timestamp("since")
+    if since is not None:
+        reception_filters["since"] = since
+    until = _parse_timestamp("until")
+    if until is not None:
+        reception_filters["until"] = until
+    gateway_id = (request.args.get("gateway_id") or "").strip()
+    if gateway_id:
+        reception_filters["gateway_id"] = gateway_id
+    portnum = (request.args.get("portnum") or "").strip()
+    if portnum:
+        reception_filters["portnum_name"] = portnum
+
+    details = get_packet_details(packet_id, reception_filters or None)
     if details is None:
         raise APIError("packet_not_found", f"Packet {packet_id} not found", 404)
 
