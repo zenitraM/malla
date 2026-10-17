@@ -214,7 +214,7 @@ def get_packet_details(
                 "WHERE from_node_id = ? AND timestamp BETWEEN ? AND ?"
                 " AND portnum = ? AND id != ?"
             )
-            receipt_params: list[Any] = [
+            receipt_params = [
                 packet["from_node_id"],
                 packet["timestamp"] - time_window,
                 packet["timestamp"] + time_window,
