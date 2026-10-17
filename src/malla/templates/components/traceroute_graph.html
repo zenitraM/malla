@@ -1372,6 +1372,18 @@ function showLinkDetails(sourceNode, targetNode, linkData) {
         openTracerouteHops(sourceNode.id, targetNode.id);
     });
 
+    // Per-pair SNR history drawer (link-timeline.js).
+    const historyButton = el('button', {
+        className: 'btn btn-outline-info btn-sm',
+        type: 'button',
+        title: 'Per-day SNR history'
+    }, icon('bi bi-clock-history'), textNode(' History'));
+    historyButton.addEventListener('click', () => {
+        if (window.MallaLinkTimeline) {
+            window.MallaLinkTimeline.show(sourceNode.id, targetNode.id);
+        }
+    });
+
     setChildren(modal,
         el('div', {
             style: {
@@ -1395,7 +1407,8 @@ function showLinkDetails(sourceNode, targetNode, linkData) {
                 el('div', { className: 'col-4' }, el('strong', null, 'Avg SNR:'), el('br'), snrBadge)
             ),
             el('div', { className: 'mb-3' }, el('strong', null, 'Packets:'), textNode(` ${linkData.packet_ids.join(', ')}`)),
-            el('div', { style: { marginTop: '20px' } }, hopsButton)
+            el('div', { style: { marginTop: '20px', display: 'flex', gap: '0.5rem' } },
+                hopsButton, historyButton)
         )
     );
 

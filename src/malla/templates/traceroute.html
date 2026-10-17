@@ -115,6 +115,7 @@
 <script src="{{ url_for('static', filename='js/table-filter-controller.js') }}"></script>
 <script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modern-table.js') }}"></script>
+<script src="{{ url_for('static', filename='js/grouped-rows.js') }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     // Move sidebar content into the actual sidebar FIRST
@@ -301,10 +302,13 @@ document.addEventListener('DOMContentLoaded', function() {
                         const names = (group.gateways || [])
                             .map((g) => g.display_name || g.short_name)
                             .filter(Boolean);
-                        return el('span', {
-                            className: 'badge bg-info',
+                        // Expander + badge; receptions lazy-load per mesh packet.
+                        return MallaGroupedRows.groupCell({
+                            meshPacketId: row.mesh_packet_id != null ? row.mesh_packet_id : null,
+                            packetId: row.id,
+                            label: `${group.reception_count} gateways`,
                             title: `Multiple gateways: ${names.join(', ')}`
-                        }, `${group.reception_count} gateways`);
+                        });
                     }
                     if (group) {
                         return badge('1 gateway', 'bg-info');

@@ -24,7 +24,7 @@ import logging
 import os
 import sqlite3
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
@@ -1856,6 +1856,113 @@ def traceroute_link(node1_id: str, node2_id: str):
     return _ok(data, {"query": {"node1": node1_id, "node2": node2_id}})
 
 
+def _link_history_rows(
+    conn, node_a: int, node_b: int, since_day: str, indirect: bool
+) -> list[dict[str, Any]]:
+    """Per-day history rows for one canonical pair, day-ordered.
+
+    Direct rows come from ``link_day_rollup`` (packet_count/snr fields);
+    indirect rows from ``route_day_rollup`` (path_count, mean-of-means SNR,
+    no per-day min/max). Both shapes surface as
+    ``{day, packet_count, snr_min, snr_max, snr_avg, last_seen}``.
+    """
+    if indirect:
+        rows = conn.execute(
+            """
+            SELECT day, path_count AS packet_count, snr_avg_sum, last_seen
+            FROM route_day_rollup
+            WHERE end_a = ? AND end_b = ? AND day >= ?
+            ORDER BY day
+            """,
+            (node_a, node_b, since_day),
+        ).fetchall()
+        return [
+            {
+                "day": row["day"],
+                "packet_count": int(row["packet_count"]),
+                "snr_min": None,
+                "snr_max": None,
+                "snr_avg": (
+                    round(row["snr_avg_sum"] / row["packet_count"], 2)
+                    if row["packet_count"]
+                    else None
+                ),
+                "last_seen": row["last_seen"],
+            }
+            for row in rows
+        ]
+
+    rows = conn.execute(
+        """
+        SELECT day, packet_count, snr_sum, snr_count, snr_min, snr_max, last_seen
+        FROM link_day_rollup
+        WHERE node_a = ? AND node_b = ? AND day >= ?
+        ORDER BY day
+        """,
+        (node_a, node_b, since_day),
+    ).fetchall()
+    return [
+        {
+            "day": row["day"],
+            "packet_count": int(row["packet_count"]),
+            "snr_min": row["snr_min"],
+            "snr_max": row["snr_max"],
+            "snr_avg": (
+                round(row["snr_sum"] / row["snr_count"], 2)
+                if row["snr_count"]
+                else None
+            ),
+            "last_seen": row["last_seen"],
+        }
+        for row in rows
+    ]
+
+
+@api_v1_bp.route("/links/<node_a>/<node_b>/history")
+def link_history(node_a: str, node_b: str) -> Response:
+    """Per-day SNR history for one node pair, from the capture rollups.
+
+    Both endpoint orders are accepted and canonicalized; either node id
+    form parses. Unknown pairs yield 200 with an empty ``days`` list --
+    absence of history is data, not a 404. ``indirect=true`` reads the
+    multi-hop route rollup instead of direct receptions.
+    """
+    a = _parse_node_id(node_a)
+    b = _parse_node_id(node_b)
+    days = _parse_int("days", 30)
+    if days is None:  # unreachable with a non-None default; narrows the type
+        days = 30
+    if not 1 <= days <= 90:
+        raise APIError("invalid_parameter", "days must be between 1 and 90", days=days)
+    indirect = (request.args.get("indirect") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+    lo, hi = min(a, b), max(a, b)
+    since_day = (datetime.now(UTC).date() - timedelta(days=days - 1)).isoformat()
+
+    conn = get_db_connection()
+    try:
+        history = _link_history_rows(conn, lo, hi, since_day, indirect)
+    finally:
+        conn.close()
+
+    return _ok(
+        {"days": history},
+        {
+            "query": {
+                "node_a": f"!{lo:08x}",
+                "node_b": f"!{hi:08x}",
+                "days": days,
+                "indirect": indirect,
+            }
+        },
+    )
+
+
 @api_v1_bp.route("/related-nodes/<node_id>")
 def related_nodes(node_id: str):
     """Nodes with traceroute connections to the given node."""
@@ -3159,6 +3266,57 @@ def _build_openapi() -> dict[str, Any]:
                             "Link analysis payload.", {"type": "object"}
                         ),
                         "400": _error_response_schema("Malformed node id."),
+                    },
+                }
+            },
+            "/api/v1/links/{node_a}/{node_b}/history": {
+                "get": {
+                    "tags": ["traceroutes"],
+                    "summary": "Per-day SNR history for one node pair",
+                    "description": "Direct receptions between the pair from "
+                    "link_day_rollup, or multi-hop endpoints from "
+                    "route_day_rollup with indirect=true. Unknown pairs "
+                    "return 200 with empty days.",
+                    "parameters": [
+                        {
+                            "name": "node_a",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        },
+                        {
+                            "name": "node_b",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        },
+                        {
+                            "name": "days",
+                            "in": "query",
+                            "required": False,
+                            "schema": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 90,
+                                "default": 30,
+                            },
+                        },
+                        {
+                            "name": "indirect",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "boolean"},
+                        },
+                    ],
+                    "responses": {
+                        "200": _json_response(
+                            "{days: [{day, packet_count, snr_min, snr_max,"
+                            " snr_avg, last_seen}]}",
+                            {"type": "object"},
+                        ),
+                        "400": _error_response_schema(
+                            "Malformed node id or days window."
+                        ),
                     },
                 }
             },

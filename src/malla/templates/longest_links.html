@@ -3,6 +3,7 @@
 {% block title %}Longest Links Analysis - Malla{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/link-timeline.css') }}">
 <style>
     .analysis-card {
         border-left: 4px solid var(--malla-primary);
@@ -260,9 +261,22 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ url_for('static', filename='js/link-timeline.js') }}"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     let currentData = null;
+
+    // Drawer entry: per-pair SNR history (link-timeline.js).
+    function historyButton(fromId, toId, indirect) {
+        const btn = el('button', {
+            className: 'btn btn-sm btn-outline-secondary ms-1',
+            type: 'button',
+            title: 'SNR history'
+        }, 'History');
+        btn.addEventListener('click', () => window.MallaLinkTimeline.show(fromId, toId, { indirect }));
+        return btn;
+    }
+
 
     // Load data on page load
     document.addEventListener('DOMContentLoaded', function() {
@@ -390,7 +404,8 @@
                         title: 'Analyze this link',
                         iconClass: 'fas fa-route',
                         text: 'Analyze'
-                    })
+                    }),
+                    historyButton(link.from_node_id, link.to_node_id, false)
                 )
             );
 
@@ -455,7 +470,8 @@
                         title: 'Analyze this path',
                         iconClass: 'fas fa-route',
                         text: 'Analyze'
-                    })
+                    }),
+                    historyButton(link.from_node_id, link.to_node_id, true)
                 )
             );
 

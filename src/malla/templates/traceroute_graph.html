@@ -236,6 +236,8 @@
 
 {{ sidebar_styles() }}
 
+<link rel="stylesheet" href="{{ url_for('static', filename='css/link-timeline.css') }}">
+<script src="{{ url_for('static', filename='js/link-timeline.js') }}"></script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
 let currentGraph = null;
@@ -1418,12 +1420,27 @@ function showSelectedLinkDetails(link) {
                 el('small', { className: 'text-muted' }, new Date(link.last_seen * 1000).toLocaleString())
             ),
             el('div', { className: 'col-6' },
-                buttonLink({
-                    href: safePath('/traceroute-hops', { from_node: link.source.id, to_node: link.target.id }),
-                    className: 'btn btn-outline-primary btn-sm',
-                    iconClass: 'bi bi-diagram-3',
-                    text: 'View Link'
-                })
+                el('div', { className: 'd-flex flex-wrap gap-1' },
+                    buttonLink({
+                        href: safePath('/traceroute-hops', { from_node: link.source.id, to_node: link.target.id }),
+                        className: 'btn btn-outline-primary btn-sm',
+                        iconClass: 'bi bi-diagram-3',
+                        text: 'View Link'
+                    }),
+                    (() => {
+                        // Per-pair SNR history drawer (link-timeline.js).
+                        const fromId = sourceNode ? sourceNode.id : (link.source && link.source.id != null ? link.source.id : link.source);
+                        const toId = targetNode ? targetNode.id : (link.target && link.target.id != null ? link.target.id : link.target);
+                        const historyBtn = el('button', {
+                            className: 'btn btn-outline-info btn-sm',
+                            type: 'button',
+                            title: 'Per-day SNR history'
+                        }, 'History');
+                        historyBtn.addEventListener('click', () =>
+                            window.MallaLinkTimeline.show(fromId, toId, { indirect: link.type !== 'direct' }));
+                        return historyBtn;
+                    })()
+                )
             )
         )
     );
