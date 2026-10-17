@@ -84,7 +84,12 @@ def test_repository_extracts_metrics(telemetry_client):
     result = NodeRepository.get_node_telemetry_history(NODE_ID)
     series = result["series"]
 
-    assert set(series) >= {"temperature", "relative_humidity", "battery_level", "voltage"}
+    assert set(series) >= {
+        "temperature",
+        "relative_humidity",
+        "battery_level",
+        "voltage",
+    }
     assert series["temperature"]["unit"] == "°C"
     assert series["temperature"]["group"] == "environment"
     assert series["voltage"]["unit"] == "V"

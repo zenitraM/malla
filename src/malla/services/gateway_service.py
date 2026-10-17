@@ -26,12 +26,7 @@ def _plotly_escape(value: object) -> str:
     surrounding template tags (e.g. ``<br>``) stay literal because we own them
     (CWE-79).
     """
-    return (
-        str(value)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
+    return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 class GatewayService:

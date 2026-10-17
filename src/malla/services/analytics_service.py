@@ -3,6 +3,7 @@ Analytics service for Meshtastic Mesh Health Web UI
 """
 
 import logging
+import sqlite3
 import time
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -562,13 +563,45 @@ class AnalyticsService:
 
     @staticmethod
     def _get_hourly_buckets(tz_offset_minutes: int) -> list[dict[str, Any]]:
-        """Aggregate the trailing 24 local-clock hours (last bucket = this hour so far)."""
+        """Aggregate the trailing 24 local-clock hours (last bucket = this hour so far).
+
+        Completed hours are summed from the quarter-hour buckets the capture
+        maintains (four per hour — the same indexed pattern as the daily view);
+        only the still-filling current hour is aggregated live from
+        ``packet_history``. The output shape is unchanged.
+        """
         from ..database.connection import get_db_connection
 
         offset_sec = tz_offset_minutes * 60
         current_hour_local = (int(time.time() + offset_sec) // 3600) * 3600
         start_local = current_hour_local - 23 * 3600
+
+        conn = get_db_connection()
+        try:
+            return AnalyticsService._hourly_buckets_in_window(
+                conn.cursor(), offset_sec, start_local, current_hour_local
+            )
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _hourly_buckets_in_window(
+        cursor: sqlite3.Cursor,
+        offset_sec: int,
+        start_local: int,
+        current_hour_local: int,
+    ) -> list[dict[str, Any]]:
+        """The 24 hourly rows for the local hours starting at *start_local*.
+
+        Hours before *current_hour_local* are completed: they are tiled exactly
+        by four quarter buckets each (real UTC offsets are multiples of the 15
+        minutes the store keys on), so they are read from the bucket tables.
+        The current hour is aggregated live from ``packet_history`` because its
+        last quarter is still filling. Every local hour appears exactly once,
+        zeros included; keys and values match the historical live-only layout.
+        """
         start_utc = start_local - offset_sec
+        current_hour_utc = current_hour_local - offset_sec
 
         buckets: dict[str, dict[str, Any]] = {}
         for i in range(24):
@@ -583,11 +616,65 @@ class AnalyticsService:
                 "new_nodes": 0,
             }
 
-        conn = get_db_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
+        # Completed hours: quarter buckets, one labelled row per bucket, the
+        # same label expression as the live queries (a 15-minute bucket never
+        # straddles a local hour when the offset is a multiple of 15 min).
+        cursor.execute(
+            f"""
+                SELECT
+                    strftime('%Y-%m-%d %H:00', bucket + ?, 'unixepoch') AS hour_label,
+                    SUM(total_packets) AS total_packets
+                FROM {activity_rollup.PACKET_TABLE}
+                WHERE bucket >= ? AND bucket < ?
+                GROUP BY hour_label
+            """,
+            (offset_sec, start_utc, current_hour_utc),
+        )
+        sums: dict[str, int] = {}
+        for row in cursor.fetchall():
+            sums[row["hour_label"]] = int(row["total_packets"] or 0)
+
+        cursor.execute(
+            f"""
+                SELECT
+                    strftime('%Y-%m-%d %H:00', bucket + ?, 'unixepoch') AS hour_label,
+                    COUNT(DISTINCT node_id) AS active_nodes
+                FROM {activity_rollup.NODE_TABLE}
+                WHERE bucket >= ? AND bucket < ?
+                GROUP BY hour_label
+            """,
+            (offset_sec, start_utc, current_hour_utc),
+        )
+        actors: dict[str, int] = {}
+        for row in cursor.fetchall():
+            actors[row["hour_label"]] = int(row["active_nodes"] or 0)
+
+        cursor.execute(
+            f"""
+                SELECT
+                    strftime('%Y-%m-%d %H:00', bucket + ?, 'unixepoch') AS hour_label,
+                    COUNT(DISTINCT gateway_id) AS gateway_count
+                FROM {activity_rollup.GATEWAY_TABLE}
+                WHERE bucket >= ? AND bucket < ?
+                GROUP BY hour_label
+            """,
+            (offset_sec, start_utc, current_hour_utc),
+        )
+        gateways: dict[str, int] = {}
+        for row in cursor.fetchall():
+            gateways[row["hour_label"]] = int(row["gateway_count"] or 0)
+
+        for key, entry in buckets.items():
+            if key in sums:
+                entry["total_packets"] = sums[key]
+            if key in actors:
+                entry["active_nodes"] = actors[key]
+            if key in gateways:
+                entry["gateway_count"] = gateways[key]
+
+        # Current hour: still filling, so straight from packet_history.
+        cursor.execute(
+            """
                 SELECT
                     strftime('%Y-%m-%d %H:00', timestamp + ?, 'unixepoch') AS bucket,
                     COUNT(*) AS total_packets,
@@ -596,16 +683,16 @@ class AnalyticsService:
                 WHERE timestamp >= ?
                 GROUP BY bucket
             """,
-                (offset_sec, start_utc),
-            )
-            for row in cursor.fetchall():
-                entry = buckets.get(row["bucket"])
-                if entry:
-                    entry["total_packets"] = row["total_packets"]
-                    entry["active_nodes"] = row["active_nodes"]
+            (offset_sec, current_hour_utc),
+        )
+        for row in cursor.fetchall():
+            entry = buckets.get(row["bucket"])
+            if entry:
+                entry["total_packets"] = row["total_packets"]
+                entry["active_nodes"] = row["active_nodes"]
 
-            cursor.execute(
-                """
+        cursor.execute(
+            """
                 SELECT
                     strftime('%Y-%m-%d %H:00', timestamp + ?, 'unixepoch') AS bucket,
                     COUNT(DISTINCT gateway_id) AS gateway_count
@@ -613,15 +700,17 @@ class AnalyticsService:
                 WHERE gateway_id IS NOT NULL AND timestamp >= ?
                 GROUP BY bucket
             """,
-                (offset_sec, start_utc),
-            )
-            for row in cursor.fetchall():
-                entry = buckets.get(row["bucket"])
-                if entry:
-                    entry["gateway_count"] = row["gateway_count"]
+            (offset_sec, current_hour_utc),
+        )
+        for row in cursor.fetchall():
+            entry = buckets.get(row["bucket"])
+            if entry:
+                entry["gateway_count"] = row["gateway_count"]
 
-            cursor.execute(
-                """
+        # New nodes remain a node_info aggregation (the buckets store activity,
+        # not first-seen); unchanged from the live-only implementation.
+        cursor.execute(
+            """
                 SELECT
                     strftime('%Y-%m-%d %H:00', first_seen + ?, 'unixepoch') AS bucket,
                     COUNT(*) AS new_nodes
@@ -629,14 +718,12 @@ class AnalyticsService:
                 WHERE first_seen >= ?
                 GROUP BY bucket
             """,
-                (offset_sec, start_utc),
-            )
-            for row in cursor.fetchall():
-                entry = buckets.get(row["bucket"])
-                if entry:
-                    entry["new_nodes"] = row["new_nodes"]
-        finally:
-            conn.close()
+            (offset_sec, start_utc),
+        )
+        for row in cursor.fetchall():
+            entry = buckets.get(row["bucket"])
+            if entry:
+                entry["new_nodes"] = row["new_nodes"]
 
         return list(buckets.values())
 

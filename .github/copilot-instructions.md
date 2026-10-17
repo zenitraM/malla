@@ -44,7 +44,7 @@ Run the applications:
 **Complete validation workflow (MANDATORY before finishing):**
 1. Format code: `make format` (auto-fixes formatting issues)
 2. Lint code: `make lint` (must pass completely)
-3. Run comprehensive CI checks: `make check` (ALL tests must pass - 430+ tests including 44 unit, 168 integration)
+3. Run comprehensive CI checks: `make check` (ALL tests must pass - 580 tests including 65 unit, 318 integration, 197 e2e)
 4. Manual validation: Start web UI `uv run malla-web` and verify basic functionality
 5. Only commit changes after ALL validation passes
 
@@ -52,8 +52,8 @@ Run the applications:
 - Web UI starts and serves HTTP 200 on port 5008
 - API endpoints return valid JSON responses
 - Database gets created automatically
-- **ALL unit tests pass (44 tests)**
-- **ALL integration tests pass (168 tests)**
+- **ALL unit tests pass (65 tests)**
+- **ALL integration tests pass (318 tests)**
 - E2E tests may fail in sandboxed environments due to missing browser dependencies (expected)
 - ANY test regression indicates broken functionality that MUST be fixed
 
@@ -133,7 +133,9 @@ docker-compose up --build -d
 
 ### Key Technologies
 - **Backend**: Python 3.13, Flask, SQLite
-- **Frontend**: HTML, CSS, JavaScript, Plotly, Leaflet maps
+- **Internal JSON API**: `src/malla/routes/api_v1.py` — internal JSON API (`/api/v1`) powering the UI; no public docs page; `openapi.json` for internal tooling; contract tests in `tests/integration/test_api_v1.py`
+- **Frontend**: HTML, CSS, JavaScript, Plotly, Leaflet maps — shared modules `static/js/api-client.js` (fetch wrapper for the v1 envelope), `meta-filters.js` (dropdown enumerations from `/api/v1/meta/filters`), `plotly-theme.js`, `auto-refresh.js`, `toast.js`
+- **Theming**: design tokens in `static/css/malla.css` (CSS custom properties drive light/dark surfaces)
 - **Testing**: pytest, Playwright (e2e)
 - **Build**: uv package manager, Makefile
 - **Deploy**: Docker, Gunicorn
@@ -166,9 +168,9 @@ docker-compose up --build -d
 **CRITICAL: Never commit code that breaks existing tests. Test failures indicate broken functionality that must be debugged and fixed. The test suite exists to prevent regressions - respect it.**
 
 **Test counts for validation:**
-- Unit tests: 44 tests (must all pass)
-- Integration tests: 168 tests (must all pass) 
-- E2E tests: Expected to fail in sandboxed environments due to missing browser dependencies
-- Total passing tests: 212+ tests required for successful validation
+- Unit tests: 65 tests (must all pass)
+- Integration tests: 318 tests (must all pass) 
+- E2E tests: 197 tests (expected to fail in sandboxed environments due to missing browser dependencies)
+- Total passing tests: 580 tests required for successful validation
 
 The codebase is well-structured with comprehensive testing. Always validate changes by running the full test suite and manually testing core functionality.
