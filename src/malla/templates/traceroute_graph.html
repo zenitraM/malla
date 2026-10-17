@@ -390,9 +390,11 @@ function loadGraph() {
         }
     });
 
-    fetch(`/api/traceroute/graph?${params.toString()}`)
+    fetch(`/api/v1/traceroute-graph?${params.toString()}`)
         .then(response => response.json())
-        .then(data => {
+        .then(body => {
+            // v1 envelope: the graph payload lives under `data`.
+            const data = body && body.data ? body.data : body;
             if (data.error) {
                 showError(data.error);
                 return;
@@ -1882,14 +1884,13 @@ function applyHopFilter() {
 
 async function loadPrimaryChannels() {
     try {
-        const response = await fetch('/api/meshtastic/packet-channels');
-        const data = await response.json();
-        if (data.channels) {
+        const channels = await window.MallaFilters.packetChannels();
+        if (channels.length) {
             const select = document.getElementById('primary_channel');
             const allOption = select.querySelector('option[value=""]');
             select.replaceChildren();
             select.appendChild(allOption);
-            data.channels.forEach((ch) => {
+            channels.forEach((ch) => {
                 const option = document.createElement('option');
                 option.value = ch;
                 option.textContent = ch;

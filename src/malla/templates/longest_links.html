@@ -5,17 +5,17 @@
 {% block extra_css %}
 <style>
     .analysis-card {
-        border-left: 4px solid #0d6efd;
+        border-left: 4px solid var(--malla-primary);
     }
     .direct-link-badge {
-        background: #28a745;
+        background: var(--malla-success);
     }
     .indirect-link-badge {
-        background: #6f42c1;
+        background: var(--malla-info);
     }
     .distance-display {
         font-weight: bold;
-        color: #0d6efd;
+        color: var(--malla-primary);
         font-size: 1.2em;
     }
     .snr-display {
@@ -23,11 +23,11 @@
     }
     .hop-count {
         font-size: 0.8rem;
-        color: #6c757d;
+        color: var(--malla-text-muted);
     }
     .link-type-tabs .nav-link.active {
-        background-color: #0d6efd;
-        border-color: #0d6efd;
+        background-color: var(--malla-primary);
+        border-color: var(--malla-primary);
         color: white;
     }
     .table-responsive {
@@ -42,7 +42,7 @@
     .no-data {
         text-align: center;
         padding: 2rem;
-        color: #6c757d;
+        color: var(--malla-text-muted);
     }
     .link-analysis-btn {
         padding: 0.2rem 0.5rem;
@@ -307,9 +307,11 @@
             max_results: maxResults
         });
 
-        fetch(`/api/longest-links?${params}`)
+        fetch(`/api/v1/longest-links?${params}`)
             .then(response => response.json())
-            .then(data => {
+            .then(body => {
+                // v1 envelope: the payload lives under `data`.
+                const data = body && body.data ? body.data : body;
                 currentData = data;
                 displayResults(data);
                 document.getElementById('loading').style.display = 'none';

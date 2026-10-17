@@ -10,6 +10,16 @@
 @media (max-width: 575.98px) {
     .timeline-panel { height: 110px; }
 }
+.timeline-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+.timeline-head .timeline-metric { font-size: 0.8rem; color: var(--malla-text-muted); }
+.timeline-head .timeline-value { font-size: 0.85rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.recent-table td { font-size: 0.845rem; }
 </style>
 {% endblock %}
 
@@ -17,91 +27,103 @@
 <div class="container-fluid">
     {# Optional Markdown content defined in config.yaml #}
     {% if APP_CONFIG.home_markdown %}
-    <div class="row mb-4">
-        <div class="col">
-            <div class="card">
-                <div class="card-body">
-                    {{ APP_CONFIG.home_markdown | markdown | safe }}
-                </div>
-            </div>
+    <div class="card mb-4">
+        <div class="card-body">
+            {{ APP_CONFIG.home_markdown | markdown | safe }}
         </div>
     </div>
     {% endif %}
 
-    <div class="row mb-4">
-        <div class="col">
-            <h1 class="h2">Mesh Metrics</h1>
+    <!-- Page header -->
+    <div class="page-header">
+        <div>
+            <h1 class="page-title"><i class="bi bi-speedometer2"></i> Network Dashboard</h1>
+            <p class="page-subtitle">Mesh health, traffic and node activity at a glance.</p>
         </div>
-    </div>
-
-    <!-- Network Overview Cards - Redesigned for Heterogeneous Networks -->
-    <div class="row mb-4">
-        <div class="col-md-2">
-            <div class="card h-100">
-                <div class="card-body card-metric">
-                    <div class="metric-value">{{ stats.total_nodes }}</div>
-                    <div class="metric-label">Total Nodes</div>
-                    <small class="text-muted">Known mesh participants</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-2">
-            <div class="card h-100">
-                <div class="card-body card-metric">
-                    <div class="metric-value text-success">{{ stats.active_nodes_24h }}</div>
-                    <div class="metric-label">Active Nodes (24h)</div>
-                    {% set nodes_seen_7d_safe = stats.nodes_seen_7d if stats.nodes_seen_7d and stats.nodes_seen_7d > 0 else 1 %}
-                    {% set coverage_pct = (stats.active_nodes_24h / nodes_seen_7d_safe * 100)|int %}
-                    <small class="text-muted">{{ coverage_pct }}% network coverage (of {{ stats.nodes_seen_7d }} seen in 7d)</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-2">
-            <div class="card h-100">
-                <div class="card-body card-metric">
-                    <div class="metric-value text-warning">{{ gateway_count }}</div>
-                    <div class="metric-label">Gateway Diversity</div>
-                    <small class="text-muted">Data source reliability</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-2">
-            <div class="card h-100">
-                <div class="card-body card-metric">
-                    <div class="metric-value text-info">{{ stats.packet_types|length }}</div>
-                    <div class="metric-label">Protocol Diversity</div>
-                    <small class="text-muted">Message types in use</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-2">
-            <div class="card h-100">
-                <div class="card-body card-metric">
-                    <div class="metric-value">{{ "{:,}".format(stats.total_packets) }}</div>
-                    <div class="metric-label">Total Messages</div>
-                    <small class="text-muted">Network activity</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-2">
-            <div class="card h-100">
-                <div class="card-body card-metric">
-                    {% set success_class = 'text-success' if stats.success_rate >= 95 else 'text-warning' if stats.success_rate >= 85 else 'text-danger' %}
-                    <div class="metric-value {{ success_class }}">{{ stats.success_rate }}%</div>
-                    <div class="metric-label">Processing Success</div>
-                    <small class="text-muted">Message reliability</small>
-                </div>
+        <div class="page-actions">
+            <span class="refresh-status" id="refresh-status" role="status" aria-live="polite">
+                <span class="refresh-dot" aria-hidden="true"></span>
+                Updated&nbsp;<span class="refresh-time">—</span>
+            </span>
+            <div class="btn-group" role="group" aria-label="Refresh controls">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="refresh-now"
+                        title="Refresh now" aria-label="Refresh now">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="refresh-toggle"
+                        title="Pause auto-refresh" aria-pressed="false" aria-label="Pause auto-refresh">
+                    <i class="bi bi-pause-fill"></i>
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- Network Health and Activity Row -->
-    <div class="row mb-4">
-        <!-- Network Activity Timeline -->
-        <div class="col-md-8 mb-4">
+    {% set nodes_seen_7d_safe = stats.nodes_seen_7d if stats.nodes_seen_7d and stats.nodes_seen_7d > 0 else 1 %}
+    {% set activity_pct = (stats.active_nodes_24h / nodes_seen_7d_safe * 100)|int %}
+    {% set coverage_pct = activity_pct %}
+    {% set coverage_class = 'bg-success' if activity_pct >= 70 else 'bg-warning' if activity_pct >= 40 else 'bg-danger' %}
+    {% set success_bar_class = 'bg-success' if stats.success_rate >= 95 else 'bg-warning' if stats.success_rate >= 85 else 'bg-danger' %}
+    {% set gateway_diversity = (gateway_count / 10 * 100)|int if gateway_count <= 10 else 100 %}
+
+    <!-- KPI stat tiles -->
+    <div class="row g-3 mb-4" id="kpi-row" aria-label="Key metrics">
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="stat-tile h-100">
+                <span class="stat-icon" aria-hidden="true"><i class="bi bi-router"></i></span>
+                <div class="stat-label">Total Nodes</div>
+                <div class="stat-value" id="kpi-total-nodes">{{ stats.total_nodes }}</div>
+                <div class="stat-hint">Known mesh participants</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="stat-tile accent-success h-100">
+                <span class="stat-icon" aria-hidden="true"><i class="bi bi-activity"></i></span>
+                <div class="stat-label">Active Nodes</div>
+                <div class="stat-value" id="kpi-active-nodes">{{ stats.active_nodes_24h }}</div>
+                <div class="stat-hint">{{ coverage_pct }}% of {{ stats.nodes_seen_7d }} seen in 7d</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="stat-tile accent-warning h-100">
+                <span class="stat-icon" aria-hidden="true"><i class="bi bi-broadcast"></i></span>
+                <div class="stat-label">Gateways</div>
+                <div class="stat-value" id="kpi-gateways">{{ gateway_count }}</div>
+                <div class="stat-hint">Gateway diversity</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="stat-tile accent-info h-100">
+                <span class="stat-icon" aria-hidden="true"><i class="bi bi-boxes"></i></span>
+                <div class="stat-label">Protocols</div>
+                <div class="stat-value" id="kpi-protocols">{{ stats.packet_types|length }}</div>
+                <div class="stat-hint">Message types in use</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="stat-tile h-100">
+                <span class="stat-icon" aria-hidden="true"><i class="bi bi-envelope-paper"></i></span>
+                <div class="stat-label">Total Messages</div>
+                <div class="stat-value" id="kpi-total-messages">{{ "{:,}".format(stats.total_packets) }}</div>
+                <div class="stat-hint">All time</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-2">
+            {% set success_accent = 'accent-success' if stats.success_rate >= 95 else 'accent-warning' if stats.success_rate >= 85 else 'accent-danger' %}
+            <div class="stat-tile {{ success_accent }} h-100" id="kpi-success-tile">
+                <span class="stat-icon" aria-hidden="true"><i class="bi bi-check2-circle"></i></span>
+                <div class="stat-label">Success</div>
+                <div class="stat-value" id="kpi-success-rate">{{ stats.success_rate }}%</div>
+                <div class="stat-hint">Processing reliability</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Network Activity + Health -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-8">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                    <h5 class="card-title mb-0"><i class="bi bi-graph-up-arrow"></i> Network Activity Trends</h5>
+                    <h2 class="card-title"><i class="bi bi-graph-up-arrow"></i> Network Activity</h2>
                     <div class="btn-group btn-group-sm" role="group" aria-label="Time range" id="timelineRangeButtons">
                         <button type="button" class="btn btn-outline-secondary" data-range="24h">24h</button>
                         <button type="button" class="btn btn-outline-secondary" data-range="7d">7d</button>
@@ -109,12 +131,14 @@
                         <button type="button" class="btn btn-outline-secondary" data-range="all">All</button>
                     </div>
                 </div>
-                <div class="card-body">
-                    <div id="activityTimelinePanelsLoading" class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
+                <div class="card-body" style="padding-block: 1rem;">
+                    <div id="activityTimelinePanelsLoading">
+                        <div class="row g-3">
+                            {% for i in range(4) %}
+                            <div class="col-6"><div class="skeleton skeleton-chart" style="height: 110px;"></div></div>
+                            {% endfor %}
                         </div>
-                        <p class="mt-2 text-muted" id="activityTimelineLoadingText">Loading chart data...</p>
+                        <p class="text-center text-muted small mt-2 mb-0" id="activityTimelineLoadingText">Loading chart data…</p>
                     </div>
                     <div id="activityTimelinePanelsError" class="text-center py-4 text-muted" style="display: none;">
                         <i class="bi bi-exclamation-triangle"></i> Could not load activity data.
@@ -122,32 +146,32 @@
                     </div>
                     <div id="activityTimelinePanels" class="row g-3" style="display: none;">
                         <div class="col-6">
-                            <div class="d-flex justify-content-between align-items-baseline flex-wrap mb-1">
-                                <small class="text-muted">Messages</small>
-                                <small class="fw-semibold" id="tlMessagesVal"></small>
+                            <div class="timeline-head">
+                                <span class="timeline-metric">Messages</span>
+                                <span class="timeline-value" id="tlMessagesVal"></span>
                             </div>
-                            <div class="timeline-panel"><canvas id="tlMessages"></canvas></div>
+                            <div class="timeline-panel" id="tlMessages"></div>
                         </div>
                         <div class="col-6">
-                            <div class="d-flex justify-content-between align-items-baseline flex-wrap mb-1">
-                                <small class="text-muted">Active Nodes</small>
-                                <small class="fw-semibold" id="tlActiveNodesVal"></small>
+                            <div class="timeline-head">
+                                <span class="timeline-metric">Active Nodes</span>
+                                <span class="timeline-value" id="tlActiveNodesVal"></span>
                             </div>
-                            <div class="timeline-panel"><canvas id="tlActiveNodes"></canvas></div>
+                            <div class="timeline-panel" id="tlActiveNodes"></div>
                         </div>
                         <div class="col-6">
-                            <div class="d-flex justify-content-between align-items-baseline flex-wrap mb-1">
-                                <small class="text-muted">Gateways</small>
-                                <small class="fw-semibold" id="tlGatewaysVal"></small>
+                            <div class="timeline-head">
+                                <span class="timeline-metric">Gateways</span>
+                                <span class="timeline-value" id="tlGatewaysVal"></span>
                             </div>
-                            <div class="timeline-panel"><canvas id="tlGateways"></canvas></div>
+                            <div class="timeline-panel" id="tlGateways"></div>
                         </div>
                         <div class="col-6">
-                            <div class="d-flex justify-content-between align-items-baseline flex-wrap mb-1">
-                                <small class="text-muted">New Nodes</small>
-                                <small class="fw-semibold" id="tlNewNodesVal"></small>
+                            <div class="timeline-head">
+                                <span class="timeline-metric">New Nodes</span>
+                                <span class="timeline-value" id="tlNewNodesVal"></span>
                             </div>
-                            <div class="timeline-panel"><canvas id="tlNewNodes"></canvas></div>
+                            <div class="timeline-panel" id="tlNewNodes"></div>
                         </div>
                     </div>
                 </div>
@@ -155,59 +179,44 @@
         </div>
 
         <!-- Network Health Status -->
-        <div class="col-md-4 mb-4">
+        <div class="col-lg-4">
             <div class="card h-100">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-activity"></i> Network Health</h5>
+                    <h2 class="card-title"><i class="bi bi-heart-pulse"></i> Network Health</h2>
                 </div>
-                <div class="card-body">
+                <div class="card-body d-flex flex-column">
                     <div class="mb-3">
-                        <h6>Network Coverage</h6>
-                        <div class="progress mb-2">
-                            {% set nodes_seen_7d_safe = stats.nodes_seen_7d if stats.nodes_seen_7d and stats.nodes_seen_7d > 0 else 1 %}
-                            {% set activity_percentage = (stats.active_nodes_24h / nodes_seen_7d_safe * 100)|int %}
-                            {% set coverage_class = 'bg-success' if activity_percentage >= 70 else 'bg-warning' if activity_percentage >= 40 else 'bg-danger' %}
-                            <div class="progress-bar {{ coverage_class }}" style="width: {{ activity_percentage }}%;">
-                                {{ activity_percentage }}%
-                            </div>
+                        <div class="d-flex justify-content-between"><span>Network coverage</span><span class="text-secondary-emphasis small">{{ activity_pct }}%</span></div>
+                        <div class="progress" role="progressbar" aria-label="Network coverage" aria-valuenow="{{ activity_pct }}" aria-valuemin="0" aria-valuemax="100">
+                            <div class="progress-bar {{ coverage_class }}" style="width: {{ activity_pct }}%;"></div>
                         </div>
-                        <small class="text-muted">{{ stats.active_nodes_24h }} of {{ stats.nodes_seen_7d }} nodes seen this week active in 24h</small>
+                        <small class="text-secondary-emphasis">{{ stats.active_nodes_24h }} of {{ stats.nodes_seen_7d }} nodes seen this week active in 24h</small>
                     </div>
 
                     <div class="mb-3">
-                        <h6>Message Success Rate</h6>
-                        <div class="progress mb-2">
-                            {% set success_bar_class = 'bg-success' if stats.success_rate >= 95 else 'bg-warning' if stats.success_rate >= 85 else 'bg-danger' %}
-                            <div class="progress-bar {{ success_bar_class }}" style="width: {{ stats.success_rate }}%;">
-                                {{ stats.success_rate }}%
-                            </div>
+                        <div class="d-flex justify-content-between"><span>Message success</span><span class="text-secondary-emphasis small">{{ stats.success_rate }}%</span></div>
+                        <div class="progress" role="progressbar" aria-label="Message success rate" aria-valuenow="{{ stats.success_rate }}" aria-valuemin="0" aria-valuemax="100">
+                            <div class="progress-bar {{ success_bar_class }}" style="width: {{ stats.success_rate }}%;"></div>
                         </div>
-                        <small class="text-muted">Packet processing reliability</small>
+                        <small class="text-secondary-emphasis">Packet processing reliability</small>
                     </div>
 
                     <div class="mb-3">
-                        <h6>Gateway Diversity</h6>
-                        <div class="progress mb-2">
-                            {% set gateway_diversity = (gateway_count / 10 * 100)|int if gateway_count <= 10 else 100 %}
-                            <div class="progress-bar bg-primary" style="width: {{ gateway_diversity }}%;">
-                                {{ gateway_count }} sources
-                            </div>
+                        <div class="d-flex justify-content-between"><span>Gateway diversity</span><span class="text-secondary-emphasis small">{{ gateway_diversity }}%</span></div>
+                        <div class="progress" role="progressbar" aria-label="Gateway diversity" aria-valuenow="{{ gateway_diversity }}" aria-valuemin="0" aria-valuemax="100">
+                            <div class="progress-bar bg-primary" style="width: {{ gateway_diversity }}%;"></div>
                         </div>
-                        <small class="text-muted">Multiple data sources improve reliability</small>
+                        <small class="text-secondary-emphasis">{{ gateway_count }} data source{{ 's' if gateway_count != 1 }} — more sources, better reliability</small>
                     </div>
 
-                    <hr>
-
-                    <div class="row text-center">
-                        <div class="col-6">
-                            <div class="border-end">
-                                <div class="fw-bold text-primary">{{ stats.recent_packets }}</div>
-                                <small class="text-muted">Recent Activity</small>
-                            </div>
+                    <div class="row text-center mt-auto pt-3">
+                        <div class="col-6 border-end">
+                            <div class="fw-bold text-primary">{{ stats.recent_packets }}</div>
+                            <small class="text-secondary-emphasis">Recent activity (1h)</small>
                         </div>
                         <div class="col-6">
-                            <div class="fw-bold text-success">{{ stats.packet_types|length }}</div>
-                            <small class="text-muted">Protocol Types</small>
+                            <div class="fw-bold text-success">{{ stats.avg_rssi|format_rssi }} dBm</div>
+                            <small class="text-secondary-emphasis">Median link RSSI</small>
                         </div>
                     </div>
                 </div>
@@ -215,69 +224,64 @@
         </div>
     </div>
 
-    <!-- Signal Quality and Activity Charts Row -->
-    <div class="row mb-4">
-        <!-- Active Nodes Distribution -->
-        <div class="col-md-4 mb-4">
+    <!-- Distributions -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-4">
             <div class="card h-100">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-people"></i> Node Activity Distribution</h5>
+                    <h2 class="card-title"><i class="bi bi-people"></i> Node Activity</h2>
                 </div>
                 <div class="card-body">
-                    <div id="nodeActivityChartLoading" class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
+                    <div id="nodeActivityChartLoading" style="height: 240px;">
+                        <div class="skeleton skeleton-chart"></div>
                     </div>
-                    <canvas id="nodeActivityChart" style="height: 300px; display: none;"></canvas>
+                    <div style="height: 240px; display: none;" id="nodeActivityChartWrapper">
+                        <canvas id="nodeActivityChart" style="display: none;"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Active Gateways Distribution -->
-        <div class="col-md-4 mb-4">
+        <div class="col-lg-4">
             <div class="card h-100">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-router-fill"></i> Gateway Activity Distribution</h5>
+                    <h2 class="card-title"><i class="bi bi-router-fill"></i> Gateway Activity</h2>
                 </div>
                 <div class="card-body">
-                    <div id="gatewayActivityChartLoading" class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
+                    <div id="gatewayActivityChartLoading" style="height: 240px;">
+                        <div class="skeleton skeleton-chart"></div>
                     </div>
-                    <canvas id="gatewayActivityChart" style="height: 300px; display: none;"></canvas>
+                    <div style="height: 240px; display: none;" id="gatewayActivityChartWrapper">
+                        <canvas id="gatewayActivityChart" style="display: none;"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Signal Quality Distribution -->
-        <div class="col-md-4 mb-4">
+        <div class="col-lg-4">
             <div class="card h-100">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-reception-4"></i> Signal Quality Distribution</h5>
+                    <h2 class="card-title"><i class="bi bi-reception-4"></i> Signal Quality</h2>
                 </div>
                 <div class="card-body">
-                    <div id="signalDistributionChartLoading" class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
+                    <div id="signalDistributionChartLoading" style="height: 240px;">
+                        <div class="skeleton skeleton-chart"></div>
                     </div>
                     <!-- Two small-multiple histograms sharing one card: real
                          distribution shape instead of four coarse buckets. -->
                     <div id="signalDistributionChart" style="display: none;">
                         <div class="d-flex justify-content-between align-items-baseline">
                             <span class="small fw-semibold">RSSI</span>
-                            <span id="rssiHistogramCaption" class="small text-body-secondary"></span>
+                            <span id="rssiHistogramCaption" class="small text-secondary-emphasis"></span>
                         </div>
-                        <div style="height: 120px;">
+                        <div style="height: 100px;">
                             <canvas id="rssiHistogramChart"></canvas>
                         </div>
                         <div class="d-flex justify-content-between align-items-baseline mt-2">
                             <span class="small fw-semibold">SNR</span>
-                            <span id="snrHistogramCaption" class="small text-body-secondary"></span>
+                            <span id="snrHistogramCaption" class="small text-secondary-emphasis"></span>
                         </div>
-                        <div style="height: 120px;">
+                        <div style="height: 100px;">
                             <canvas id="snrHistogramChart"></canvas>
                         </div>
                     </div>
@@ -286,28 +290,25 @@
         </div>
     </div>
 
-    <!-- Message Routing and Protocol Usage Row -->
-    <div class="row mb-4">
-        <!-- Hop Count Distribution -->
-        <div class="col-md-6 mb-4">
+    <!-- Routing + Protocols -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-6">
             <div class="card h-100">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-router"></i> Message Routing Patterns</h5>
+                    <h2 class="card-title"><i class="bi bi-signpost-split"></i> Message Routing</h2>
                 </div>
                 <div class="card-body">
-                    <div id="hopDistributionChartLoading" class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
+                    <div id="hopDistributionChartLoading" style="height: 240px;">
+                        <div class="skeleton skeleton-chart"></div>
                     </div>
                     <!-- Ordered hop-count columns (0..7): the doughnut hid the
                          order and buried everything past 2 hops in one slice. -->
                     <div id="hopDistributionChart" style="display: none;">
                         <div class="d-flex justify-content-between align-items-baseline">
                             <span class="small fw-semibold">Hops to gateway</span>
-                            <span id="hopDistributionCaption" class="small text-body-secondary"></span>
+                            <span id="hopDistributionCaption" class="small text-secondary-emphasis"></span>
                         </div>
-                        <div style="height: 272px;">
+                        <div style="height: 210px;">
                             <canvas id="hopDistributionCanvas"></canvas>
                         </div>
                     </div>
@@ -315,24 +316,24 @@
             </div>
         </div>
 
-        <!-- Protocol Usage -->
-        <div class="col-md-6 mb-4">
+        <div class="col-lg-6">
             <div class="card h-100">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-pie-chart"></i> Protocol Usage (24h)</h5>
+                    <h2 class="card-title"><i class="bi bi-pie-chart"></i> Protocol Usage (24h)</h2>
                 </div>
                 <div class="card-body">
                     {% if stats.packet_types %}
-                    <div id="packetTypesChartLoading" class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
+                    <div id="packetTypesChartLoading" style="height: 240px;">
+                        <div class="skeleton skeleton-chart"></div>
                     </div>
-                    <canvas id="packetTypesChart" style="height: 300px; display: none;"></canvas>
+                    <div style="height: 240px; display: none;" id="packetTypesChartWrapper">
+                        <canvas id="packetTypesChart"></canvas>
+                    </div>
                     {% else %}
-                    <div class="text-center text-muted py-4">
-                        <i class="bi bi-inbox" style="font-size: 3rem;"></i>
-                        <p class="mt-2">No packet data available</p>
+                    <div class="empty-state">
+                        <div class="empty-state-icon"><i class="bi bi-inbox"></i></div>
+                        <div class="empty-state-title">No packet data</div>
+                        <div class="empty-state-description">Nothing decoded in the last 24 hours.</div>
                     </div>
                     {% endif %}
                 </div>
@@ -340,21 +341,20 @@
         </div>
     </div>
 
-    <!-- Top Active Nodes Row -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
+    <!-- Tables: top talkers + latest activity -->
+    <div class="row g-3">
+        <div class="col-lg-4">
+            <div class="card h-100">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-trophy"></i> Most Active Nodes</h5>
+                    <h2 class="card-title"><i class="bi bi-trophy"></i> Most Active Nodes</h2>
                 </div>
-                <div class="card-body">
-                    <div id="topNodesLoading" class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
+                <div class="card-body pt-2">
+                    <div id="topNodesLoading">
+                        {% for i in range(4) %}<div class="skeleton skeleton-row"></div>{% endfor %}
                     </div>
-                    <div class="table-responsive" style="display: none;" id="topNodesTableContainer">
-                        <table class="table table-sm" id="topNodesTable">
+                    <div style="display: none;" id="topNodesTableContainer">
+                        <div class="table-responsive">
+                        <table class="table table-sm recent-table align-middle mb-0" id="topNodesTable">
                             <thead>
                                 <tr>
                                     <th>Node</th>
@@ -362,106 +362,59 @@
                                     <th>Signal</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                <!-- Data will be populated by JavaScript -->
-                            </tbody>
+                            <tbody></tbody>
                         </table>
+                        </div>
+                    </div>
+                    <div id="topNodesEmpty" class="empty-state py-4" style="display:none;">
+                        <div class="empty-state-title">No node activity</div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Network Information Cards -->
-    <div class="row mb-4">
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-header">
-                    <h6 class="card-title mb-0"><i class="bi bi-info-circle"></i> Network Information</h6>
+        <div class="col-lg-4">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h2 class="card-title"><i class="bi bi-router"></i> Recently Heard</h2>
+                    <a href="/nodes" class="btn btn-sm btn-outline-secondary">All nodes</a>
                 </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-6">
-                            <strong>Total Nodes:</strong><br>
-                            <span class="text-primary">{{ stats.total_nodes }}</span>
-                        </div>
-                        <div class="col-6">
-                            <strong>Active (24h):</strong><br>
-                            <span class="text-success">{{ stats.active_nodes_24h }}</span>
-                        </div>
+                <div class="card-body pt-2">
+                    <div id="recentNodesLoading">
+                        {% for i in range(4) %}<div class="skeleton skeleton-row"></div>{% endfor %}
                     </div>
-                    <hr>
-                    <div class="row">
-                        <div class="col-6">
-                            <strong>Gateways:</strong><br>
-                            <span class="text-warning">{{ gateway_count }}</span>
-                        </div>
-                        <div class="col-6">
-                            <strong>Protocols:</strong><br>
-                            <span class="text-info">{{ stats.packet_types|length }}</span>
+                    <div style="display: none;" id="recentNodesContainer">
+                        <div class="table-responsive">
+                        <table class="table table-sm recent-table align-middle mb-0" id="recentNodesTable">
+                            <thead>
+                                <tr><th>Node</th><th>Last seen</th><th>24h</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-header">
-                    <h6 class="card-title mb-0"><i class="bi bi-activity"></i> Activity Summary</h6>
+        <div class="col-lg-4">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h2 class="card-title"><i class="bi bi-envelope"></i> Latest Packets</h2>
+                    <a href="/packets" class="btn btn-sm btn-outline-secondary">All packets</a>
                 </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-6">
-                            <strong>Total Messages:</strong><br>
-                            <span class="text-primary">{{ "{:,}".format(stats.total_packets) }}</span>
-                        </div>
-                        <div class="col-6">
-                            <strong>Recent (1h):</strong><br>
-                            <span class="text-success">{{ stats.recent_packets }}</span>
-                        </div>
+                <div class="card-body pt-2">
+                    <div id="recentPacketsLoading">
+                        {% for i in range(4) %}<div class="skeleton skeleton-row"></div>{% endfor %}
                     </div>
-                    <hr>
-                    <div class="row">
-                        <div class="col-12">
-                            <strong>Success Rate:</strong><br>
-                            {% set success_class = 'text-success' if stats.success_rate >= 95 else 'text-warning' if stats.success_rate >= 85 else 'text-danger' %}
-                            <span class="{{ success_class }}">{{ stats.success_rate }}%</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-header">
-                    <h6 class="card-title mb-0"><i class="bi bi-reception-4"></i> Signal Quality</h6>
-                </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-6">
-                            <strong>Avg RSSI:</strong><br>
-                            <span class="text-primary">{{ stats.avg_rssi|format_rssi }}dBm</span>
-                        </div>
-                        <div class="col-6">
-                            <strong>Avg SNR:</strong><br>
-                            <span class="text-success">{{ stats.avg_snr|format_snr }}dB</span>
-                        </div>
-                    </div>
-                    <hr>
-                    <div class="row">
-                        <div class="col-12">
-                            <strong>Network Health:</strong><br>
-                            {% set nodes_seen_7d_safe = stats.nodes_seen_7d if stats.nodes_seen_7d and stats.nodes_seen_7d > 0 else 1 %}
-                            {% set activity_percentage = (stats.active_nodes_24h / nodes_seen_7d_safe * 100)|int %}
-                            {% if activity_percentage >= 70 %}
-                                <span class="text-success">Excellent</span>
-                            {% elif activity_percentage >= 40 %}
-                                <span class="text-warning">Good</span>
-                            {% else %}
-                                <span class="text-danger">Needs Attention</span>
-                            {% endif %}
+                    <div style="display: none;" id="recentPacketsContainer">
+                        <div class="table-responsive">
+                        <table class="table table-sm recent-table align-middle mb-0" id="recentPacketsTable">
+                            <thead>
+                                <tr><th>Time</th><th>From</th><th>Type</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
                         </div>
                     </div>
                 </div>
@@ -472,43 +425,47 @@
 {% endblock %}
 
 {% block extra_js %}
+<script type="module" src="{{ url_for('static', filename='js/auto-refresh.js') }}"></script>
 <script>
-// Load analytics data asynchronously to improve initial page load time
-let analyticsData = null;
-let chartInstances = {}; // Store chart instances for theme updates
+// All dashboard data comes from /api/v1 (single envelope contract via
+// window.MallaAPI). The heavy summary endpoint feeds KPIs, the activity
+// timeline, signal histograms, top talkers and protocol share; derived
+// views (gateway activity, node-activity buckets, hop mix, recent lists)
+// use their documented v1 list endpoints.
+const V1 = '/api/v1';
 
-// Get theme-aware colors for charts
+// ---------------------------------------------------------------------------
+// Theme-aware palettes
+// ---------------------------------------------------------------------------
+function tokenColor(name, fallback) {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+}
+
 function getChartColors() {
-    const computedStyle = getComputedStyle(document.documentElement);
     const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
 
     return {
-        // Text colors
-        textColor: computedStyle.getPropertyValue('--bs-body-color').trim(),
-        mutedTextColor: computedStyle.getPropertyValue('--bs-secondary-color').trim(),
+        textColor: tokenColor('--malla-text', '#17212e'),
+        mutedTextColor: tokenColor('--malla-text-muted', '#5b6b7c'),
+        gridColor: tokenColor('--malla-border', '#dfe5ec'),
+        surface: tokenColor('--malla-surface', '#ffffff'),
 
-        // Grid and border colors
-        gridColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-        borderColor: computedStyle.getPropertyValue('--bs-border-color').trim(),
+        primary: tokenColor('--malla-primary', '#2563eb'),
+        success: tokenColor('--malla-success', '#15803d'),
+        info: tokenColor('--malla-info', '#0e7490'),
+        warning: tokenColor('--malla-warning-strong', '#d97706'),
+        danger: tokenColor('--malla-danger', '#c0392b'),
+        secondary: tokenColor('--malla-text-muted', '#5b6b7b'),
 
-        // Chart colors (theme-aware)
-        primary: computedStyle.getPropertyValue('--bs-primary').trim(),
-        success: computedStyle.getPropertyValue('--bs-success').trim(),
-        info: computedStyle.getPropertyValue('--bs-info').trim(),
-        warning: computedStyle.getPropertyValue('--bs-warning').trim(),
-        danger: computedStyle.getPropertyValue('--bs-danger').trim(),
-        secondary: computedStyle.getPropertyValue('--bs-secondary').trim(),
-
-        // Background colors with transparency
-        primaryBg: isDark ? 'rgba(13, 110, 253, 0.2)' : 'rgba(13, 110, 253, 0.1)',
-        successBg: isDark ? 'rgba(25, 135, 84, 0.2)' : 'rgba(25, 135, 84, 0.1)',
-        infoBg: isDark ? 'rgba(13, 202, 240, 0.2)' : 'rgba(13, 202, 240, 0.1)',
-        warningBg: isDark ? 'rgba(255, 193, 7, 0.2)' : 'rgba(255, 193, 7, 0.1)',
-        dangerBg: isDark ? 'rgba(220, 53, 69, 0.2)' : 'rgba(220, 53, 69, 0.1)',
+        primaryBg: isDark ? 'rgba(95, 155, 255, 0.2)' : 'rgba(37, 99, 235, 0.1)',
+        successBg: isDark ? 'rgba(74, 222, 128, 0.2)' : 'rgba(21, 128, 61, 0.1)',
+        infoBg: isDark ? 'rgba(56, 189, 248, 0.2)' : 'rgba(8, 145, 178, 0.1)',
+        warningBg: isDark ? 'rgba(251, 191, 36, 0.2)' : 'rgba(217, 119, 6, 0.1)',
+        dangerBg: isDark ? 'rgba(248, 113, 113, 0.2)' : 'rgba(192, 57, 43, 0.1)',
     };
 }
 
-// Get default chart options with theme support
 function getDefaultChartOptions() {
     const colors = getChartColors();
 
@@ -517,111 +474,41 @@ function getDefaultChartOptions() {
         maintainAspectRatio: false,
         plugins: {
             legend: {
-                labels: {
-                    color: colors.textColor
-                }
+                labels: { color: colors.textColor }
             }
         },
         scales: {
             x: {
-                ticks: {
-                    color: colors.mutedTextColor
-                },
-                grid: {
-                    color: colors.gridColor
-                }
+                ticks: { color: colors.mutedTextColor },
+                grid: { color: colors.gridColor }
             },
             y: {
-                ticks: {
-                    color: colors.mutedTextColor
-                },
-                grid: {
-                    color: colors.gridColor
-                },
+                ticks: { color: colors.mutedTextColor },
+                grid: { color: colors.gridColor },
                 beginAtZero: true
             }
         }
     };
 }
 
-// Update all charts when theme changes
+// Re-theme every chart on theme toggle
 function updateChartsForTheme() {
-    if (analyticsData) {
-        // Destroy existing charts
+    if (lastSummary) {
         Object.values(chartInstances).forEach(chart => {
             if (chart) chart.destroy();
         });
         chartInstances = {};
 
-        // Recreate charts with new theme
-        createNodeActivityChart(analyticsData.node_statistics);
-        createGatewayActivityChart(analyticsData.gateway_distribution);
-        createSignalDistributionChart(analyticsData.signal_quality);
-        createHopDistributionChart(analyticsData.hop_distribution);
-        createPacketTypesChart(analyticsData.packet_types);
+        applySummaryCharts(lastSummary);
     }
     if (timelineData) {
         renderTimelinePanels();
     }
 }
 
-// Initialize dashboard when page loads
-document.addEventListener('DOMContentLoaded', function () {
-    // Load analytics data asynchronously
-    loadAnalyticsData();
-
-    // Activity timeline: restore the last-used range and wire the selector
-    loadActivityTimeline(timelineRange);
-    const rangeButtons = document.getElementById('timelineRangeButtons');
-    if (rangeButtons) {
-        rangeButtons.addEventListener('click', function (event) {
-            const button = event.target.closest('button[data-range]');
-            if (button && button.dataset.range !== timelineRange) {
-                loadActivityTimeline(button.dataset.range);
-            }
-        });
-    }
-
-    // Listen for theme changes and update charts
-    window.addEventListener('themeChanged', function(event) {
-        updateChartsForTheme();
-    });
-
-    // Re-render the timeline when crossing the phone breakpoint so tick
-    // density matches the new panel width (Chart.js only rescales, it does
-    // not re-read our narrow-mode options).
-    const narrowQuery = window.matchMedia('(max-width: 575.98px)');
-    if (typeof narrowQuery.addEventListener === 'function') {
-        narrowQuery.addEventListener('change', function () {
-            if (timelineData) renderTimelinePanels();
-        });
-    }
-});
-
-async function loadAnalyticsData() {
-    try {
-        const response = await fetch('/api/analytics');
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        analyticsData = await response.json();
-
-        // Render all charts and tables with loaded data
-        createNodeActivityChart(analyticsData.node_statistics);
-        createGatewayActivityChart(analyticsData.gateway_distribution);
-        createSignalDistributionChart(analyticsData.signal_quality);
-        createHopDistributionChart(analyticsData.hop_distribution);
-        createPacketTypesChart(analyticsData.packet_types);
-        populateTopNodesTable(analyticsData.top_nodes);
-
-    } catch (error) {
-        console.error('Error loading analytics data:', error);
-        // Hide loading spinners and show error message
-        hideAllLoadingSpinners();
-        showErrorMessage('Failed to load chart data. Please refresh the page.');
-    }
-}
-
+// ---------------------------------------------------------------------------
+// Loading helpers
+// ---------------------------------------------------------------------------
 function hideLoadingSpinner(chartId) {
     const loading = document.getElementById(chartId + 'Loading');
     const chart = document.getElementById(chartId);
@@ -629,30 +516,66 @@ function hideLoadingSpinner(chartId) {
     if (chart) chart.style.display = 'block';
 }
 
-function hideAllLoadingSpinners() {
-    const spinners = document.querySelectorAll('[id$="Loading"]');
-    spinners.forEach(spinner => spinner.style.display = 'none');
+function hideById(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
 }
 
-function showErrorMessage(message) {
-    // You could implement a toast notification here
-    console.error(message);
+function showById(id, display = '') {
+    const el = document.getElementById(id);
+    if (el) el.style.display = display;
+}
+
+function hideAllLoadingSpinners() {
+    document.querySelectorAll('[id$="Loading"]').forEach(spinner => spinner.style.display = 'none');
 }
 
 // ---------------------------------------------------------------------------
-// Activity timeline: four single-metric panels sharing one time axis, with a
-// 24h / 7d / 30d / All range selector. One metric per panel (no dual axes) so
-// each scale reads directly.
+// v1 access helpers
+// ---------------------------------------------------------------------------
+let lastSummary = null;
+let chartInstances = {}; // chart instances for theme updates
+
+function tzOffsetMinutes() {
+    const tzPref = (typeof getTimezonePreference === 'function') ? getTimezonePreference() : 'local';
+    return (tzPref === 'utc') ? 0 : -new Date().getTimezoneOffset();
+}
+
+function validRange(range) {
+    return ['24h', '7d', '30d', 'all'].includes(range) ? range : null;
+}
+
+/** Paginate a v1 collection endpoint (bounded; caps documented per caller). */
+async function pagedV1(path, { maxPages = 20, pageSize = 500 } = {}) {
+    const rows = [];
+    let page = 1;
+    let hasNext = true;
+    while (hasNext && page <= maxPages) {
+        const sep = path.includes('?') ? '&' : '?';
+        const { data, meta } = await window.MallaAPI.getDetailed(
+            `${path}${sep}page=${page}&page_size=${pageSize}`,
+            { silent: true }
+        );
+        rows.push(...(Array.isArray(data) ? data : []));
+        hasNext = !!(meta && meta.pagination && meta.pagination.has_next);
+        page += 1;
+    }
+    return rows;
+}
+
+// ---------------------------------------------------------------------------
+// Activity timeline (Plotly small multiples, 24h / 7d / 30d / all via v1
+// stats/summary `activity`; the range lives in the URL).
 // ---------------------------------------------------------------------------
 let timelineData = null;
-let timelineRange = localStorage.getItem('mallaTimelineRange') || '7d';
+let timelineRange = null;
+let pendingPollTimer = null;
 
-// kind: bars for per-bucket flows, lines for levels; agg drives the header stat.
 const TIMELINE_PANELS = [
-    { key: 'total_packets', canvas: 'tlMessages',    valueEl: 'tlMessagesVal',    color: 'info',      kind: 'bar',  agg: 'sum'  },
-    { key: 'active_nodes',  canvas: 'tlActiveNodes', valueEl: 'tlActiveNodesVal', color: 'success',   kind: 'line', agg: 'last' },
-    { key: 'gateway_count', canvas: 'tlGateways',    valueEl: 'tlGatewaysVal',    color: 'primary',   kind: 'line', agg: 'last' },
-    { key: 'new_nodes',     canvas: 'tlNewNodes',    valueEl: 'tlNewNodesVal',    color: 'warning',   kind: 'bar',  agg: 'sum'  },
+    { key: 'total_packets', div: 'tlMessages',    valueEl: 'tlMessagesVal',    colorToken: '--malla-info',    fallback: '#0e7490', kind: 'bar',  agg: 'sum'  },
+    { key: 'active_nodes',  div: 'tlActiveNodes', valueEl: 'tlActiveNodesVal', colorToken: '--malla-success', fallback: '#15803d', kind: 'line', agg: 'last' },
+    { key: 'gateway_count', div: 'tlGateways',    valueEl: 'tlGatewaysVal',    colorToken: '--malla-primary', fallback: '#2563eb', kind: 'line', agg: 'last' },
+    { key: 'new_nodes',     div: 'tlNewNodes',    valueEl: 'tlNewNodesVal',    colorToken: '--malla-warning-strong', fallback: '#d97706', kind: 'bar', agg: 'sum'  },
 ];
 
 function hexToRgba(hex, alpha) {
@@ -669,181 +592,146 @@ function formatCompact(value) {
         : String(value);
 }
 
-// Bucket labels arrive as "YYYY-MM-DD" (days) or "YYYY-MM-DD HH:00" (hours);
-// ticks show a short form, tooltips keep the full label. Narrow panels get an
-// even shorter year-month ("25-12") so dense ticks can't collide.
-function shortBucketLabel(label, granularity, dense, narrow) {
-    if (granularity === 'hour') return label.slice(11);
-    if (!dense) return label.slice(5);
-    return narrow ? label.slice(2, 7) : label.slice(0, 7);
-}
-
-async function loadActivityTimeline(range) {
-    timelineRange = range;
-    try { localStorage.setItem('mallaTimelineRange', range); } catch (e) { /* private mode */ }
-
-    const buttons = document.querySelectorAll('#timelineRangeButtons button[data-range]');
-    buttons.forEach(b => {
+function syncRangeButtons(range) {
+    document.querySelectorAll('#timelineRangeButtons button[data-range]').forEach(b => {
         const active = b.dataset.range === range;
         b.classList.toggle('active', active);
-        b.setAttribute('aria-pressed', active);
+        b.setAttribute('aria-pressed', String(active));
     });
+}
 
-    const panels = document.getElementById('activityTimelinePanels');
-    const errorEl = document.getElementById('activityTimelinePanelsError');
-    if (errorEl) errorEl.style.display = 'none';
-    if (panels) panels.style.opacity = '0.5';
+function rangeFromUrl() {
+    const param = new URLSearchParams(window.location.search).get('range');
+    return validRange(param);
+}
 
-    try {
-        const tzPref = (typeof getTimezonePreference === 'function') ? getTimezonePreference() : 'local';
-        const tzOffset = (tzPref === 'utc') ? 0 : -new Date().getTimezoneOffset();
-        const response = await fetch(`/api/activity-timeline?range=${encodeURIComponent(range)}&tz_offset=${tzOffset}`);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+function setRangeInUrl(range) {
+    const url = new URL(window.location);
+    url.searchParams.set('range', range);
+    window.history.replaceState({}, '', url);
+}
+
+function showTimelineBackfillProgress() {
+    showById('activityTimelinePanelsLoading', '');
+    showById('activityTimelinePanels', 'none');
+    const text = document.getElementById('activityTimelineLoadingText');
+    if (text) text.textContent = 'Building daily history...';
+}
+
+function plotlyLayoutDefaults() {
+    const colors = getChartColors();
+    return {
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: {
+            family: getComputedStyle(document.body).fontFamily,
+            size: 10,
+            color: colors.mutedTextColor,
+        },
+        margin: { l: 34, r: 6, t: 4, b: 20 },
+        showlegend: false,
+    };
+}
+
+function renderTimelinePanel(panel, buckets, dense) {
+    const container = document.getElementById(panel.div);
+    if (!container || typeof Plotly === 'undefined') return;
+
+    const color = tokenColor(panel.colorToken, panel.fallback);
+    const series = buckets.map(b => b[panel.key] || 0);
+    const labels = buckets.map(b => b.bucket);
+    const narrow = window.matchMedia('(max-width: 575.98px)').matches;
+    const isBar = panel.kind === 'bar' && !dense;
+    const granularity = timelineData.granularity;
+    const latestLabel = granularity === 'hour' ? 'now' : 'today';
+
+    // Header stat
+    const valueEl = document.getElementById(panel.valueEl);
+    if (valueEl) {
+        if (panel.agg === 'sum') {
+            const total = series.reduce((a, v) => a + v, 0);
+            valueEl.textContent = narrow ? formatCompact(total) : total.toLocaleString();
+            valueEl.title = total.toLocaleString();
+        } else {
+            const latest = (series[series.length - 1] || 0).toLocaleString();
+            valueEl.textContent = narrow ? latest : `${latest} ${latestLabel}`;
+            valueEl.title = `${latest} ${latestLabel}`;
         }
-        const data = await response.json();
-        timelineData = data;
-        renderTimelinePanels();
-    } catch (error) {
-        console.error('Error loading activity timeline:', error);
-        const loading = document.getElementById('activityTimelinePanelsLoading');
-        if (loading) loading.style.display = 'none';
-        if (panels) panels.style.display = 'none';
-        if (errorEl) errorEl.style.display = '';
-    } finally {
-        if (panels) panels.style.opacity = '';
     }
+
+    const layout = plotlyLayoutDefaults();
+    layout.margin = { l: 30, r: 4, t: 4, b: 18 };
+    // Thin + shorten the category ticks: 3 compact labels (first/mid/last);
+    // days render MM-DD, hours HH:00, so 130px panels never collide.
+    const shortLabel = (label) => granularity === 'hour' ? label.slice(11) : label.slice(5);
+    const idx = [0, Math.floor((labels.length - 1) / 2), labels.length - 1];
+    const tickIdx = [...new Set(idx)];
+    layout.xaxis = {
+        type: 'category',
+        showgrid: false,
+        tickfont: { size: narrow ? 9 : 10 },
+        tickvals: tickIdx.map(i => labels[i]),
+        ticktext: tickIdx.map(i => shortLabel(labels[i])),
+    };
+    layout.yaxis = {
+        gridcolor: hexToRgba(tokenColor('--malla-text', '#888'), 0.12),
+        zeroline: false,
+        tickformat: '~s',
+        tickfont: { size: 9 },
+    };
+
+    const trace = isBar
+        ? {
+            type: 'bar',
+            x: labels,
+            y: series,
+            marker: { color: hexToRgba(color, 0.65), line: { color, width: 1 } },
+            hovertemplate: '%{x}: %{y:,}<extra></extra>',
+        }
+        : {
+            type: 'scatter',
+            mode: 'lines',
+            x: labels,
+            y: series,
+            line: { color, width: 2, shape: 'spline' },
+            fill: 'tozeroy',
+            fillcolor: hexToRgba(color, 0.12),
+            hovertemplate: '%{x}: %{y:,}<extra></extra>',
+        };
+
+    Plotly.react(container, [trace], layout, {
+        displayModeBar: false,
+        responsive: true,
+    });
 }
 
 function renderTimelinePanels() {
     if (!timelineData || !timelineData.buckets) return;
 
-    // Not hideLoadingSpinner(): that forces display:block, which would break
-    // the Bootstrap .row flex layout of the panel grid.
-    const loading = document.getElementById('activityTimelinePanelsLoading');
-    if (loading) loading.style.display = 'none';
+    showById('activityTimelinePanelsLoading', 'none');
     const panelsEl = document.getElementById('activityTimelinePanels');
     if (panelsEl) panelsEl.style.display = '';
 
     const buckets = timelineData.buckets;
-    const granularity = timelineData.granularity;
-    const dense = buckets.length > 60;  // "All": bars degrade into slivers, use lines
-    const labels = buckets.map(b => b.bucket);
-    const colors = getChartColors();
-    const latestLabel = granularity === 'hour' ? 'now' : 'today';
-    // Phones show the same 2x2 grid at ~half the panel width: fewer, smaller
-    // ticks so axis labels don't collide.
-    const narrow = window.matchMedia('(max-width: 575.98px)').matches;
-    const tickFont = narrow ? { size: 10 } : undefined;
-
-    TIMELINE_PANELS.forEach(panel => {
-        const ctx = document.getElementById(panel.canvas);
-        if (!ctx) return;
-
-        const chartKey = 'timeline_' + panel.key;
-        if (chartInstances[chartKey]) {
-            chartInstances[chartKey].destroy();
-        }
-
-        const series = buckets.map(b => b[panel.key] || 0);
-        const hex = colors[panel.color];
-
-        const valueEl = document.getElementById(panel.valueEl);
-        if (valueEl) {
-            // Headers must stay one line so the grid rows align: on phones,
-            // compact big sums (13.8M) and drop the today/now suffix.
-            if (panel.agg === 'sum') {
-                const total = series.reduce((a, v) => a + v, 0);
-                valueEl.textContent = narrow ? formatCompact(total) : total.toLocaleString();
-                valueEl.title = total.toLocaleString();
-            } else {
-                const latest = (series[series.length - 1] || 0).toLocaleString();
-                valueEl.textContent = narrow ? latest : `${latest} ${latestLabel}`;
-                valueEl.title = `${latest} ${latestLabel}`;
-            }
-        }
-
-        const type = (dense && panel.kind === 'bar') ? 'line' : panel.kind;
-        const dataset = type === 'bar'
-            ? {
-                data: series,
-                backgroundColor: hexToRgba(hex, 0.65),
-                hoverBackgroundColor: hexToRgba(hex, 0.85),
-                borderColor: hex,
-                borderWidth: 1,
-                borderRadius: 3,
-                borderSkipped: 'start',
-                maxBarThickness: 26,
-                categoryPercentage: 0.72,
-                barPercentage: 1
-            }
-            : {
-                data: series,
-                borderColor: hex,
-                backgroundColor: hexToRgba(hex, 0.12),
-                borderWidth: 2,
-                fill: true,
-                tension: 0.3,
-                pointRadius: 0,
-                pointHoverRadius: 4,
-                pointHitRadius: 10
-            };
-
-        chartInstances[chartKey] = new Chart(ctx, {
-            type: type,
-            data: { labels: labels, datasets: [dataset] },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: c => c.parsed.y.toLocaleString()
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        grid: { display: false },
-                        ticks: {
-                            color: colors.mutedTextColor,
-                            maxTicksLimit: narrow ? 3 : 5,
-                            maxRotation: 0,
-                            autoSkip: true,
-                            font: tickFont,
-                            callback: function (value) {
-                                return shortBucketLabel(this.getLabelForValue(value), granularity, dense, narrow);
-                            }
-                        }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: colors.gridColor },
-                        ticks: {
-                            color: colors.mutedTextColor,
-                            maxTicksLimit: narrow ? 3 : 4,
-                            font: tickFont,
-                            callback: value => formatCompact(value)
-                        }
-                    }
-                }
-            }
-        });
-    });
+    const dense = buckets.length > 60; // "All": bars degrade into slivers, use lines
+    TIMELINE_PANELS.forEach(panel => renderTimelinePanel(panel, buckets, dense));
 }
 
+// ---------------------------------------------------------------------------
+// Chart.js analytics (theme-aware via CSS tokens)
+// ---------------------------------------------------------------------------
 function createNodeActivityChart(nodeData) {
     if (!nodeData || !nodeData.activity_distribution) return;
 
     hideLoadingSpinner('nodeActivityChart');
+    showById('nodeActivityChartWrapper', 'block');
     const ctx = document.getElementById('nodeActivityChart');
     if (!ctx) return;
 
     const activityDist = nodeData.activity_distribution;
     const colors = getChartColors();
 
+    if (chartInstances.nodeActivityChart) chartInstances.nodeActivityChart.destroy();
     chartInstances.nodeActivityChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
@@ -855,7 +743,9 @@ function createNodeActivityChart(nodeData) {
                     activityDist.lightly_active || 0,
                     activityDist.inactive || 0
                 ],
-                backgroundColor: [colors.success, colors.info, colors.warning, colors.danger]
+                backgroundColor: [colors.success, colors.info, colors.warning, colors.danger],
+                borderColor: colors.surface,
+                borderWidth: 2,
             }]
         },
         options: {
@@ -864,9 +754,7 @@ function createNodeActivityChart(nodeData) {
             plugins: {
                 legend: {
                     position: 'bottom',
-                    labels: {
-                        color: colors.textColor
-                    }
+                    labels: { color: colors.textColor, boxWidth: 12 }
                 }
             }
         }
@@ -874,13 +762,12 @@ function createNodeActivityChart(nodeData) {
 }
 
 function createGatewayActivityChart(gatewayData) {
-    if (!gatewayData || gatewayData.length === 0) return;
-
     hideLoadingSpinner('gatewayActivityChart');
+    showById('gatewayActivityChartWrapper', 'block');
     const ctx = document.getElementById('gatewayActivityChart');
     if (!ctx) return;
+    if (!gatewayData || gatewayData.length === 0) return;
 
-    // Take top 10 gateways by packet count
     const topGateways = gatewayData.slice(0, 10);
     const labels = topGateways.map(g => g.gateway_id || 'Unknown');
     const data = topGateways.map(g => g.total_packets || 0);
@@ -888,16 +775,15 @@ function createGatewayActivityChart(gatewayData) {
     const colors = getChartColors();
     const options = getDefaultChartOptions();
 
-    // Generate gradient colors for bars
     const barColors = data.map((_, index) => {
-        const opacity = 0.8 - (index * 0.05); // Gradually decrease opacity
-        return `rgba(13, 110, 253, ${Math.max(opacity, 0.3)})`;
+        const opacity = 0.85 - (index * 0.06);
+        return hexToRgba(colors.primary, Math.max(opacity, 0.3));
     });
 
-    // Customize options for bar chart
     options.plugins.legend.display = false;
     options.scales.x.ticks.maxRotation = 45;
 
+    if (chartInstances.gatewayActivityChart) chartInstances.gatewayActivityChart.destroy();
     chartInstances.gatewayActivityChart = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -915,8 +801,7 @@ function createGatewayActivityChart(gatewayData) {
 }
 
 // Two small-multiple histograms (RSSI/SNR as measured at the reporting
-// gateway) replace the old four-bucket bars: fine 5 dB / 2 dB bins show the
-// actual distribution shape, gaps included.
+// gateway): fine 5 dB / 2 dB bins show the actual distribution shape.
 function createSignalDistributionChart(signalData) {
     if (!signalData) return;
 
@@ -938,10 +823,6 @@ function createSignalDistributionChart(signalData) {
     });
 }
 
-// Per-bar signal-quality ramp: theme success → warning → danger, using the
-// same good/bad semantics as the quality badges elsewhere in the UI. The
-// x-axis already encodes the value, so color is a redundant cue (the chart
-// stays readable under color-vision deficiency via position alone).
 function parseCssColor(str) {
     if (!str) return null;
     str = str.trim();
@@ -954,8 +835,7 @@ function parseCssColor(str) {
     return null;
 }
 
-// Mix in linear light so the green→amber→red midpoints stay vivid instead
-// of dipping through dark olive.
+// Mix in linear light so the green→amber→red midpoints stay vivid.
 function mixRgb(c1, c2, t) {
     const ch = (i) => {
         const a = Math.pow(c1[i] / 255, 2.2);
@@ -987,10 +867,7 @@ function createHistogramChart(canvasId, histogram, opts) {
     if (!bins.length) return;
 
     const width = histogram.bin_width;
-    // The edge bins may be accumulators: everything above overflow_start
-    // (RSSI ≥ -60 dBm: co-located nodes) and everything below underflow_end
-    // (RSSI < -130 dBm: stray sub-sensitivity readings) collapse into one
-    // bar each, so the main body keeps its resolution and a stable axis.
+    // Edge bins are accumulators (see repository): keep a stable axis.
     const overflowStart = histogram.overflow_start;
     const underflowEnd = histogram.underflow_end;
     const isOverflowBin = (index) =>
@@ -998,10 +875,6 @@ function createHistogramChart(canvasId, histogram, opts) {
     const isUnderflowBin = (index) =>
         underflowEnd !== undefined && bins[index].start === underflowEnd - width;
 
-    // Color each bar by where its bin center sits on the good→bad scale.
-    // Full success at the "Excellent" boundary the badges use (RSSI -70 dBm /
-    // SNR +5 dB), full danger near the LoRa demodulation floor (-125 dBm /
-    // -15 dB), warning halfway; accumulator bins clamp to the nearest end.
     const ramp = [colors.success, colors.warning, colors.danger].map(parseCssColor);
     const rampOk = opts.quality && ramp.every(Boolean);
     const barColors = bins.map((b) => {
@@ -1055,14 +928,11 @@ function createHistogramChart(canvasId, histogram, opts) {
             scales: {
                 x: {
                     grid: { display: false },
+                    border: { display: false },
                     ticks: {
                         color: colors.mutedTextColor,
                         maxRotation: 0,
                         autoSkip: false,
-                        // Label only clean bin edges (every 20 dBm / 8 dB —
-                        // the card is narrow at every breakpoint) plus the
-                        // overflow accumulator; the tooltip carries the
-                        // exact per-bin ranges.
                         callback: function (value, index) {
                             const start = bins[index].start;
                             if (isOverflowBin(index)) return '≥' + start;
@@ -1086,10 +956,9 @@ function createHistogramChart(canvasId, histogram, opts) {
     });
 }
 
-// Real hop counts (hop_start - hop_limit) over the last 24h as an ordered
-// column chart. The old doughnut lost the ordering and collapsed everything
-// past 2 hops into a single "3+" slice, which on this network hid ~78% of
-// the traffic; the full 0..7 spread is the actual routing story.
+// Real hop counts over the last 24h as an ordered column chart. Derived
+// client-side from /api/v1/packets (bounded to the 10 most recent pages of
+// 500 = 5k packets; a documented approximation on very busy days).
 function createHopDistributionChart(hopDistribution) {
     hideLoadingSpinner('hopDistributionChart');
     const ctx = document.getElementById('hopDistributionCanvas');
@@ -1103,12 +972,10 @@ function createHopDistributionChart(hopDistribution) {
 
     const colors = getChartColors();
 
-    // Dense 0..N axis (Meshtastic hop fields are 3-bit, so N <= 7);
-    // zero-fill so absent hop counts keep their slot.
     const byHops = new Map(hopDistribution.map(d => [d.hops, d.count]));
     const maxHops = Math.max(...byHops.keys(), 3);
     const hops = [];
-    for (let h = 0; h <= maxHops; h++) {
+    for (let h = 0; h <= Math.min(maxHops, 7); h++) {
         hops.push({ hops: h, count: byHops.get(h) || 0 });
     }
 
@@ -1130,7 +997,9 @@ function createHopDistributionChart(hopDistribution) {
             labels: hops.map(d => d.hops === 0 ? 'direct' : String(d.hops)),
             datasets: [{
                 data: hops.map(d => d.count),
-                backgroundColor: colors.primary,
+                backgroundColor: hexToRgba(colors.primary, 0.75),
+                borderColor: colors.primary,
+                borderWidth: 1,
                 borderRadius: { topLeft: 3, topRight: 3 },
                 borderSkipped: 'bottom',
                 maxBarThickness: 24
@@ -1158,6 +1027,7 @@ function createHopDistributionChart(hopDistribution) {
             scales: {
                 x: {
                     grid: { display: false },
+                    border: { display: false },
                     ticks: { color: colors.mutedTextColor, maxRotation: 0 }
                 },
                 y: {
@@ -1175,30 +1045,35 @@ function createHopDistributionChart(hopDistribution) {
     });
 }
 
-function createPacketTypesChart(packetTypes) {
-    if (!packetTypes || packetTypes.length === 0) return;
+function createPacketTypesChart(transportTypes) {
+    hideById('packetTypesChartLoading');
+    if (!transportTypes || transportTypes.length === 0) return;
 
     hideLoadingSpinner('packetTypesChart');
+    const wrapper = document.getElementById('packetTypesChartWrapper');
+    if (wrapper) wrapper.style.display = 'block';
     const ctx = document.getElementById('packetTypesChart');
     if (!ctx) return;
 
-    const labels = packetTypes.map(pt => pt.portnum_name || 'Unknown');
-    const data = packetTypes.map(pt => pt.count);
+    const labels = transportTypes.map(pt => pt.portnum_name || 'Unknown');
+    const data = transportTypes.map(pt => pt.count);
     const colors = getChartColors();
 
-    // Generate a variety of colors for different packet types
     const themeColors = [
         colors.primary, colors.success, colors.info, colors.warning,
         colors.danger, colors.secondary, colors.primary, colors.success
     ];
 
+    if (chartInstances.packetTypesChart) chartInstances.packetTypesChart.destroy();
     chartInstances.packetTypesChart = new Chart(ctx, {
-        type: 'pie',
+        type: 'doughnut',
         data: {
             labels: labels,
             datasets: [{
                 data: data,
-                backgroundColor: themeColors.slice(0, data.length)
+                backgroundColor: themeColors.slice(0, data.length),
+                borderColor: colors.surface,
+                borderWidth: 2,
             }]
         },
         options: {
@@ -1207,85 +1082,411 @@ function createPacketTypesChart(packetTypes) {
             plugins: {
                 legend: {
                     position: 'bottom',
-                    labels: {
-                        color: colors.textColor
-                    }
+                    labels: { color: colors.textColor, boxWidth: 12 }
                 }
             }
         }
     });
 }
 
-function populateTopNodesTable(topNodes) {
-    if (!topNodes || topNodes.length === 0) return;
+// ---------------------------------------------------------------------------
+// Tables: top talkers, recent nodes, latest packets
+// ---------------------------------------------------------------------------
+function pill(text, variant, dot = true) {
+    return el('span', { className: `pill pill-${variant}` },
+        dot ? el('span', { className: 'pill-dot', 'aria-hidden': 'true' }) : null,
+        text
+    );
+}
 
-    document.getElementById('topNodesLoading').style.display = 'none';
-    document.getElementById('topNodesTableContainer').style.display = 'block';
+function nodeCell(node, nameFallback) {
+    const name = node.display_name || node.long_name || node.node_name || nameFallback
+        || `!${node.node_id.toString(16).padStart(8, '0')}`;
+    return el('a', {
+        href: safePath(`/node/${encodeURIComponent(String(node.node_id))}`),
+        className: 'node-link',
+        dataset: { nodeId: String(node.node_id) },
+        title: name,
+    }, name.length > 22 ? name.slice(0, 22) + '…' : name);
+}
+
+function signalCellFor(rssi, snr) {
+    // Averages cover only direct (0-hop) receptions in the last 24h.
+    const validRssi = Number.isFinite(rssi) ? rssi : null;
+    const validSnr = Number.isFinite(snr) ? snr : null;
+    if (validRssi !== null) {
+        let variant, quality;
+        if (validRssi > -70) { variant = 'success'; quality = 'Excellent'; }
+        else if (validRssi > -80) { variant = 'success'; quality = 'Good'; }
+        else if (validRssi > -90) { variant = 'warning'; quality = 'Fair'; }
+        else { variant = 'danger'; quality = 'Poor'; }
+        let title = `${quality} — avg RSSI of direct receptions (24h)`;
+        if (validSnr !== null) title += `, SNR ${validSnr.toFixed(1)} dB`;
+        return el('span', {
+            className: `pill pill-${variant}`,
+            title,
+        }, `${Math.round(validRssi)} dBm`);
+    }
+    if (validSnr !== null) {
+        const variant = validSnr >= 0 ? 'success' : validSnr >= -5 ? 'warning' : 'danger';
+        return el('span', {
+            className: `pill pill-${variant}`,
+            title: 'Avg SNR of direct receptions (24h); no valid RSSI reported',
+        }, `SNR ${validSnr.toFixed(1)} dB`);
+    }
+    return el('span', {
+        className: 'text-secondary-emphasis small',
+        title: 'No gateway heard this node directly in the last 24h',
+    }, 'Relayed only');
+}
+
+function populateTopNodesTable(topNodes) {
+    hideById('topNodesLoading');
+    const container = document.getElementById('topNodesTableContainer');
+    const empty = document.getElementById('topNodesEmpty');
+    if (!topNodes || topNodes.length === 0) {
+        if (container) container.style.display = 'none';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (container) container.style.display = 'block';
+    if (empty) empty.style.display = 'none';
 
     const tbody = document.querySelector('#topNodesTable tbody');
     if (!tbody) return;
 
     tbody.replaceChildren();
-
-    topNodes.slice(0, 10).forEach(node => {
-        const nodeName = node.display_name || `!${node.node_id.toString(16).padStart(8, '0')}`;
-        const row = document.createElement('tr');
-
-        // Averages cover only direct (0-hop) receptions in the last 24h —
-        // relayed packets carry the relay's signal, not this node's.
-        const rssi = Number.isFinite(node.avg_rssi) ? node.avg_rssi : null;
-        const snr = Number.isFinite(node.avg_snr) ? node.avg_snr : null;
-        let signalCell;
-        if (rssi !== null) {
-            let signalClass, quality;
-            if (rssi > -70) {
-                signalClass = 'text-success';
-                quality = 'Excellent';
-            } else if (rssi > -80) {
-                signalClass = 'text-warning';
-                quality = 'Good';
-            } else if (rssi > -90) {
-                signalClass = 'text-info';
-                quality = 'Fair';
-            } else {
-                signalClass = 'text-danger';
-                quality = 'Poor';
-            }
-            let title = `${quality} — avg RSSI of direct receptions (24h)`;
-            if (snr !== null) title += `, SNR ${snr.toFixed(1)} dB`;
-            signalCell = el('span', { className: signalClass, title },
-                `${Math.round(rssi)} dBm`);
-        } else if (snr !== null) {
-            const signalClass = snr >= 5 ? 'text-success'
-                : snr >= 0 ? 'text-warning'
-                : snr >= -5 ? 'text-info' : 'text-danger';
-            signalCell = el('span', {
-                className: signalClass,
-                title: 'Avg SNR of direct receptions (24h); no valid RSSI reported'
-            }, `SNR ${snr.toFixed(1)} dB`);
-        } else {
-            signalCell = el('span', {
-                className: 'text-muted',
-                title: 'No gateway heard this node directly in the last 24h, so there is no signal reading for the node itself'
-            }, 'Relayed only');
-        }
-
-        row.append(
-            el('td', null,
-                el('a', {
-                    href: safePath(`/node/${encodeURIComponent(String(node.node_id))}`),
-                    className: 'text-decoration-none'
-                }, nodeName)
-            ),
-            el('td', null, badge(String(node.packet_count || 0), 'bg-primary')),
-            el('td', null, signalCell)
-        );
-
-        tbody.appendChild(row);
+    topNodes.slice(0, 8).forEach(node => {
+        tbody.appendChild(el('tr', null,
+            el('td', { className: 'text-truncate', style: { maxWidth: '10rem' } }, nodeCell(node)),
+            el('td', null, badge(String(node.packet_count ?? 0), 'bg-primary')),
+            el('td', null, signalCellFor(
+                Number.isFinite(node.avg_rssi) ? node.avg_rssi : NaN,
+                Number.isFinite(node.avg_snr) ? node.avg_snr : NaN
+            ))
+        ));
     });
-}
-</script>
 
-<!-- Chart.js for analytics charts -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    if (window.reinitializeTooltips) window.reinitializeTooltips();
+}
+
+async function loadRecentNodes({ silent = true } = {}) {
+    const tbody = document.querySelector('#recentNodesTable tbody');
+    if (!tbody) return;
+    try {
+        const rows = await window.MallaAPI.get(
+            `${V1}/nodes?page=1&page_size=8&sort=last_seen&order=desc`, { silent });
+        hideById('recentNodesLoading');
+        const container = document.getElementById('recentNodesContainer');
+        if (container) container.style.display = 'block';
+
+        tbody.replaceChildren();
+        (rows || []).forEach(node => {
+            const count = node.packet_count_24h ?? 0;
+            tbody.appendChild(el('tr', null,
+                el('td', { className: 'text-truncate', style: { maxWidth: '9rem' } },
+                    nodeCell({ node_id: node.node_id, long_name: node.long_name, node_name: node.short_name })),
+                el('td', { className: 'text-secondary-emphasis small' },
+                    node.last_seen ? formatTimestamp(node.last_seen) : 'Never'),
+                el('td', null, count > 0
+                    ? badge(String(count), 'bg-primary')
+                    : el('span', { className: 'text-secondary-emphasis small' }, '0'))
+            ));
+        });
+        if (window.reinitializeTooltips) window.reinitializeTooltips();
+    } catch (error) {
+        hideById('recentNodesLoading');
+        if (!silent) console.error('Recent nodes load failed:', error);
+    }
+}
+
+async function loadRecentPackets({ silent = true } = {}) {
+    const tbody = document.querySelector('#recentPacketsTable tbody');
+    if (!tbody) return;
+    try {
+        const rows = await window.MallaAPI.get(
+            `${V1}/packets?page=1&page_size=8`, { silent });
+        hideById('recentPacketsLoading');
+        const container = document.getElementById('recentPacketsContainer');
+        if (container) container.style.display = 'block';
+
+        tbody.replaceChildren();
+        (rows || []).forEach(packet => {
+            const timeCell = (typeof renderTimestampColumn === 'function')
+                ? renderTimestampColumn(packet)
+                : el('span', { className: 'text-secondary-emphasis small' }, '—');
+            // v1 packets carry ids only; resolve names via the shared
+            // NodeCache (async fill, hex fallback until resolved).
+            const hexLabel = packet.from_node_id != null
+                ? `!${Number(packet.from_node_id).toString(16).padStart(8, '0')}`.slice(-4)
+                : '—';
+            const nameSpan = el('span', null, hexLabel);
+            if (packet.from_node_id != null && window.NodeCache) {
+                window.NodeCache.getNode(packet.from_node_id).then(node => {
+                    if (node) {
+                        nameSpan.textContent = node.long_name || node.short_name || hexLabel;
+                    }
+                });
+            }
+            const portnum = el('span', { className: 'badge bg-secondary' },
+                packet.portnum_name || 'Unknown');
+            tbody.appendChild(el('tr', null,
+                el('td', { className: 'text-nowrap' }, timeCell),
+                el('td', { className: 'text-truncate', style: { maxWidth: '8rem' } }, nameSpan),
+                el('td', null, portnum)
+            ));
+        });
+        if (window.reinitializeTooltips) window.reinitializeTooltips();
+    } catch (error) {
+        hideById('recentPacketsLoading');
+        if (!silent) console.error('Recent packets load failed:', error);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Derived analytics from v1 list endpoints
+// ---------------------------------------------------------------------------
+async function loadGatewayActivity({ silent = true } = {}) {
+    try {
+        const rows = await window.MallaAPI.get(`${V1}/gateways?hours=24&page_size=500`, { silent });
+        const mapped = (rows || [])
+            .map(g => ({ gateway_id: g.gateway_id || 'Unknown', total_packets: g.packet_count ?? 0 }))
+            .sort((a, b) => b.total_packets - a.total_packets);
+        createGatewayActivityChart(mapped);
+    } catch (error) {
+        hideById('gatewayActivityChartLoading');
+        if (!silent) console.error('Gateway activity load failed:', error);
+    }
+}
+
+async function loadNodeActivityDistribution({ silent = true } = {}) {
+    try {
+        const nodes = await pagedV1(`${V1}/nodes?order=desc`, { maxPages: 20 });
+        let very = 0, moderate = 0, light = 0;
+        nodes.forEach(n => {
+            const c = n.packet_count_24h ?? 0;
+            if (c > 100) very += 1;
+            else if (c > 10) moderate += 1;
+            else if (c > 0) light += 1;
+        });
+        const seen7d = (lastSummary && lastSummary.totals && lastSummary.totals.nodes_seen_7d) || 0;
+        const inactive = Math.max(seen7d - (very + moderate + light), 0);
+        createNodeActivityChart({
+            activity_distribution: {
+                very_active: very,
+                moderately_active: moderate,
+                lightly_active: light,
+                inactive,
+            }
+        });
+    } catch (error) {
+        hideById('nodeActivityChartLoading');
+        if (!silent) console.error('Node activity load failed:', error);
+    }
+}
+
+async function loadHopDistribution({ silent = true } = {}) {
+    try {
+        const since = new Date(Date.now() - 24 * 3600e3).toISOString();
+        // Bounded to 10 pages x 500 = 5k newest packets (see pagedV1).
+        const packets = await pagedV1(`${V1}/packets?since=${encodeURIComponent(since)}&order=desc`, { maxPages: 10 });
+        const byHops = new Map();
+        let total = 0;
+        packets.forEach(p => {
+            const h = p.hop_count;
+            if (h === null || h === undefined || h < 0 || h > 7) return;
+            byHops.set(h, (byHops.get(h) || 0) + 1);
+            total += 1;
+        });
+        if (!total) return;
+        createHopDistributionChart([...byHops.entries()].map(([hops, count]) => ({ hops, count })));
+    } catch (error) {
+        hideById('hopDistributionChartLoading');
+        if (!silent) console.error('Hop distribution load failed:', error);
+    }
+}
+
+async function loadGatewayCount({ silent = true } = {}) {
+    try {
+        const { meta } = await window.MallaAPI.getDetailed(`${V1}/gateways?page=1&page_size=1`, { silent });
+        const total = meta && meta.pagination ? meta.pagination.total : null;
+        if (total !== null) setKpiText('kpi-gateways', Number(total).toLocaleString());
+    } catch (error) { /* footer-style metric: silent */ }
+}
+
+// ---------------------------------------------------------------------------
+// Summary application (KPIs + charts) — the accent class on the success tile
+// is recomputed on every refresh, never inherited from server render.
+// ---------------------------------------------------------------------------
+function setKpiText(id, value) {
+    if (value === undefined || value === null) return;
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+}
+
+function applySummaryKpis(summary) {
+    const t = summary.totals || {};
+    setKpiText('kpi-total-nodes', t.total_nodes?.toLocaleString());
+    setKpiText('kpi-active-nodes', t.active_nodes_24h?.toLocaleString());
+    setKpiText('kpi-total-messages', t.total_packets?.toLocaleString());
+    setKpiText('kpi-protocols', (summary.transport_types || []).length);
+
+    if (t.success_rate !== undefined) {
+        setKpiText('kpi-success-rate', `${t.success_rate}%`);
+        const tile = document.getElementById('kpi-success-tile');
+        if (tile) {
+            tile.classList.remove('accent-success', 'accent-warning', 'accent-danger');
+            tile.classList.add(
+                t.success_rate >= 95 ? 'accent-success'
+                    : t.success_rate >= 85 ? 'accent-warning'
+                        : 'accent-danger'
+            );
+        }
+    }
+
+    if (t.nodes_seen_7d !== undefined) {
+        const hint = document.querySelector('#kpi-active-nodes')?.closest('.stat-tile')?.querySelector('.stat-hint');
+        if (hint) {
+            const coverage = t.nodes_seen_7d > 0
+                ? Math.round((t.active_nodes_24h || 0) / t.nodes_seen_7d * 100)
+                : 0;
+            hint.textContent = `${coverage}% of ${Number(t.nodes_seen_7d).toLocaleString()} seen in 7d`;
+        }
+    }
+}
+
+function applySummaryCharts(summary) {
+    const activity = summary.activity || {};
+    if (activity.pending) {
+        showTimelineBackfillProgress();
+        if (!pendingPollTimer) {
+            pendingPollTimer = setTimeout(() => {
+                pendingPollTimer = null;
+                if (document.visibilityState !== 'hidden') refreshSummary({ silent: true });
+            }, 1000);
+        }
+    } else if (activity.buckets) {
+        hideById('activityTimelinePanelsError');
+        timelineData = activity;
+        renderTimelinePanels();
+    }
+
+    createSignalDistributionChart(summary.signal_quality);
+    populateTopNodesTable(summary.top_nodes);
+    createPacketTypesChart(summary.transport_types);
+}
+
+async function refreshSummary({ silent = false } = {}) {
+    const range = validRange(timelineRange) ? timelineRange : '7d';
+    try {
+        const summary = await window.MallaAPI.get(
+            `${V1}/stats/summary?range=${encodeURIComponent(range)}&tz_offset=${tzOffsetMinutes()}`,
+            { silent }
+        );
+        lastSummary = summary;
+        applySummaryKpis(summary);
+        applySummaryCharts(summary);
+        return true;
+    } catch (error) {
+        if (!silent) {
+            hideAllLoadingSpinners();
+            console.error('Summary load failed:', error);
+        }
+        return false;
+    }
+}
+
+function stampUpdated() {
+    const timeEl = document.querySelector('#refresh-status .refresh-time');
+    if (timeEl) {
+        timeEl.textContent = new Date().toLocaleTimeString([], {
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+        });
+    }
+}
+
+async function refreshDashboard({ silent = false } = {}) {
+    const ok = await refreshSummary({ silent });
+    if (!ok && !silent) return; // first load failed: leave skeletons + error toast shown
+    await Promise.allSettled([
+        loadGatewayActivity({ silent }),
+        loadNodeActivityDistribution({ silent }),
+        loadHopDistribution({ silent }),
+        loadGatewayCount({ silent: true }),
+        loadRecentNodes({ silent: true }),
+        loadRecentPackets({ silent: true }),
+    ]);
+    stampUpdated();
+}
+
+// Initialize dashboard when DOM is ready.
+document.addEventListener('DOMContentLoaded', function () {
+    // Range: URL param wins, then last-used, then 7d.
+    timelineRange = rangeFromUrl()
+        || (() => { try { return validRange(localStorage.getItem('mallaTimelineRange')) || '7d'; } catch (e) { return '7d'; } })();
+    setRangeInUrl(timelineRange);
+    syncRangeButtons(timelineRange);
+
+    refreshDashboard();
+
+    // Range switcher: only the summary endpoint is range-scoped.
+    const rangeButtons = document.getElementById('timelineRangeButtons');
+    if (rangeButtons) {
+        rangeButtons.addEventListener('click', function (event) {
+            const button = event.target.closest('button[data-range]');
+            const range = button && validRange(button.dataset.range) ? button.dataset.range : null;
+            if (range && range !== timelineRange) {
+                timelineRange = range;
+                try { localStorage.setItem('mallaTimelineRange', range); } catch (e) { /* private mode */ }
+                setRangeInUrl(range);
+                syncRangeButtons(range);
+                refreshSummary();
+            }
+        });
+    }
+
+    // Auto-refresh: 30s, pausable; manual refresh button
+    if (window.AutoRefresh) {
+        const refresher = new window.AutoRefresh({
+            intervalMs: 30000,
+            onRefresh: () => refreshDashboard({ silent: true }),
+            pauseButton: document.getElementById('refresh-toggle'),
+        });
+        refresher.start();
+        window.dashboardRefresher = refresher;
+    } else {
+        console.warn('auto-refresh module unavailable; running static');
+    }
+
+    const refreshNow = document.getElementById('refresh-now');
+    if (refreshNow) {
+        refreshNow.addEventListener('click', async () => {
+            refreshNow.disabled = true;
+            try {
+                if (window.dashboardRefresher) {
+                    await window.dashboardRefresher.refreshNow();
+                } else {
+                    await refreshDashboard({ silent: true });
+                }
+            } finally {
+                refreshNow.disabled = false;
+            }
+        });
+    }
+
+    // Theme changes re-theme every chart
+    window.addEventListener('themeChanged', function () {
+        updateChartsForTheme();
+    });
+
+    // Re-render the timeline when crossing the phone breakpoint so tick
+    // density matches the new panel width.
+    const narrowQuery = window.matchMedia('(max-width: 575.98px)');
+    if (typeof narrowQuery.addEventListener === 'function') {
+        narrowQuery.addEventListener('change', function () {
+            if (timelineData) renderTimelinePanels();
+        });
+    }
+});
+</script>
 {% endblock %}

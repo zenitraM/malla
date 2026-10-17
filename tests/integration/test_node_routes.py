@@ -128,7 +128,7 @@ class TestNodeRoutes:
         assert "Avg RSSI" in response_text
 
         # Check for node metrics
-        assert "metric-value" in response_text
+        assert "stat-value" in response_text
 
         # Check for breadcrumb navigation
         assert "breadcrumb" in response_text

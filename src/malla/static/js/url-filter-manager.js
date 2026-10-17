@@ -107,10 +107,10 @@ class URLFilterManager {
 
             // Try to fetch node info to get display name
             try {
-                const response = await fetch(`/api/node/${nodeId}/info`);
+                const response = await fetch(`/api/v1/nodes/${nodeId}`);
                 if (response.ok) {
-                    const data = await response.json();
-                    const node = data.node || data;
+                    const body = await response.json();
+                    const node = (body && body.data ? (body.data.node || body.data) : body) || {};
                     displayName = node.long_name || node.short_name || node.hex_id || `Node ${nodeId}`;
                 }
                 // If response is not ok, we'll use the fallback display name
@@ -165,26 +165,27 @@ class URLFilterManager {
                 } catch (_) { /* ignore */ }
             }
 
-            // Fallback: call /api/node/<id>/info for more accurate name
+            // Fallback: call /api/v1/nodes/<id> for a more accurate name
             if (displayName === gatewayId) {
                 try {
-                    const resp = await fetch(`/api/node/${nodeId}/info`);
+                    const resp = await fetch(`/api/v1/nodes/${nodeId}`);
                     if (resp.ok) {
-                        const data = await resp.json();
-                        const node = data.node || data;
+                        const body = await resp.json();
+                        const node = (body && body.data ? (body.data.node || body.data) : body) || {};
                         displayName = node.long_name || node.short_name || node.hex_id || gatewayId;
                     }
                 } catch (_) { /* ignore */ }
             }
 
-            // Final fallback: attempt /api/gateways/search (handles non-node gateways)
+            // Final fallback: /api/v1/gateways?q= (handles non-node gateways)
             if (displayName === gatewayId) {
                 try {
-                    const response = await fetch(`/api/gateways/search?q=${encodeURIComponent(gatewayId)}&limit=1`);
+                    const response = await fetch(`/api/v1/gateways?q=${encodeURIComponent(gatewayId)}&page_size=1`);
                     if (response.ok) {
-                        const data = await response.json();
-                        if (data.gateways && data.gateways.length) {
-                            const gw = data.gateways[0];
+                        const body = await response.json();
+                        const rows = (body && body.data) || [];
+                        if (rows.length) {
+                            const gw = rows[0];
                             displayName = gw.display_name || gw.name || gw.gateway_id || gatewayId;
                         }
                     }

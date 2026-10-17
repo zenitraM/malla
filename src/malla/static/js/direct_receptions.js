@@ -84,11 +84,16 @@ class DirectReceptionsChart {
             document.getElementById('direct-receptions-loading').style.display = 'block';
             document.getElementById('direct-receptions-content').style.display = 'none';
 
-            const response = await fetch(`/api/node/${this.nodeId}/direct-receptions?limit=1000&direction=${direction}`);
-            const data = await response.json();
+            const response = await fetch(`/api/v1/nodes/${this.nodeId}/direct-receptions?limit=1000&direction=${direction}`);
+            const body = await response.json();
+            // v1 envelope: the payload lives under `data`.
+            const data = body && body.data ? body.data : body;
 
             if (data.error) {
-                throw new Error(data.error);
+                const err = data.error;
+                throw new Error(
+                    typeof err === "string" ? err : err.message || "Request failed"
+                );
             }
 
             // Update description based on direction
@@ -331,7 +336,8 @@ class DirectReceptionsChart {
             const checkbox = el('input', {
                 type: 'checkbox',
                 checked: stats.visible,
-                className: 'form-check-input'
+                className: 'form-check-input',
+                'aria-label': `Toggle ${stats.label} series`
             });
 
             row.append(

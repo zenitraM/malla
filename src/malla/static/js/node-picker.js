@@ -580,18 +580,27 @@ class GatewayPicker {
                 this.isPopular = false;
             }
 
-            // If no results (could be non-node gateways), fallback to API
+            // If no results (could be non-node gateways), fall back to the
+            // v1 gateway collection (search endpoint, then filtered page).
             if (this.gateways.length === 0) {
                 try {
-                    const response = await fetch(`/api/gateways/search?q=${encodeURIComponent(query)}&limit=20`);
+                    const response = await fetch(`/api/v1/gateways?q=${encodeURIComponent(query)}&page_size=20`, {
+                        headers: { Accept: 'application/json' },
+                    });
                     if (response.ok) {
-                        const data = await response.json();
-                        this.gateways = data.gateways || [];
-                        this.isPopular = data.is_popular || false;
+                        const body = await response.json();
+                        const rows = body && Array.isArray(body.data) ? body.data : [];
+                        this.gateways = rows;
+                        this.isPopular = false;
                     } else {
-                        const allGatewaysResponse = await fetch('/api/gateways');
-                        const allGatewaysData = await allGatewaysResponse.json();
-                        this.gateways = this.filterGateways(allGatewaysData.gateways, query);
+                        const allGatewaysResponse = await fetch('/api/v1/gateways?hours=24&page_size=500', {
+                            headers: { Accept: 'application/json' },
+                        });
+                        const allGatewaysBody = await allGatewaysResponse.json();
+                        const allRows = allGatewaysBody && Array.isArray(allGatewaysBody.data)
+                            ? allGatewaysBody.data
+                            : [];
+                        this.gateways = this.filterGateways(allRows, query);
                     }
                 } catch (fallbackErr) {
                     console.warn('GatewayPicker: API fallback failed', fallbackErr);
@@ -610,8 +619,11 @@ class GatewayPicker {
         const lowerQuery = query.toLowerCase();
 
         return gateways.filter(gateway => {
-            // Gateway can be a string ID or an object with name/id
-            const gatewayStr = typeof gateway === 'string' ? gateway : (gateway.name || gateway.id || '');
+            // Gateway can be a string ID or an object; v1 rows carry
+            // display_name/gateway_id, legacy-shaped objects name/id.
+            const gatewayStr = typeof gateway === 'string'
+                ? gateway
+                : (gateway.name || gateway.display_name || gateway.id || gateway.gateway_id || '');
             return gatewayStr.toLowerCase().includes(lowerQuery);
         }).slice(0, 20); // Limit results
     }

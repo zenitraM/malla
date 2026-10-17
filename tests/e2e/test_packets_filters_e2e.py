@@ -73,7 +73,7 @@ class TestPacketsFilters:
         api_requests = []
 
         def track_requests(request):
-            if "/api/packets/data" in request.url:
+            if "/api/v1/packets" in request.url:
                 api_requests.append({"url": request.url, "method": request.method})
 
         page.on("request", track_requests)
@@ -96,7 +96,7 @@ class TestPacketsFilters:
 
         # Verify the filtering was applied by checking API directly
         response = requests.get(
-            f"{test_server_url}/api/packets/data?portnum={test_portnum}&limit=5"
+            f"{test_server_url}/api/v1/packets?portnum={test_portnum}&page_size=5"
         )
         assert response.status_code == 200, (
             f"API request failed: {response.status_code}"
@@ -159,13 +159,15 @@ class TestPacketsFilters:
         print(f"Updated headers after TEXT_MESSAGE_APP: {updated_header_texts}")
 
         # Should have "Message" column for text messages
-        assert "Message" in updated_header_texts, (
+        # Design system renders headers uppercase via CSS (inner_text follows).
+        updated_headers_upper = [h.upper() for h in updated_header_texts]
+        assert "MESSAGE" in updated_headers_upper, (
             f"Expected 'Message' column for TEXT_MESSAGE_APP, got: {updated_header_texts}"
         )
 
         # Should have "Channel" column (always visible)
         channel_column_found = any(
-            "Channel" in header for header in updated_header_texts
+            "CHANNEL" in header for header in updated_headers_upper
         )
         assert channel_column_found, (
             f"Expected 'Channel' column, got: {updated_header_texts}"
@@ -186,7 +188,8 @@ class TestPacketsFilters:
         print(f"Final headers after clearing filter: {final_header_texts}")
 
         # Should NOT have "Message" column when not filtering by text messages
-        assert "Message" not in final_header_texts, (
+        final_headers_upper = [h.upper() for h in final_header_texts]
+        assert "MESSAGE" not in final_headers_upper, (
             f"Expected 'Message' column to be hidden when not filtering text messages, got: {final_header_texts}"
         )
 
@@ -217,14 +220,18 @@ class TestPacketsFilters:
         print(f"Headers after URL parameter restoration: {header_texts}")
 
         # Should have "Message" column for text messages
-        message_column_found = any("Message" in header for header in header_texts)
+        message_column_found = any(
+            "MESSAGE" in header.upper() for header in header_texts
+        )
         assert message_column_found, (
             f"ISSUE FOUND: Expected 'Message' column when loading with portnum={test_portnum} URL parameter, "
             f"but got headers: {header_texts}. This indicates columns are not being updated when URL parameters are restored."
         )
 
         # Should have "Channel" column (always visible)
-        channel_column_found = any("Channel" in header for header in header_texts)
+        channel_column_found = any(
+            "CHANNEL" in header.upper() for header in header_texts
+        )
         assert channel_column_found, f"Expected 'Channel' column, got: {header_texts}"
 
         print("✅ URL parameter column restoration test passed")
@@ -246,7 +253,7 @@ class TestPacketsFilters:
 
         # Get API data directly
         response = requests.get(
-            f"{test_server_url}/api/packets/data?portnum={test_portnum}&limit=25"
+            f"{test_server_url}/api/v1/packets?portnum={test_portnum}&page_size=25"
         )
         assert response.status_code == 200
 
@@ -291,14 +298,14 @@ class TestPacketsFilters:
         test_portnum = "TEXT_MESSAGE_APP"
 
         # First, get baseline data without filtering
-        response_all = requests.get(f"{test_server_url}/api/packets/data?limit=100")
+        response_all = requests.get(f"{test_server_url}/api/v1/packets?page_size=100")
         assert response_all.status_code == 200
         all_data = response_all.json()
         total_packets = len(all_data.get("data", []))
 
         # Get filtered data from API
         response_filtered = requests.get(
-            f"{test_server_url}/api/packets/data?portnum={test_portnum}&limit=100"
+            f"{test_server_url}/api/v1/packets?portnum={test_portnum}&page_size=100"
         )
         assert response_filtered.status_code == 200
         filtered_data = response_filtered.json()
@@ -401,7 +408,7 @@ class TestPacketsFilters:
         api_requests = []
 
         def track_requests(request):
-            if "/api/packets/data" in request.url:
+            if "/api/v1/packets" in request.url:
                 api_requests.append(
                     {
                         "url": request.url,
@@ -483,7 +490,7 @@ class TestPacketsFilters:
         events = []
 
         def track_requests(request):
-            if "/api/packets/data" in request.url:
+            if "/api/v1/packets" in request.url:
                 events.append(
                     {
                         "type": "api_request",
@@ -567,7 +574,7 @@ class TestPacketsFilters:
         api_requests = []
 
         def track_requests(request):
-            if "/api/packets/data" in request.url:
+            if "/api/v1/packets" in request.url:
                 api_requests.append(
                     {
                         "url": request.url,
@@ -715,7 +722,7 @@ class TestPacketsFilters:
         api_requests = []
 
         def track_requests(request):
-            if "/api/packets/data" in request.url:
+            if "/api/v1/packets" in request.url:
                 api_requests.append(request.url)
 
         page.on("request", track_requests)
@@ -753,10 +760,10 @@ class TestPacketsFilters:
         api_response_debug = page.evaluate("""
             async () => {
                 try {
-                    const response = await fetch('/api/packets/data?page=1&limit=25&search=&portnum=TEXT_MESSAGE_APP&group_packets=true');
+                    const response = await fetch('/api/v1/packets?page=1&page_size=25&portnum=TEXT_MESSAGE_APP');
                     const data = await response.json();
                     return {
-                        totalCount: data.total_count,
+                        totalCount: data.meta ? data.meta.pagination.total : null,
                         dataLength: data.data ? data.data.length : 0,
                         firstFewTypes: data.data ? data.data.slice(0, 3).map(p => p.portnum_name) : []
                     };
@@ -792,7 +799,9 @@ class TestPacketsFilters:
         print(f"Headers after dropdown change: {header_texts}")
 
         # Should have "Message" column for text messages
-        message_column_found = any("Message" in header for header in header_texts)
+        message_column_found = any(
+            "MESSAGE" in header.upper() for header in header_texts
+        )
         assert message_column_found, (
             f"Expected 'Message' column after changing to TEXT_MESSAGE_APP, got: {header_texts}"
         )
