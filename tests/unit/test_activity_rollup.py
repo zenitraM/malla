@@ -428,3 +428,33 @@ def test_hourly_timeline_matches_the_live_aggregation(tmp_path):
         assert got == list(expected.values()), offset_minutes
 
     conn.close()
+
+
+def test_prune_refold_does_not_rewrite_later_buckets(tmp_path):
+    """Retention must not re-fold the whole retained store.
+
+    A later bucket is deliberately corrupted: if ``prune_before`` re-aggregates
+    everything at/after the cutoff, the corruption is repaired and this fails.
+    Only the boundary bucket is allowed to be rewritten.
+    """
+    conn, _packets = _make_db(tmp_path / "refold-scope.db")
+    assert activity_rollup.refresh(conn, until=NOW) > 0
+
+    cutoff = NOW - DAY
+    later_bucket = activity_rollup.bucket_start(cutoff) + activity_rollup.BUCKET_SECONDS
+    conn.execute(
+        f"UPDATE {activity_rollup.PACKET_TABLE} SET total_packets = 999999 "
+        "WHERE bucket = ?",
+        (later_bucket,),
+    )
+    conn.commit()
+
+    activity_rollup.prune_before(conn, cutoff)
+    conn.commit()
+
+    stored = conn.execute(
+        f"SELECT total_packets FROM {activity_rollup.PACKET_TABLE} WHERE bucket = ?",
+        (later_bucket,),
+    ).fetchone()[0]
+    assert stored == 999999
+    conn.close()

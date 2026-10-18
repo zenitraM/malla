@@ -269,3 +269,22 @@ def test_grouped_expansion_columns_sort(page: Page, test_server_url: str):
     ]
     assert vals == sorted(vals, reverse=True), f"desc order violated: {vals}"
     assert first_asc != first_desc, "second click must reorder"
+
+
+def test_grouped_expansion_uses_the_active_filters(page: Page, test_server_url: str):
+    """The detail request must carry the table's filter set, not just the id."""
+    detail_urls: list[str] = []
+    page.on(
+        "request",
+        lambda request: detail_urls.append(request.url)
+        if "/api/v1/packets/" in request.url
+        else None,
+    )
+
+    page.goto(f"{test_server_url}/packets?group_packets=true&min_rssi=-200")
+    page.wait_for_selector(".group-expand-btn", timeout=15000)
+    page.locator(".group-expand-btn").first.click()
+    page.wait_for_selector(".group-receptions-row tbody tr", timeout=10000)
+
+    assert detail_urls, "expansion did not request packet detail"
+    assert "min_rssi=-200" in detail_urls[-1], detail_urls[-1]

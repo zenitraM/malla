@@ -33,6 +33,53 @@
         ).then((payload) => (payload && payload.data !== undefined ? payload.data : payload));
     }
 
+    /**
+     * The page's active query, as the table built it. The grouped badge counts
+     * only rows matching these filters, so the expansion must ask with the same
+     * window/membership or the two disagree on screen.
+     */
+    function expansionQuery() {
+        const params = new URLSearchParams();
+        const range = window.MallaRange && window.MallaRange.get
+            ? window.MallaRange.get()
+            : null;
+        if (range && range.sinceEpoch) {
+            params.set('since', new Date(range.sinceEpoch * 1000).toISOString());
+        }
+        if (range && range.untilEpoch) {
+            params.set('until', new Date(range.untilEpoch * 1000).toISOString());
+        }
+        if (range && range.key === 'all') {
+            params.delete('since');
+            params.delete('until');
+        }
+
+        const filters = (window.table && window.table.state && window.table.state.filters) || {};
+        // Explicit form bounds win over the global range, matching the table.
+        if (filters.start_time) {
+            const start = new Date(filters.start_time);
+            if (!Number.isNaN(start.getTime())) params.set('since', start.toISOString());
+        }
+        if (filters.end_time) {
+            const end = new Date(filters.end_time);
+            if (!Number.isNaN(end.getTime())) params.set('until', end.toISOString());
+        }
+        ['from_node', 'to_node', 'exclude_from', 'exclude_to', 'gateway_id'].forEach((key) => {
+            if (filters[key]) params.set(key, filters[key]);
+        });
+        if (filters.portnum) params.set('portnum', filters.portnum);
+        if (filters.primary_channel) params.set('primary_channel', filters.primary_channel);
+        ['min_rssi', 'max_rssi', 'hop_count'].forEach((key) => {
+            if (filters[key] !== undefined && filters[key] !== null && filters[key] !== '') {
+                params.set(key, filters[key]);
+            }
+        });
+        if (filters.exclude_self === true || filters.exclude_self === '1' || filters.exclude_self === 'true') {
+            params.set('exclude_self', 'true');
+        }
+        return params;
+    }
+
     /** '!433d0c24' -> 1128074276, for /node/ links. */
     function nodeRef(gatewayId) {
         if (typeof gatewayId !== 'string' || !gatewayId.startsWith('!')) return null;
@@ -322,7 +369,9 @@
         if (!row) return;
 
         const packetId = button.dataset.packetId;
-        const cacheKey = button.dataset.meshPacketId || String(packetId);
+        const query = expansionQuery();
+        const queryString = query.toString();
+        const cacheKey = `${button.dataset.meshPacketId || String(packetId)}|${queryString}`;
         const expansionRow = el('tr', { className: 'group-receptions-row' });
         const cell = el('td', { colspan: tableColspan(row) });
         expansionRow.appendChild(cell);
@@ -334,10 +383,9 @@
         button.dataset.loading = '1';
 
         try {
-            const receptions = await loadReceptions(
-                cacheKey,
-                `/api/v1/packets/${encodeURIComponent(packetId)}`
-            );
+            const detailPath = `/api/v1/packets/${encodeURIComponent(packetId)}`
+                + (queryString ? `?${queryString}` : '');
+            const receptions = await loadReceptions(cacheKey, detailPath);
             if (button.getAttribute('aria-expanded') !== 'true') return; // collapsed meanwhile
             renderReceptions(cell, receptions, sortStates.get(cell));
         } catch (error) {

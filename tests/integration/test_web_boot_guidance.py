@@ -137,7 +137,7 @@ def test_initialized_database_keeps_default_error_handling(tmp_path) -> None:
     # Bootstrap the required schema; the handler must no longer interfere.
     # The required set covers the rollup/activity tables the read paths
     # hard-depend on, not just packet_history/node_info.
-    from malla.database.connection import REQUIRED_TABLES
+    from src.malla.database.connection import REQUIRED_TABLES
 
     conn = sqlite3.connect(app.config["DATABASE_FILE"])
     try:
@@ -155,3 +155,42 @@ def test_initialized_database_keeps_default_error_handling(tmp_path) -> None:
     resp = client.get("/api/guidance-probe")
     assert resp.status_code == 500  # handler returned None: default handling
     assert "database_not_initialized" not in resp.get_data(as_text=True)
+
+
+def test_v1_missing_activity_table_answers_503(tmp_path) -> None:
+    """The activity store is a hard dependency, not an optional rollup.
+
+    Dropping one activity table must produce the coded bootstrap response, not
+    a generic 500 from the dashboard summary.
+    """
+    from tests.fixtures.database_fixtures import DatabaseFixtures
+
+    path = str(tmp_path / "missing-activity.db")
+    DatabaseFixtures().create_test_database(path)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("DROP TABLE activity_packet_quarter")
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Process-wide caches are keyed without the database path; a previous
+    # test's populated activity would otherwise serve 200 without touching
+    # the missing table.
+    import importlib
+
+    for pkg in ("malla", "src.malla"):
+        try:
+            analytics = importlib.import_module(f"{pkg}.services.analytics_service")
+            analytics.AnalyticsService._CACHE.clear()
+            analytics.AnalyticsService._TIMELINE_CACHE.clear()
+        except Exception:  # noqa: BLE001 - flush is best-effort
+            pass
+
+    app = create_app(AppConfig(database_file=path))
+    app.config["TESTING"] = True
+    client = app.test_client()
+
+    resp = client.get("/api/v1/stats/summary")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"]["code"] == "database_not_initialized"

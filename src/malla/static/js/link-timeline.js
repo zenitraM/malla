@@ -254,7 +254,7 @@
         }
     }
 
-    function close() {
+    function close({ restoreFocus = true } = {}) {
         if (!backdrop) return;
         document.removeEventListener('keydown', onKeydown, true);
         if (themeDisposer) { themeDisposer(); themeDisposer = null; }
@@ -267,8 +267,11 @@
         const closing = backdrop;
         backdrop = null;
         closing.remove();
-        if (lastFocus && document.contains(lastFocus)) lastFocus.focus();
-        lastFocus = null;
+        if (restoreFocus) {
+            const focusTarget = lastFocus;
+            lastFocus = null;
+            if (focusTarget && document.contains(focusTarget)) focusTarget.focus();
+        }
     }
 
     /**
@@ -279,12 +282,15 @@
      */
     function show(nodeA, nodeB, options = {}) {
         const indirect = Boolean(options.indirect);
-        // While already open, keep the captured focus: close() clears it and
-        // the trigger lives inside the drawer being discarded.
+        // While already open, keep the captured focus: close() would restore
+        // it to the drawer's own button and then clear it, so the final close
+        // would fall back to <body>.
         if (!backdrop) {
             lastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            close(); // no-op: there is nothing to dismiss yet
+        } else {
+            close({ restoreFocus: false });
         }
-        close();
 
         backdrop = h('div', 'lt-backdrop');
         drawer = h('aside', 'lt-drawer');
