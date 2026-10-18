@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sqlite3
 import sys
 import time
@@ -99,9 +100,39 @@ def main(argv: list[str] | None = None) -> int:
 
     phases: list[Phase] | None = [Phase(p) for p in args.phase] if args.phase else None
 
-    conn = sqlite3.connect(db_path, timeout=30)
+    selected = (
+        [m for m in MIGRATIONS if phases is None or m.phase in phases]
+        if args.dry_run
+        else []
+    )
+    if args.dry_run and not os.path.exists(db_path):
+        # No file to inspect. Report the registry directly: creating the file
+        # (even empty) is a write, and the schema checks cannot see the tables
+        # that the SCHEMA phase would create first.
+        print(f"dry run: {db_path} does not exist; all selected migrations are pending")
+        for name in args.forget:
+            print(f"dry run: would forget the progress marker of {name}")
+        for migration in selected:
+            print(f"{migration.name} [{migration.phase.value}] would apply")
+        print(
+            f"{len(selected)} would apply, 0 up to date, 0 failed in 0.00s ({db_path})"
+        )
+        return 0
+    if args.dry_run:
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30)
+        except sqlite3.Error as exc:
+            print(f"cannot open {db_path}: {exc}", file=sys.stderr)
+            return 2
+    else:
+        try:
+            conn = sqlite3.connect(db_path, timeout=30)
+        except sqlite3.Error as exc:
+            print(f"cannot open {db_path}: {exc}", file=sys.stderr)
+            return 2
+
     try:
-        if args.forget:
+        if args.forget and not args.dry_run:
             ensure_meta_table(conn)
             conn.commit()
         for name in args.forget:
@@ -112,7 +143,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"forgot progress marker of {name}")
             else:
                 print(f"no progress marker for {name}")
-        conn.commit()
+        if not args.dry_run:
+            conn.commit()
 
         started = time.monotonic()
         results = run_migrations(
@@ -122,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
             strict=args.strict,
             dry_run=args.dry_run,
         )
-    except TimeoutError as exc:
+    except (TimeoutError, sqlite3.OperationalError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     finally:
@@ -131,13 +163,34 @@ def main(argv: list[str] | None = None) -> int:
     applied = [r for r in results if r.status is Status.APPLIED]
     failed = [r for r in results if r.status is Status.FAILED]
     skipped = [r for r in results if r.status is Status.SKIPPED]
-    for result in results:
-        if result.status is not Status.SKIPPED:
-            print(result.describe())
-    print(
-        f"{len(applied)} applied, {len(skipped)} up to date, {len(failed)} failed "
-        f"in {time.monotonic() - started:.2f}s ({db_path})"
-    )
+    if args.dry_run:
+        # If the core tables are missing, the read-only index check cannot see
+        # the tables that the SCHEMA phase would create; every selected
+        # migration will run on the real database, so report them all pending.
+        if any(
+            r.name == "core_tables" and r.detail == "pending (dry run)" for r in results
+        ):
+            for result in results:
+                if result.status is Status.SKIPPED and result.detail == "up to date":
+                    result.detail = "pending (dry run)"
+        pending = [r for r in results if r.detail == "pending (dry run)"]
+        for result in results:
+            if result.detail == "pending (dry run)":
+                print(f"{result.name} [{result.phase.value}] would apply")
+            else:
+                print(result.describe())
+        print(
+            f"{len(pending)} would apply, {len(skipped) - len(pending)} up to date, "
+            f"{len(failed)} failed in {time.monotonic() - started:.2f}s ({db_path})"
+        )
+    else:
+        for result in results:
+            if result.status is not Status.SKIPPED:
+                print(result.describe())
+        print(
+            f"{len(applied)} applied, {len(skipped)} up to date, {len(failed)} failed "
+            f"in {time.monotonic() - started:.2f}s ({db_path})"
+        )
     for result in failed:
         print(f"failed: {result.name}: {result.detail}", file=sys.stderr)
     return 1 if failed else 0
