@@ -20,6 +20,12 @@ logger = logging.getLogger(__name__)
 #: a migration is unexpectedly slow, which is worth surfacing).
 DEFAULT_WARN_DEPTH = 100_000
 
+#: Default ceiling on queued payloads. A long BLOCKING migration must degrade
+#: to dropped-and-counted packets, never to an OOM-killed daemon; raise it (or
+#: pass ``max_depth=None``) when the box has headroom and the migration is
+#: known to be slow.
+DEFAULT_MAX_DEPTH = 1_000_000
+
 
 class IngestBuffer:
     """Queue of ``(topic, payload)`` pairs awaiting a writable database.
@@ -37,7 +43,7 @@ class IngestBuffer:
         self,
         *,
         warn_depth: int = DEFAULT_WARN_DEPTH,
-        max_depth: int | None = None,
+        max_depth: int | None = DEFAULT_MAX_DEPTH,
     ) -> None:
         self._items: deque[tuple[str, bytes]] = deque()
         self._lock = threading.Lock()

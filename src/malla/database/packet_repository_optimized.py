@@ -38,11 +38,11 @@ class PacketRepositoryOptimized:
             where_conditions = []
             params = []
 
-            if filters.get("start_time"):
+            if filters.get("start_time") is not None:
                 where_conditions.append("timestamp >= ?")
                 params.append(filters["start_time"])
 
-            if filters.get("end_time"):
+            if filters.get("end_time") is not None:
                 where_conditions.append("timestamp <= ?")
                 params.append(filters["end_time"])
 
@@ -58,11 +58,11 @@ class PacketRepositoryOptimized:
                 where_conditions.append("portnum_name = ?")
                 params.append(filters["portnum"])
 
-            if filters.get("min_rssi"):
+            if filters.get("min_rssi") is not None:
                 where_conditions.append("rssi >= ?")
                 params.append(filters["min_rssi"])
 
-            if filters.get("max_rssi"):
+            if filters.get("max_rssi") is not None:
                 where_conditions.append("rssi <= ?")
                 params.append(filters["max_rssi"])
 
@@ -317,7 +317,9 @@ class PacketRepositoryOptimized:
                     "hop_count",
                     "relay_node",
                 }
-                order_column = order_by if order_by in valid_order_columns else "timestamp"
+                order_column = (
+                    order_by if order_by in valid_order_columns else "timestamp"
+                )
                 order_dir_sql = "DESC" if order_dir.lower() == "desc" else "ASC"
 
                 # Main query
@@ -325,7 +327,7 @@ class PacketRepositoryOptimized:
                     SELECT
                         id, timestamp, from_node_id, to_node_id, portnum, portnum_name,
                         gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_limit, hop_start,
-                        payload_length, processed_successfully,
+                        payload_length, processed_successfully, raw_payload,
                         via_mqtt, want_ack, priority, delayed, channel_index, rx_time,
                         pki_encrypted, next_hop, relay_node, tx_after,
                         datetime(timestamp, 'unixepoch') as timestamp_str,

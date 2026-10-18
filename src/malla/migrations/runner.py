@@ -32,10 +32,13 @@ logger = logging.getLogger(__name__)
 
 MARKER_PREFIX = "migration:"
 LOCK_KEY = "migration_lock"
+#: Seconds an untouched migration lock may sit before takeover, unless the
+#: caller overrides ``stale_after`` (env-tunable via the capture startup).
+DEFAULT_LOCK_STALE_AFTER = 900.0
 #: A live holder may legitimately spend minutes building an index. Wait at
 #: least as long as the staleness window before declaring it wedged, so a
 #: healthy migration is never mistaken for a dead one.
-DEFAULT_LOCK_TIMEOUT = 900.0
+DEFAULT_LOCK_TIMEOUT = DEFAULT_LOCK_STALE_AFTER
 META_TABLE_SQL = """
     CREATE TABLE IF NOT EXISTS malla_meta (
         key TEXT PRIMARY KEY,
@@ -136,6 +139,9 @@ def _holder_is_alive(holder: str) -> bool:
         return False
     except (PermissionError, OSError):
         return True  # exists but not ours
+    # A recycled PID on the same host reads as a live holder; telling reuse
+    # apart would need /proc start-time checks, so the staleness timeout is
+    # what eventually reaps such a lock.
     return True
 
 
@@ -144,7 +150,7 @@ def migration_lock(
     conn: sqlite3.Connection,
     *,
     timeout: float = DEFAULT_LOCK_TIMEOUT,
-    stale_after: float = DEFAULT_LOCK_TIMEOUT,
+    stale_after: float = DEFAULT_LOCK_STALE_AFTER,
     poll: float = 0.25,
 ) -> Iterator[None]:
     """Serialise migration *runners* through a row in ``malla_meta``.
@@ -234,6 +240,7 @@ def run_migrations(
     dry_run: bool = False,
     take_lock: bool = True,
     lock_timeout: float = DEFAULT_LOCK_TIMEOUT,
+    stale_after: float | None = None,
 ) -> list[MigrationResult]:
     """Apply every pending migration in phase order.
 
@@ -249,6 +256,13 @@ def run_migrations(
     idempotent by contract and run unlocked: they may be duplicated by another
     instance, and a multi-minute phase must not hold a lock that a second runner
     could steal as stale. ``take_lock=False`` disables it entirely.
+
+    ``stale_after`` overrides how long a migration lock may sit untouched
+    before it is taken over regardless of its holder (seconds; default
+    :data:`DEFAULT_LOCK_STALE_AFTER`). The capture daemon threads its
+    ``MALLA_MIGRATION_LOCK_STALE_AFTER`` environment variable through here —
+    raise it before running a ``BLOCKING`` migration on a far bigger database
+    than the default assumes.
     """
     if migrations is None:
         from .registry import MIGRATIONS
@@ -272,7 +286,13 @@ def run_migrations(
         # Schema-changing phases are serialised across runners; DERIVED work is
         # idempotent, so it runs unlocked (see the docstring).
         guard: Any = (
-            migration_lock(conn, timeout=lock_timeout)
+            migration_lock(
+                conn,
+                timeout=lock_timeout,
+                stale_after=DEFAULT_LOCK_STALE_AFTER
+                if stale_after is None
+                else stale_after,
+            )
             if (take_lock and not dry_run and phase is not Phase.DERIVED)
             else nullcontext()
         )

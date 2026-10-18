@@ -1,99 +1,185 @@
+"""Unit tests for TracerouteService.
+
+The longest-links analysis reads the capture-maintained link/route day rollups
+(see ``malla.capture_rollups``), so these tests seed a real temporary database
+through the refresh path and pin the returned aggregates.
 """
-Unit tests for TracerouteService class.
 
-Tests the business logic and service methods for traceroute analysis.
-"""
+import sqlite3
+import time
 
-from datetime import datetime
-from unittest.mock import Mock, patch
+import pytest
 
+from malla import capture_rollups, capture_startup, mqtt_capture
 from src.malla.services.traceroute_service import TracerouteService
+
+pytestmark = pytest.mark.unit
+
+
+def _seed_db(tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    from meshtastic import mesh_pb2
+
+    db_path = str(tmp_path / "ll.db")
+    original_db = mqtt_capture.DATABASE_FILE
+    mqtt_capture.DATABASE_FILE = db_path
+    capture_startup.init_database(db_path)
+
+    conn = sqlite3.connect(db_path)
+    now = time.time()
+    # Link/day rollups fold completed UTC days only, so seed the traceroutes
+    # and positions inside yesterday.
+    ts = (
+        datetime.now(tz=UTC).replace(hour=12, minute=0, second=0, microsecond=0)
+        - timedelta(days=1)
+    ).timestamp()
+
+    def traceroute(route, snrs):
+        payload = mesh_pb2.RouteDiscovery()
+        payload.route.extend(route)
+        payload.snr_towards.extend(snrs)
+        return bytes(payload.SerializeToString())
+
+    def position(lat, lon):
+        position = mesh_pb2.Position()
+        position.latitude_i = int(lat * 1e7)
+        position.longitude_i = int(lon * 1e7)
+        return bytes(position.SerializeToString())
+
+    rows = [
+        # A two-hop path 100 -> 200 -> 300 plus the reverse direction.
+        (
+            ts,
+            100,
+            300,
+            70,
+            "TRACEROUTE_APP",
+            traceroute([200], [8, -4]),
+        ),
+        (
+            ts,
+            300,
+            100,
+            70,
+            "TRACEROUTE_APP",
+            traceroute([200, 300], [8, -4, -12]),
+        ),
+        # Latest positions: 100 near 200 (short hop), 300 far away.
+        (ts + 60, 100, None, 3, "POSITION_APP", position(52.0, 13.0)),
+        (ts + 60, 200, None, 3, "POSITION_APP", position(52.05, 13.05)),
+        (ts + 60, 300, None, 3, "POSITION_APP", position(60.0, 20.0)),
+    ]
+    for ts, src, dst, portnum, portnum_name, payload in rows:
+        conn.execute(
+            "INSERT INTO packet_history (timestamp, topic, from_node_id, to_node_id,"
+            " portnum, portnum_name, raw_payload) VALUES (?, 't', ?, ?, ?, ?, ?)",
+            (ts, src, dst, portnum, portnum_name, payload),
+        )
+    for node_id in (100, 200, 300):
+        conn.execute(
+            "INSERT INTO node_info (node_id, hex_id, long_name, short_name, first_seen,"
+            " last_updated) VALUES (?, '!x', ?, ?, ?, ?)",
+            (node_id, f"Node{node_id}", f"N{node_id}", now, now),
+        )
+    conn.commit()
+    conn.close()
+
+    capture_rollups.refresh(sqlite3.connect(db_path))
+    return db_path, original_db
 
 
 class TestTracerouteServiceLongestLinks:
-    """Test TracerouteService longest links analysis functionality."""
+    """Longest links over the capture-maintained rollups."""
 
-    @patch("src.malla.services.traceroute_service.TracerouteRepository")
-    @patch("src.malla.services.traceroute_service.TraceroutePacket")
-    def test_longest_links_analysis_basic(self, mock_traceroute_packet, mock_repo):
-        """Test basic longest links analysis functionality."""
-        # Mock repository response
-        mock_packet_data = {
-            "id": 1,
-            "from_node_id": 100,
-            "to_node_id": 200,
-            "timestamp": datetime.now().timestamp(),
-            "gateway_id": "!12345678",
-            "raw_payload": b"mock_payload",
-            "processed_successfully": True,
-        }
+    def test_longest_links_analysis_empty_data(self, tmp_path, monkeypatch):
+        db_path = str(tmp_path / "empty.db")
+        monkeypatch.setenv("MALLA_DATABASE_FILE", db_path)
+        original_db = mqtt_capture.DATABASE_FILE
+        mqtt_capture.DATABASE_FILE = db_path
+        capture_startup.init_database(db_path)
+        try:
+            result = TracerouteService.get_longest_links_analysis()
+        finally:
+            mqtt_capture.DATABASE_FILE = original_db
 
-        mock_repo.get_traceroute_packets.return_value = {"packets": [mock_packet_data]}
-
-        # Mock TraceroutePacket
-        mock_packet = Mock()
-        mock_packet.from_node_id = 100
-        mock_packet.to_node_id = 200
-
-        # Mock RF hop
-        mock_hop = Mock()
-        mock_hop.from_node_id = 100
-        mock_hop.to_node_id = 200
-        mock_hop.from_node_name = "Node100"
-        mock_hop.to_node_name = "Node200"
-        mock_hop.distance_km = 5.0  # 5km
-        mock_hop.snr = -5.0
-
-        mock_packet.get_rf_hops.return_value = [mock_hop]
-        mock_packet.get_display_hops.return_value = [mock_hop]
-        mock_packet.calculate_hop_distances = Mock()
-
-        mock_traceroute_packet.return_value = mock_packet
-
-        # Call the method
-        result = TracerouteService.get_longest_links_analysis(
-            min_distance_km=1.0, min_snr=-10.0, max_results=10
-        )
-
-        # Verify TraceroutePacket was called with correct arguments
-        mock_traceroute_packet.assert_called_with(
-            packet_data=mock_packet_data, resolve_names=True
-        )
-
-        # Verify structure
-        assert "summary" in result
-        assert "direct_links" in result
-        assert "indirect_links" in result
-
-        # Verify summary
-        summary = result["summary"]
-        assert "total_links" in summary
-        assert "direct_links" in summary
-        assert "longest_direct" in summary
-        assert "longest_path" in summary
-
-        # Verify direct links
-        assert len(result["direct_links"]) == 1
-        direct_link = result["direct_links"][0]
-        assert direct_link["from_node_id"] == 100
-        assert direct_link["to_node_id"] == 200
-        assert direct_link["distance_km"] == 5.0
-        assert direct_link["avg_snr"] == -5.0
-        assert direct_link["traceroute_count"] == 1
-
-    @patch("src.malla.services.traceroute_service.TracerouteRepository")
-    def test_longest_links_analysis_empty_data(self, mock_repo):
-        """Test analysis with no traceroute data."""
-        # Mock empty repository response
-        mock_repo.get_traceroute_packets.return_value = {"packets": []}
-
-        # Call the method
-        result = TracerouteService.get_longest_links_analysis()
-
-        # Should return empty results with proper structure
         assert result["summary"]["total_links"] == 0
         assert result["summary"]["direct_links"] == 0
         assert result["summary"]["longest_direct"] is None
         assert result["summary"]["longest_path"] is None
-        assert len(result["direct_links"]) == 0
-        assert len(result["indirect_links"]) == 0
+        assert result["direct_links"] == []
+        assert result["indirect_links"] == []
+
+    def test_longest_links_ranks_by_distance(self, tmp_path, monkeypatch):
+        db_path, original_db = _seed_db(tmp_path)
+        monkeypatch.setenv("MALLA_DATABASE_FILE", db_path)
+        try:
+            result = TracerouteService.get_longest_links_analysis(
+                min_distance_km=1.0, min_snr=-20.0, max_results=10
+            )
+        finally:
+            mqtt_capture.DATABASE_FILE = original_db
+
+        direct = result["direct_links"]
+        # The long 100/300 and 200/300 spans; the short 100<->200 hop is the
+        # pair (100, 200)?? - whatever the exact set, the farthest pair wins.
+        assert direct, "expected rollup-backed direct links"
+        distances = [link["distance_km"] for link in direct]
+        assert distances == sorted(distances, reverse=True)
+        assert distances[0] >= 1.0
+
+        top = direct[0]
+        for key in (
+            "from_node_id",
+            "to_node_id",
+            "from_node_name",
+            "to_node_name",
+            "distance_km",
+            "avg_snr",
+            "traceroute_count",
+            "packet_id",
+            "packet_url",
+            "last_seen",
+        ):
+            assert key in top
+        assert top["packet_id"] > 0
+        assert top["packet_url"] == f"/packet/{top['packet_id']}"
+        assert isinstance(top["traceroute_count"], int)
+
+        # Indirect path 100 <-> 300 via 200 with the recorded route preview.
+        indirect = result["indirect_links"]
+        assert indirect, "expected rollup-backed indirect links"
+        assert {link["from_node_id"] for link in indirect} | {
+            link["to_node_id"] for link in indirect
+        } == {100, 300}
+        preview = indirect[0]["route_preview"]
+        assert len(preview) >= 3
+        assert indirect[0]["hop_count"] >= 2
+
+        assert result["summary"]["total_links"] == len(direct) + len(indirect)
+        assert (
+            result["summary"]["longest_direct"] == f"{direct[0]['distance_km']:.2f} km"
+        )
+
+    def test_min_snr_filter_drops_weak_pairs(self, tmp_path, monkeypatch):
+        db_path, original_db = _seed_db(tmp_path)
+        monkeypatch.setenv("MALLA_DATABASE_FILE", db_path)
+
+        def all_pair_snrs():
+            try:
+                return TracerouteService.get_longest_links_analysis(min_snr=-100.0)[
+                    "direct_links"
+                ]
+            finally:
+                pass
+
+        try:
+            generous = TracerouteService.get_longest_links_analysis(min_snr=-100.0)
+            strict = TracerouteService.get_longest_links_analysis(min_snr=50.0)
+        finally:
+            mqtt_capture.DATABASE_FILE = original_db
+
+        assert generous["direct_links"]
+        # Every stored hop SNR is <= 20 dB, so a 50 dB bar excludes everything.
+        assert strict["direct_links"] == []
+        assert strict["summary"]["total_links"] == 0

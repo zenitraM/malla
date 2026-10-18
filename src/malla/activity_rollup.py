@@ -19,6 +19,11 @@ alone (a set cannot be re-cut), which is why the node/gateway buckets store
 identities rather than totals.
 
 The capture daemon refreshes the store; the web UI only reads it.
+
+Buckets key off the stored ``timestamp`` column. If that column ever mixes
+clock sources (rx time versus insert time, backfills from device logs), the
+boundaries blur by exactly that skew — the store stays self-consistent, but
+neighbouring buckets inherit the difference.
 """
 
 from __future__ import annotations
@@ -191,30 +196,18 @@ def pending(conn: sqlite3.Connection, *, until: float | None = None) -> bool:
     return row is not None
 
 
-def refresh(
-    conn: sqlite3.Connection, *, until: float | None = None, since: float | None = None
-) -> int:
-    """Append every completed bucket up to *until*. Returns rows inserted.
+#: Largest span a single refresh transaction covers, in buckets: 96 x 15 min
+#: == one day. The capture's writer lock is held per chunk, never for a whole
+#: backfill, so packet ingestion waits at most one chunk.
+DEFAULT_MAX_BUCKET_SPAN = 96
 
-    Idempotent (``INSERT OR IGNORE`` on the primary keys) and incremental: with
-    no *since* it resumes after the newest bucket already stored, so a first run
-    backfills all retained history and later runs only touch the new buckets.
+
+def _aggregate_range(conn: sqlite3.Connection, start: int, end: int) -> int:
+    """Insert the bucket rows for ``[start, end)``. Caller owns the transaction.
+
+    The three statements are the store's whole write path: idempotent
+    (``INSERT OR IGNORE`` on the primary keys) and set-based per bucket.
     """
-    end = bucket_start(until if until is not None else time.time())
-    if since is not None:
-        start = bucket_start(since)
-    else:
-        newest = latest_bucket(conn)
-        if newest is not None:
-            start = newest + BUCKET_SECONDS
-        else:
-            first = _first_packet_timestamp(conn)
-            if first is None:
-                return 0
-            start = bucket_start(first)
-    if start >= end:
-        return 0
-
     window = (start, end)
     bucket = f"(CAST(timestamp / {BUCKET_SECONDS} AS INT) * {BUCKET_SECONDS})"
     inserted = 0
@@ -242,8 +235,66 @@ def refresh(
         window,
     )
     inserted += cursor.rowcount
+    return inserted
 
+
+def refresh_chunk(conn: sqlite3.Connection, start: int, end: int) -> int:
+    """Aggregate the buckets in ``[start, end)`` and commit. Returns rows.
+
+    One transaction: this is the unit the capture's writer lock is held for.
+    """
+    inserted = _aggregate_range(conn, start, end)
     conn.commit()
+    return inserted
+
+
+def resume_bucket(conn: sqlite3.Connection) -> int | None:
+    """Bucket a fresh refresh would start from, or ``None`` if there is nothing.
+
+    ``None`` means no packets at all; otherwise the caller resumes after the
+    newest bucket already stored, or at the first packet's bucket on a cold one.
+    """
+    newest = latest_bucket(conn)
+    if newest is not None:
+        return newest + BUCKET_SECONDS
+    first = _first_packet_timestamp(conn)
+    return None if first is None else bucket_start(first)
+
+
+def refresh(
+    conn: sqlite3.Connection,
+    *,
+    until: float | None = None,
+    since: float | None = None,
+    max_bucket_span: int = DEFAULT_MAX_BUCKET_SPAN,
+) -> int:
+    """Append every completed bucket up to *until*. Returns rows inserted.
+
+    Idempotent (``INSERT OR IGNORE`` on the primary keys) and incremental: with
+    no *since* it resumes after the newest bucket already stored, so a first run
+    backfills all retained history and later runs only touch the new buckets.
+
+    The range is processed in chunks of at most *max_bucket_span* buckets, each
+    committed on its own, so a backfill never holds a write transaction (or the
+    capture's writer lock) for more than one chunk.
+    """
+    end = bucket_start(until if until is not None else time.time())
+    if since is not None:
+        start = bucket_start(since)
+    else:
+        resume = resume_bucket(conn)
+        if resume is None:
+            return 0
+        start = resume
+    if start >= end:
+        return 0
+
+    span = max(1, int(max_bucket_span)) * BUCKET_SECONDS
+    inserted = 0
+    while start < end:
+        chunk_end = min(start + span, end)
+        inserted += refresh_chunk(conn, start, chunk_end)
+        start = chunk_end
     return inserted
 
 
@@ -254,12 +305,27 @@ def prune_before(conn: sqlite3.Connection, cutoff: float) -> int:
     and the timeline stops reporting days whose source rows are gone. The bucket
     containing *cutoff* is kept even though part of it may already be expired:
     that way a bucket is never dropped while any of its packets are still
-    retained. Returns rows deleted across the three bucket tables."""
+    retained. Returns rows deleted across the three bucket tables.
+
+    Every bucket at or after the cutoff is then re-folded from the rows that
+    are still present (deleted, then repopulated by the normal aggregate
+    ``INSERT..SELECT`` in the caller's transaction) — the retention-edge bucket
+    never carries counts of already-deleted packets.
+    """
     cutoff_bucket = bucket_start(cutoff)
     deleted = 0
     for table in TABLES:
         cursor = conn.execute(f"DELETE FROM {table} WHERE bucket < ?", (cutoff_bucket,))
         deleted += cursor.rowcount
+
+    # Only the retention-edge bucket can be stale: older buckets are gone and
+    # newer buckets were folded from packets that are still present. Delete
+    # and re-fold just that bucket from the surviving rows; re-folding the
+    # whole retained store on every prune rewrites millions of rows under the
+    # capture's writer lock.
+    for table in TABLES:
+        conn.execute(f"DELETE FROM {table} WHERE bucket = ?", (cutoff_bucket,))
+    _aggregate_range(conn, cutoff_bucket, cutoff_bucket + BUCKET_SECONDS)
     return deleted
 
 

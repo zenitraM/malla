@@ -57,7 +57,7 @@ from paho.mqtt.enums import CallbackAPIVersion
 # ---------------------------------------------------------------------------
 from malla.config import get_config  # Import here to avoid circular import issues
 
-from . import activity_rollup, capture_startup
+from . import activity_rollup, capture_rollups, capture_startup
 from .ingest_buffer import IngestBuffer
 
 # Load the singleton configuration once at module import time.  This ensures the
@@ -797,6 +797,12 @@ def cleanup_old_data() -> None:
         cursor = conn.cursor()
 
         try:
+            # Lockstep rollup prune: the rollup window shrinks with the packet
+            # history in the SAME transaction, so readers never see a rollup
+            # row whose source packets are already gone. Buckets containing
+            # the cutoff are kept (same rule as the activity rollup prune).
+            capture_rollups.prune_before(conn, cutoff_time)
+
             # Delete old packet history records
             cursor.execute(
                 "DELETE FROM packet_history WHERE timestamp < ?", (cutoff_time,)
@@ -1496,6 +1502,29 @@ def main() -> None:
                     logging.debug("Built %s activity bucket rows", built)
             except Exception as exc:  # noqa: BLE001 - never break the loop
                 logging.warning("Activity bucket refresh failed: %s", exc)
+
+            # Retry DERIVED migrations that failed at boot (a killed ANALYZE, a
+            # busy database): the pending checks are cheap, and without this
+            # slot a boot-time failure would warn once and never re-run.
+            capture_startup.retry_derived_migrations(DATABASE_FILE)
+
+            # Periodic rollup refresh, on the same 60s cadence as the stats
+            # line. The capture daemon is the primary rollup refresher; the
+            # web app additionally runs a budgeted boot chunk plus its own
+            # low-priority refresher - dual runners are safe because every
+            # rollup write is idempotent on its natural keys.
+            if capture_rollups.refresh_enabled():
+                try:
+                    rollup_conn = sqlite3.connect(DATABASE_FILE, timeout=60.0)
+                    rollup_conn.execute("PRAGMA busy_timeout=30000")
+                    try:
+                        rollup_stats = capture_rollups.refresh(rollup_conn)
+                        if any(rollup_stats.values()):
+                            logging.debug("Rollup refresh: %s", rollup_stats)
+                    finally:
+                        rollup_conn.close()
+                except Exception as rollup_exc:  # noqa: BLE001
+                    logging.warning("Rollup refresh failed: %s", rollup_exc)
 
             # Periodically refresh query-planner statistics so the planner keeps
             # choosing index-based plans as packet_history grows. PRAGMA optimize

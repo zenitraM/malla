@@ -21,6 +21,7 @@ lets each phase be exercised without the MQTT stack.
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -30,6 +31,32 @@ from . import activity_rollup
 from .migrations import MIGRATIONS, MigrationResult, Phase, Status, run_migrations
 
 logger = logging.getLogger(__name__)
+
+#: Environment knob for the migration-lock staleness threshold (seconds). A
+#: lock older than this is taken over even if its holder looks alive.
+LOCK_STALE_AFTER_ENV = "MALLA_MIGRATION_LOCK_STALE_AFTER"
+LOCK_STALE_AFTER_DEFAULT = 900.0
+
+
+def migration_lock_stale_after() -> float:
+    """Staleness threshold for the runner's advisory lock.
+
+    Tunable via ``MALLA_MIGRATION_LOCK_STALE_AFTER`` (seconds); malformed
+    values fall back to the default rather than disabling takeover.
+    """
+    raw = os.getenv(LOCK_STALE_AFTER_ENV)
+    if not raw:
+        return LOCK_STALE_AFTER_DEFAULT
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid %s=%r, using %ss",
+            LOCK_STALE_AFTER_ENV,
+            raw,
+            LOCK_STALE_AFTER_DEFAULT,
+        )
+        return LOCK_STALE_AFTER_DEFAULT
 
 
 def configure_connection(conn: sqlite3.Connection, *, cache_kib: int = 65536) -> None:
@@ -79,7 +106,12 @@ def run_phase(
         conn = sqlite3.connect(db_path, timeout=30.0)
         try:
             configure_connection(conn)
-            results = run_migrations(conn, MIGRATIONS, phases=(phase,))
+            results = run_migrations(
+                conn,
+                MIGRATIONS,
+                phases=(phase,),
+                stale_after=migration_lock_stale_after(),
+            )
         finally:
             conn.close()
     _log_results(results)
@@ -106,22 +138,48 @@ def run_write_locking_migrations(
 def refresh_activity_buckets(db_path: str, *, lock: threading.Lock) -> int:
     """Append completed quarter-hour activity buckets. Returns rows inserted.
 
-    Called from the daemon's steady-state loop, where it is normally one
-    ``MAX(bucket)`` plus one indexed existence check: a bucket only completes
-    every 15 minutes.
+    The writer lock is taken per CHUNK (at most
+    :data:`activity_rollup.DEFAULT_MAX_BUCKET_SPAN` buckets, one day) and
+    released between chunks, so a first backfill over retained history — also
+    the ``activity_quarter_backfill`` DERIVED shape — never stars packet
+    ingestion for more than one chunk. The cursor advances by whole chunks even
+    through stretches with no packets, so the backfill always finishes.
     """
-    with lock:
+    span = activity_rollup.DEFAULT_MAX_BUCKET_SPAN * activity_rollup.BUCKET_SECONDS
+    total = 0
+    cursor: int | None = None
+    while True:
         conn = sqlite3.connect(db_path, timeout=30.0)
         try:
-            if not activity_rollup.pending(conn):
-                return 0
-            return activity_rollup.refresh(conn)
+            # The resume point and horizon are plain reads (WAL); only the
+            # chunk's writes need the writer lock.
+            if cursor is None:
+                start = activity_rollup.resume_bucket(conn)
+                if start is None:
+                    break
+            else:
+                start = cursor
+            end = activity_rollup.bucket_start(time.time())
+            if start >= end:
+                break
+            chunk_end = min(start + span, end)
+            with lock:
+                total += activity_rollup.refresh_chunk(conn, start, chunk_end)
         finally:
             conn.close()
+        cursor = chunk_end
+    return total
 
 
 def start_background_migrations(db_path: str) -> threading.Thread:
-    """Apply the DERIVED migrations in a daemon thread, alongside ingestion."""
+    """Apply the DERIVED migrations in a daemon thread, alongside ingestion.
+
+    The boot thread and the steady-state maintenance loop (the 60s slot that
+    calls :func:`refresh_activity_buckets`) may work on the same tables at the
+    same time. That is safe by construction: every bucket write is ``INSERT OR
+    IGNORE`` on natural keys, so a duplicate application is a no-op, not a
+    conflict. Leave it as is.
+    """
 
     def _worker() -> None:
         try:
@@ -132,3 +190,30 @@ def start_background_migrations(db_path: str) -> threading.Thread:
     thread = threading.Thread(target=_worker, name="db-migrations", daemon=True)
     thread.start()
     return thread
+
+
+def retry_derived_migrations(db_path: str) -> None:
+    """Re-run pending DERIVED migrations on their own connection.
+
+    Called from the maintenance loop: a DERIVED migration that failed at boot
+    (a killed ``ANALYZE``, a busy database) is retried here every minute
+    instead of never. The pending checks are cheap, the work is idempotent,
+    and every exception is logged rather than raised — the next tick retries.
+    """
+    try:
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        try:
+            configure_connection(conn)
+            results = run_migrations(
+                conn,
+                MIGRATIONS,
+                phases=(Phase.DERIVED,),
+                take_lock=False,
+                stale_after=migration_lock_stale_after(),
+            )
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - never break the maintenance loop
+        logger.warning("Deferred-migration retry failed: %s", exc)
+        return
+    _log_results(results)

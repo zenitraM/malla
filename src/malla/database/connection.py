@@ -1,13 +1,13 @@
-"""
-Database connection management for Meshtastic Mesh Health Web UI.
-"""
+"""Database connection management for Meshtastic Mesh Health Web UI."""
 
 import logging
 import os
 import sqlite3
+from typing import Any
+
+from malla.config import get_config
 
 # Prefer configuration loader over environment variables
-from malla.config import get_config
 from malla.migrations.structural import missing_indexes
 
 logger = logging.getLogger(__name__)
@@ -83,8 +83,23 @@ def get_db_connection() -> sqlite3.Connection:
         raise
 
 
-#: Tables the web UI needs; everything else is created by the capture daemon.
-REQUIRED_TABLES: tuple[str, ...] = ("packet_history", "node_info")
+#: Tables the web UI's read paths hard-depend on. The capture daemon (or
+#: ``malla-migrate``) creates everything else; a database from an older
+#: release is missing these and every read 500s, so the preflight treats
+#: them as required and serves the actionable 503 instead.
+REQUIRED_TABLES: tuple[str, ...] = (
+    "packet_history",
+    "node_info",
+    "node_hour_rollup",
+    "node_latest_position",
+    "node_latest_telemetry",
+    "traceroute_endpoint",
+    "link_day_rollup",
+    "route_day_rollup",
+    "activity_node_quarter",
+    "activity_packet_quarter",
+    "activity_gateway_quarter",
+)
 
 
 def _present_required_tables(cursor: sqlite3.Cursor) -> set[str]:
@@ -94,6 +109,29 @@ def _present_required_tables(cursor: sqlite3.Cursor) -> set[str]:
         REQUIRED_TABLES,
     )
     return {row[0] for row in cursor.fetchall()}
+
+
+def required_tables_missing(db_path: str | None = None) -> list[str] | None:
+    """Return the required tables absent from *db_path*.
+
+    Reads the catalog on a throwaway connection (no pragmas, no WAL switch —
+    this must stay cheap enough for a request handler). Returns ``None`` when
+    the answer cannot be determined (missing file, locked catalog, ...): the
+    caller should keep its default handling instead of trusting the check.
+    An empty list means the database is initialized.
+    """
+    path = db_path or _resolve_db_path()
+    try:
+        conn = sqlite3.connect(path, timeout=5.0)
+    except sqlite3.Error:
+        return None
+    try:
+        present = _present_required_tables(conn.cursor())
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+    return [table for table in REQUIRED_TABLES if table not in present]
 
 
 def init_database() -> None:
@@ -147,6 +185,45 @@ def init_database() -> None:
             )
 
     except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
         # Don't raise the exception - let the app start anyway
-        # The database might not exist yet or be created by another process
+        logger.error(f"Database initialization failed: {e}")
+
+
+def check_database_tables() -> dict[str, Any]:
+    """
+    Check the health of database tables.
+
+    Returns:
+        Dictionary with table health information
+    """
+    tables_status = {}
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get all tables
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        all_tables = [row[0] for row in cursor.fetchall()]
+
+        # Check each expected table
+        expected_tables = [
+            "packet_history",
+            "node_info",
+            "traceroute_table",
+            "node_receptions",
+        ]
+
+        for table in expected_tables:
+            if table in all_tables:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                count = cursor.fetchone()[0]
+                tables_status[table] = {"exists": True, "count": count}
+            else:
+                tables_status[table] = {"exists": False, "count": 0}
+
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error checking database tables: {e}")
+        tables_status["error"] = str(e)
+
+    return tables_status

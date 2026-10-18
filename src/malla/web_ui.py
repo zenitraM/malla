@@ -10,18 +10,24 @@ import atexit
 import json
 import logging
 import os
+import sqlite3
 import sys
+import threading
 import time
 from pathlib import Path
 
-from flask import Flask
+from flask import Flask, jsonify, render_template_string, request
+from werkzeug.exceptions import InternalServerError
 
 # Import application configuration loader
+from . import capture_rollups
 from .config import AppConfig, get_config
 
 # Optional CORS support will be checked inline
 # Import configuration and database setup
-from .database.connection import init_database
+from .database.connection import init_database, required_tables_missing
+from .migrations import Phase, run_migrations
+from .migrations.derived import PLANNER_STATS
 from .routes import register_routes
 
 # Import utility functions for template filters
@@ -40,8 +46,70 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+#: Shown (plainly styled, no DB access) while the database is still
+#: uninitialized; the capture daemon or the migration CLI bootstraps it.
+_UNINITIALIZED_DB_PAGE = """<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Database not initialized</title>
+<style>
+body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #1f2430; }
+h1 { font-size: 1.25rem; } code, pre { background: #f2f4f8; border-radius: 4px; }
+code { padding: 0.1rem 0.35rem; } pre { padding: 0.75rem 1rem; overflow-x: auto; }
+</style></head>
+<body>
+<h1>Database not initialized</h1>
+<p>{{ message }}</p>
+<pre>malla-capture
+{{ cli_command }}</pre>
+</body>
+</html>"""
+
+_BOOTSTRAP_CLI_COMMAND = "python -m malla.migrations.cli"
+
+# One planner-stats bootstrap attempt per database path, process-wide: the
+# DERIVED migration is idempotent, but there is no reason to race it either.
+_PLANNER_STATS_STARTED: set[str] = set()
+_PLANNER_STATS_LOCK = threading.Lock()
+
 # Static-asset cache-busting token; changes each process start (i.e. each deploy).
 _ASSET_VERSION = str(int(time.time()))
+
+
+def _spawn_planner_stats_bootstrap(db_path: str) -> None:
+    """Run the PLANNER_STATS DERIVED migration once, in a daemon thread.
+
+    The capture daemon normally owns DERIVED work; this restores parity for
+    capture-less web boots, which would otherwise serve a cold ``sqlite_stat1``
+    on a large database — exactly the mis-planned-query scenario the ANALYZE
+    exists to prevent. Idempotent, and never raises into request serving.
+    """
+
+    def _run() -> None:
+        conn: sqlite3.Connection | None = None
+        try:
+            from malla.capture_startup import configure_connection
+
+            conn = sqlite3.connect(db_path, timeout=30.0)
+            configure_connection(conn)
+            results = run_migrations(
+                conn,
+                migrations=[PLANNER_STATS],
+                phases=(Phase.DERIVED,),
+                take_lock=False,
+            )
+            for result in results:
+                logger.info("Planner-stats bootstrap: %s", result.describe())
+        except Exception as exc:  # noqa: BLE001 - background, best effort
+            logger.warning("Planner-stats bootstrap failed: %s", exc)
+        finally:
+            if conn is not None:
+                conn.close()
+
+    with _PLANNER_STATS_LOCK:
+        if db_path in _PLANNER_STATS_STARTED:
+            return
+        _PLANNER_STATS_STARTED.add(db_path)
+    threading.Thread(target=_run, name="planner-stats-bootstrap", daemon=True).start()
 
 
 class TrustedProxyClientIPMiddleware:
@@ -269,6 +337,79 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
     # Initialize database
     logger.info("Initializing database connection")
     init_database()
+
+    # ---------------------------------------------------------------------
+    # Uninitialized-database guidance (web-only boots without capture).
+    # A locked/busy database keeps its default handling: the check below
+    # returns an empty missing-list for every initialized schema.
+    # ---------------------------------------------------------------------
+
+    @app.errorhandler(sqlite3.OperationalError)
+    def _database_operational_error(exc: sqlite3.OperationalError):
+        """Answer with boot guidance while the database is uninitialized."""
+        from flask import current_app
+
+        missing = required_tables_missing()
+        if not missing:
+            # Initialized: locked/timeout errors keep their default path. An
+            # errorhandler returning None would break response finalization,
+            # so reproduce Flask's own default here (logged identically).
+            if exc.__traceback__ is not None:
+                current_app.log_exception((type(exc), exc, exc.__traceback__))
+            return InternalServerError()
+        message = (
+            "Database not initialized. Run the capture daemon once "
+            "(malla-capture) to bootstrap it, then retry."
+        )
+        if request.path.startswith("/api/"):
+            return (
+                jsonify(
+                    {
+                        "error": {
+                            "code": "database_not_initialized",
+                            "message": message,
+                        }
+                    }
+                ),
+                503,
+            )
+        return (
+            render_template_string(
+                _UNINITIALIZED_DB_PAGE,
+                message=message,
+                cli_command=_BOOTSTRAP_CLI_COMMAND,
+            ),
+            503,
+        )
+
+    # Capture-less parity for the planner-stats DERIVED migration: without
+    # sqlite_stat1 the planner mis-scales plans on a big database. The check
+    # is a cheap marker/stats read; the thread no-ops when capture ran.
+    try:
+        _db_file = str(app.config.get("DATABASE_FILE") or "")
+        _check = sqlite3.connect(_db_file, timeout=5.0)
+        try:
+            _planner_pending = PLANNER_STATS.pending(_check, None)
+        finally:
+            _check.close()
+        if _planner_pending:
+            _spawn_planner_stats_bootstrap(_db_file)
+    except Exception as exc:  # noqa: BLE001 - must not block app creation
+        logger.debug("Planner-stats bootstrap check skipped: %s", exc)
+
+    # Rollup maintenance: one budgeted catch-up chunk now (mirrors the
+    # AnalyticsService lazy-rollup precedent) plus a persistent low-priority
+    # refresher. The capture daemon refreshes too; overlap is safe because
+    # every rollup write is idempotent on its natural keys. NOTE: this
+    # intentionally deviates from design §0's "web does a single bounded
+    # chunk only" - the standing sign-off is a persistent thread here as well.
+    if capture_rollups.refresh_enabled():
+        db_path = str(app.config.get("DATABASE_FILE") or cfg.database_file)
+        try:
+            capture_rollups.run_boot_refresh(db_path)
+        except Exception as exc:  # noqa: BLE001 - never block startup
+            logger.warning("Rollup boot refresh failed: %s", exc)
+        capture_rollups.ensure_refresh_thread(db_path)
 
     # Start periodic cache cleanup for node names
     logger.info("Starting node name cache cleanup background thread")

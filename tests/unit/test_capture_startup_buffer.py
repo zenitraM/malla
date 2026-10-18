@@ -120,6 +120,84 @@ def test_derived_phase_does_not_take_the_migration_lock(tmp_path):
     assert holder == (dead_holder,)
 
 
+def _seed_activity_span(db_path: str, days: float) -> None:
+    """Schema plus packets spread over the last *days*, for refresh chunking."""
+    import time as time_module
+
+    from malla.migrations import MIGRATIONS, run_migrations
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    run_migrations(conn, MIGRATIONS, phases=(Phase.SCHEMA,), take_lock=False)
+    now = time_module.time()
+    rows = []
+    timestamp = now - days * 86400
+    node = 1
+    while timestamp < now - 61:
+        rows.append((timestamp, "msh/x", node, "!gwA", 3, 3, 1))
+        timestamp += 421
+        node = node % 40 + 1
+    conn.executemany(
+        "INSERT INTO packet_history (timestamp, topic, from_node_id, gateway_id, "
+        "hop_start, hop_limit, processed_successfully) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_activity_refresh_locks_once_per_chunk(tmp_path, monkeypatch):
+    """A multi-day backfill takes the writer lock once per chunk, not overall."""
+    import threading
+
+    from malla import activity_rollup
+
+    db = str(tmp_path / "chunks.db")
+    _seed_activity_span(db, days=3)
+
+    chunk_lock = threading.Lock()
+    chunks: list[tuple[int, int]] = []
+    original = activity_rollup.refresh_chunk
+
+    def counting_chunk(conn, start, end):
+        with chunk_lock:
+            chunks.append((start, end))
+        return original(conn, start, end)
+
+    monkeypatch.setattr(activity_rollup, "refresh_chunk", counting_chunk)
+
+    class LockProxy:
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self.acquisitions = 0
+
+        def __enter__(self):
+            self._lock.acquire()
+            self.acquisitions += 1
+
+        def __exit__(self, *exc: object) -> None:
+            self._lock.release()
+
+    lock = LockProxy()
+    built = capture_startup.refresh_activity_buckets(db, lock=lock)  # type: ignore[arg-type]
+
+    assert built > 0
+    assert len(chunks) >= 2, "a 3-day backlog must be more than one chunk"
+    assert lock.acquisitions == len(chunks)  # one hold per chunk, released between
+
+    # And the store is complete once the loop is done.
+    conn = sqlite3.connect(db)
+    try:
+        assert not activity_rollup.pending(conn)
+    finally:
+        conn.close()
+
+    # A steady-state pass writes nothing: no chunk, no lock.
+    before = lock.acquisitions
+    assert capture_startup.refresh_activity_buckets(db, lock=lock) == 0
+    assert lock.acquisitions == before
+
+
 def test_oversized_payload_is_rejected_before_buffering(monkeypatch):
     """The 4 KB cap must run before the startup buffer, not at drain time."""
 

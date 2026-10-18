@@ -68,8 +68,64 @@ def sort_receptions_for_display(
     return sorted(receptions, key=_sort_key)
 
 
-def get_packet_details(packet_id: int) -> dict[str, Any] | None:
-    """Get comprehensive details for a specific packet including all receptions."""
+def _reception_clauses(filters: dict[str, Any], params: list[Any]) -> list[str]:
+    """SQL fragments matching the packets-list membership filters.
+
+    The grouped badge counts rows after every list filter; the expansion must
+    apply the same clauses or the badge and the expanded receptions disagree.
+    """
+    clauses: list[str] = []
+
+    def add(clause: str, value: Any) -> None:
+        clauses.append(clause)
+        params.append(value)
+
+    if filters.get("since") is not None:
+        add("timestamp >= ?", filters["since"])
+    if filters.get("until") is not None:
+        add("timestamp <= ?", filters["until"])
+    if filters.get("gateway_id"):
+        add("gateway_id = ?", filters["gateway_id"])
+    if filters.get("portnum_name"):
+        add("portnum_name = ?", filters["portnum_name"])
+    if filters.get("primary_channel"):
+        add("channel_id = ?", filters["primary_channel"])
+    if filters.get("min_rssi") is not None:
+        add("rssi >= ?", filters["min_rssi"])
+    if filters.get("max_rssi") is not None:
+        add("rssi <= ?", filters["max_rssi"])
+    if filters.get("hop_count") is not None:
+        add("(hop_start - hop_limit) = ?", filters["hop_count"])
+    if filters.get("from_node") is not None:
+        add("from_node_id = ?", filters["from_node"])
+    if filters.get("to_node") is not None:
+        add("to_node_id = ?", filters["to_node"])
+    if filters.get("exclude_from") is not None:
+        add("from_node_id != ?", filters["exclude_from"])
+    if filters.get("exclude_to") is not None:
+        add("to_node_id != ?", filters["exclude_to"])
+    search = filters.get("search")
+    if search:
+        clauses.append(
+            "(portnum_name LIKE ? OR gateway_id LIKE ? OR channel_id LIKE ?"
+            " OR CAST(from_node_id AS TEXT) LIKE ?"
+            " OR CAST(to_node_id AS TEXT) LIKE ?)"
+        )
+        params.extend([f"%{search}%"] * 5)
+    return clauses
+
+
+def get_packet_details(
+    packet_id: int,
+    reception_filters: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Get comprehensive details for a specific packet including all receptions.
+
+    ``reception_filters`` (``since``/``until`` epoch seconds, ``gateway_id``,
+    ``portnum_name``) narrows the correlated receptions to the page's active
+    grouped query: the grouped badge counts only rows matching those, so the
+    expansion must ask with the same membership or the counts disagree.
+    """
     logger.info(f"Getting packet details for packet {packet_id}")
 
     try:
@@ -164,48 +220,61 @@ def get_packet_details(packet_id: int) -> dict[str, Any] | None:
         receptions: list[dict[str, Any]] = []
         if packet["mesh_packet_id"] is not None:
             # Use mesh_packet_id for accurate correlation
+            receipt_where = "WHERE mesh_packet_id = ? AND id != ?"
+            receipt_params: list[Any] = [packet["mesh_packet_id"], packet_id]
+            filters = reception_filters or {}
+            clauses = _reception_clauses(filters, receipt_params)
+            if clauses:
+                receipt_where += " AND " + " AND ".join(clauses)
             cursor.execute(
-                """
+                f"""
                 SELECT
                     id, timestamp, gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
                     payload_length, processed_successfully,
                     raw_payload, from_node_id, to_node_id, portnum, portnum_name, relay_node,
                     mesh_packet_id
                 FROM packet_history
-                WHERE mesh_packet_id = ?
-                AND id != ?
+                {receipt_where}
                 ORDER BY timestamp ASC
             """,
-                (packet["mesh_packet_id"], packet_id),
+                receipt_params,
             )
 
             logger.info(
                 f"Correlating packets using mesh_packet_id: {packet['mesh_packet_id']}"
             )
         else:
-            # Fallback to time-based correlation for older packets without mesh_packet_id
+            # Fallback to time-based correlation for older packets without
+            # (integer) mesh_packet_id: honour the same reception filters so
+            # both correlation paths stay in parity with the grouped counts.
             time_window = 2
+            receipt_where = (
+                "WHERE from_node_id = ? AND timestamp BETWEEN ? AND ?"
+                " AND portnum = ? AND id != ?"
+            )
+            receipt_params = [
+                packet["from_node_id"],
+                packet["timestamp"] - time_window,
+                packet["timestamp"] + time_window,
+                packet["portnum"],
+                packet_id,
+            ]
+            filters = dict(reception_filters or {})
+            clauses = _reception_clauses(filters, receipt_params)
+            if clauses:
+                receipt_where += " AND " + " AND ".join(clauses)
             cursor.execute(
-                """
+                f"""
                 SELECT
                     id, timestamp, gateway_id, channel_id, rssi, snr, hop_limit, hop_start,
                     payload_length, processed_successfully,
                     raw_payload, from_node_id, to_node_id, portnum, portnum_name, relay_node,
                     mesh_packet_id
                 FROM packet_history
-                WHERE from_node_id = ?
-                AND timestamp BETWEEN ? AND ?
-                AND portnum = ?
-                AND id != ?
+                {receipt_where}
                 ORDER BY timestamp ASC
             """,
-                (
-                    packet["from_node_id"],
-                    packet["timestamp"] - time_window,
-                    packet["timestamp"] + time_window,
-                    packet["portnum"],
-                    packet_id,
-                ),
+                receipt_params,
             )
 
             logger.info(

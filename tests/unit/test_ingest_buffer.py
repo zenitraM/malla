@@ -102,3 +102,18 @@ def test_depth_warning_and_max_depth_drops():
     seen: list[bytes] = []
     buffer.drain(lambda topic, payload: seen.append(payload))
     assert seen == [b"0", b"1", b"2"]
+
+
+def test_default_buffer_is_bounded_not_unbounded():
+    """The default ceiling keeps a stuck migration from OOM-ing the daemon."""
+    from malla.ingest_buffer import DEFAULT_MAX_DEPTH, DEFAULT_WARN_DEPTH
+
+    assert DEFAULT_MAX_DEPTH == 1_000_000
+    assert DEFAULT_WARN_DEPTH < DEFAULT_MAX_DEPTH
+
+    # Explicit None still means "no ceiling" for boxes with headroom.
+    unbounded = IngestBuffer(max_depth=None)
+    unbounded.start()
+    for index in range(5):
+        assert unbounded.append("msh/x", str(index).encode()) is True
+    assert unbounded.dropped == 0
