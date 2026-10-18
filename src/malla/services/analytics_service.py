@@ -666,7 +666,6 @@ class AnalyticsService:
         the timeline is complete; buckets for missing days read as zero).
         """
         from ..database.connection import get_db_connection
-        from ..database.schema import ACTIVITY_ROLLUP_TABLE_SQL
 
         offset_sec = tz_offset_minutes * 60
         deadline = time.time() + AnalyticsService._ROLLUP_TIME_BUDGET_SEC
@@ -675,9 +674,6 @@ class AnalyticsService:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            # Defensive create: the web app normally creates this at startup,
-            # but the service must also work against bare test databases.
-            cursor.execute(ACTIVITY_ROLLUP_TABLE_SQL)
 
             if range_key == "7d":
                 start_local = today_local - 7 * 86400
