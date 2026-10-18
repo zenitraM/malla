@@ -81,6 +81,16 @@ NODE_INFO_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (("primary_channel", "TEX
 
 INDEX_SPECS: tuple[tuple[str, str, str], ...] = (
     (
+        "idx_packet_history_to_node",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_to_node ON packet_history(to_node_id)",
+    ),
+    (
+        "idx_packet_history_payload_length",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_payload_length ON packet_history(payload_length)",
+    ),
+    (
         "idx_packet_history_stats",
         "packet_history",
         "CREATE INDEX IF NOT EXISTS idx_packet_history_stats ON packet_history(timestamp, from_node_id)",
@@ -185,6 +195,24 @@ INDEX_SPECS: tuple[tuple[str, str, str], ...] = (
         "idx_packet_history_portnum_name",
         "packet_history",
         "CREATE INDEX IF NOT EXISTS idx_packet_history_portnum_name ON packet_history(portnum_name)",
+    ),
+    (
+        "idx_packet_history_mesh_ts",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_mesh_ts "
+        "ON packet_history(mesh_packet_id, timestamp, id)",
+    ),
+    (
+        "idx_packet_history_ts_mesh",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_ts_mesh "
+        "ON packet_history(timestamp, mesh_packet_id)",
+    ),
+    (
+        "idx_packet_history_signal_time",
+        "packet_history",
+        "CREATE INDEX IF NOT EXISTS idx_packet_history_signal_time "
+        "ON packet_history(timestamp, rssi, snr)",
     ),
     (
         "idx_packet_history_portnum_name_time",
