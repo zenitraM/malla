@@ -739,6 +739,15 @@ def _refresh_loop(db_path: str) -> None:
                         delay = 1.0  # catch-up: bounded slices, back-to-back
             finally:
                 conn.close()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc):
+                # Verify-only web process over a database the capture has not
+                # migrated yet: there is nothing to refresh, and retrying every
+                # interval only buries real failures in the log.
+                logger.debug("Rollup refresher stopped (rollup tables absent): %s", exc)
+                return
+            logger.warning("Rollup refresh thread error: %s", exc)
+            delay = interval
         except Exception as exc:  # noqa: BLE001 - never kill the refresher
             logger.warning("Rollup refresh thread error: %s", exc)
             delay = interval
