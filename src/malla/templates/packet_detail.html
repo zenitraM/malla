@@ -4,6 +4,7 @@
 {% block title %}Packet #{{ packet.id }} - Malla{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/link-timeline.css') }}">
 <!-- Leaflet CSS -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 {% include 'components/openfreemap_css.html' %}
@@ -893,6 +894,7 @@
 <script src="{{ url_for('static', filename='js/openfreemap.js') }}?v={{ ASSET_VERSION }}"></script>
 <!-- D3.js for graph visualisation -->
 <script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="{{ url_for('static', filename='js/link-timeline.js') }}"></script>
 
 <script>
 // Embed data directly in JavaScript variables to avoid HTML attribute parsing issues

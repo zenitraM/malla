@@ -370,3 +370,172 @@
   .pagination-btn,
   .action-btn { transition: none; }
 }
+
+/* ---------------------------------------------------------------------------
+ * Grouped-row reception expander (grouped-rows.js)
+ * ------------------------------------------------------------------------- */
+.group-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  margin-right: 0.25rem;
+  border: 1px solid var(--malla-border);
+  border-radius: var(--malla-radius-sm, 0.3rem);
+  background: var(--malla-surface-raised, transparent);
+  color: var(--malla-text-muted, inherit);
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.group-expand-btn:hover {
+  background: var(--malla-surface-2);
+  color: var(--malla-text, inherit);
+}
+
+.group-expand-btn:focus-visible {
+  outline: 2px solid var(--malla-focus);
+  outline-offset: 2px;
+}
+
+.group-expand-btn .bi {
+  font-size: 0.8rem;
+  transition: transform 0.15s ease;
+}
+
+.group-expand-btn[aria-expanded='true'] .bi {
+  transform: rotate(90deg);
+}
+
+.group-receptions-row > td {
+  background: var(--malla-surface-2);
+  border-bottom: 1px solid var(--malla-border);
+}
+
+.group-reception-tag {
+  font-size: 0.65rem;
+}
+
+/* Per-reception deep link inside expanded grouped rows */
+a.group-reception-open {
+  color: var(--malla-text-muted);
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.25rem;
+}
+a.group-reception-open:hover { color: var(--bs-link-hover-color); }
+a.group-reception-open:focus-visible {
+  outline: var(--malla-focus-ring);
+  outline-offset: 1px;
+  border-radius: var(--malla-radius-sm);
+}
+
+.group-receptions-empty,
+.group-receptions-error {
+  padding: 0.35rem 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.group-receptions-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.35rem 0.25rem;
+}
+
+.skeleton-line {
+  display: block;
+  height: 0.7rem;
+  width: 55%;
+  border-radius: 0.25rem;
+  background: linear-gradient(
+    90deg,
+    var(--malla-border) 25%,
+    var(--malla-surface-raised) 50%,
+    var(--malla-border) 75%
+  );
+  background-size: 200% 100%;
+  animation: group-receptions-shimmer 1.2s ease-in-out infinite;
+}
+
+.skeleton-line.short { width: 30%; }
+
+@keyframes group-receptions-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-line { animation: none; }
+  .group-expand-btn .bi { transition: none; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Saved views (saved-views.js)
+ * ------------------------------------------------------------------------- */
+.sv-sidebar-section { border-top: 1px dashed var(--malla-border); }
+
+.sv-menu { min-width: 260px; max-width: 340px; }
+
+.sv-name { font-weight: 600; margin-right: 0.35rem; }
+
+.sv-apply { display: flex; flex-direction: column; align-items: flex-start; }
+
+.sv-chips { display: inline-flex; flex-wrap: wrap; gap: 0.2rem; }
+
+.sv-chip { font-size: 0.6rem; }
+
+.sv-name-input { min-width: 9rem; }
+
+.sv-delete { padding: 0.1rem 0.45rem; }
+
+/* Inline mount: only while the filter sidebar is collapsed. */
+.sv-inline { display: none !important; }
+
+.table-sidebar.collapsed ~ .table-main .sv-inline {
+  display: inline-flex !important;
+}
+
+.sv-scratch {
+  position: absolute;
+  left: -9999px;
+}
+
+/* Grouped-expansion receptions table */
+.group-receptions-table {
+  font-size: 0.8rem;
+  --bs-table-bg: transparent;
+  color: var(--malla-text);
+  margin-bottom: 0.25rem;
+}
+.group-receptions-table thead th {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--malla-text-muted);
+  border-bottom: 1px solid var(--malla-border);
+  padding: 0.2rem 0.5rem;
+  white-space: nowrap;
+}
+.group-receptions-table td {
+  padding: 0.22rem 0.5rem;
+  border-top: 1px solid color-mix(in srgb, var(--malla-border) 55%, transparent);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.group-receptions-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.group-receptions-table .center { text-align: center; }
+.group-receptions-table .mono { font-family: var(--bs-font-monospace); font-size: 0.74rem; }
+.group-receptions-table .group-tl { text-align: left; }
+
+/* sortable grouped-expansion headers */
+.group-receptions-table th.group-sortable { cursor: pointer; user-select: none; }
+.group-receptions-table th.group-sortable:hover { color: var(--bs-link-hover-color); }
+.group-receptions-table th.group-sortable:focus-visible {
+  outline: var(--malla-focus-ring);
+  outline-offset: -1px;
+}
+.group-receptions-table .group-sort-arrow { font-size: 0.62rem; margin-left: 0.2rem; opacity: 0.75; }
