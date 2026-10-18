@@ -32,11 +32,13 @@ logger = logging.getLogger(__name__)
 
 MARKER_PREFIX = "migration:"
 LOCK_KEY = "migration_lock"
-
 #: Seconds an untouched migration lock may sit before takeover, unless the
 #: caller overrides ``stale_after`` (env-tunable via the capture startup).
 DEFAULT_LOCK_STALE_AFTER = 900.0
-
+#: A live holder may legitimately spend minutes building an index. Wait at
+#: least as long as the staleness window before declaring it wedged, so a
+#: healthy migration is never mistaken for a dead one.
+DEFAULT_LOCK_TIMEOUT = DEFAULT_LOCK_STALE_AFTER
 META_TABLE_SQL = """
     CREATE TABLE IF NOT EXISTS malla_meta (
         key TEXT PRIMARY KEY,
@@ -54,6 +56,36 @@ def marker_key(name: str) -> str:
 def ensure_meta_table(conn: sqlite3.Connection) -> None:
     """Create the key/value table that stores migration progress."""
     conn.execute(META_TABLE_SQL)
+
+
+def ensure_meta_table_when_ready(
+    conn: sqlite3.Connection,
+    *,
+    timeout: float = DEFAULT_LOCK_TIMEOUT,
+    poll: float = 0.25,
+) -> None:
+    """Create ``malla_meta``, waiting out another writer's SQLite lock.
+
+    ``run_migrations`` may start while the capture is committing a batch; the
+    DDL below would otherwise surface ``database is locked`` before the
+    advisory-lock retry loop even begins.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            ensure_meta_table(conn)
+            conn.commit()
+            return
+        except sqlite3.OperationalError as exc:
+            conn.rollback()
+            if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+                raise
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"database is busy; could not create malla_meta within "
+                    f"{timeout:.0f}s"
+                ) from exc
+            time.sleep(poll)
 
 
 def read_marker(conn: sqlite3.Connection, name: str) -> tuple[bool, Watermark]:
@@ -117,7 +149,7 @@ def _holder_is_alive(holder: str) -> bool:
 def migration_lock(
     conn: sqlite3.Connection,
     *,
-    timeout: float = 60.0,
+    timeout: float = DEFAULT_LOCK_TIMEOUT,
     stale_after: float = DEFAULT_LOCK_STALE_AFTER,
     poll: float = 0.25,
 ) -> Iterator[None]:
@@ -143,6 +175,20 @@ def migration_lock(
             )
             conn.commit()
             break
+        except sqlite3.OperationalError as exc:
+            # Another writer can hold SQLite's write lock (the capture, a
+            # checkpoint, a second migration runner). That is a wait, not a
+            # fatal startup error: retry until the deadline instead of letting
+            # ``database is locked`` escape the daemon.
+            conn.rollback()
+            if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+                raise
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"database is busy; could not acquire the migration lock "
+                    f"within {timeout:.0f}s"
+                ) from exc
+            time.sleep(poll)
         except sqlite3.IntegrityError:
             # The failed INSERT opened an implicit transaction (python sqlite3
             # legacy mode); end it, or every later read on this connection
@@ -193,7 +239,7 @@ def run_migrations(
     strict: bool = False,
     dry_run: bool = False,
     take_lock: bool = True,
-    lock_timeout: float = 60.0,
+    lock_timeout: float = DEFAULT_LOCK_TIMEOUT,
     stale_after: float | None = None,
 ) -> list[MigrationResult]:
     """Apply every pending migration in phase order.
@@ -228,8 +274,7 @@ def run_migrations(
     selected = set(phases) if phases else set(PHASE_ORDER)
 
     if not dry_run:
-        ensure_meta_table(conn)
-        conn.commit()
+        ensure_meta_table_when_ready(conn, timeout=lock_timeout)
 
     results: list[MigrationResult] = []
     for phase in PHASE_ORDER:

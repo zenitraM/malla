@@ -83,8 +83,23 @@ def get_db_connection() -> sqlite3.Connection:
         raise
 
 
-#: Tables the web UI needs; everything else is created by the capture daemon.
-REQUIRED_TABLES: tuple[str, ...] = ("packet_history", "node_info")
+#: Tables the web UI's read paths hard-depend on. The capture daemon (or
+#: ``malla-migrate``) creates everything else; a database from an older
+#: release is missing these and every read 500s, so the preflight treats
+#: them as required and serves the actionable 503 instead.
+REQUIRED_TABLES: tuple[str, ...] = (
+    "packet_history",
+    "node_info",
+    "node_hour_rollup",
+    "node_latest_position",
+    "node_latest_telemetry",
+    "traceroute_endpoint",
+    "link_day_rollup",
+    "route_day_rollup",
+    "activity_node_quarter",
+    "activity_packet_quarter",
+    "activity_gateway_quarter",
+)
 
 
 def _present_required_tables(cursor: sqlite3.Cursor) -> set[str]:

@@ -83,10 +83,12 @@ def test_initialized_database_keeps_default_error_handling(tmp_path) -> None:
     assert client.get("/").status_code == 503
 
     # Bootstrap the minimal schema; the handler must no longer interfere.
+    from src.malla.database.connection import REQUIRED_TABLES
+
     conn = sqlite3.connect(app.config["DATABASE_FILE"])
     try:
-        conn.execute("CREATE TABLE packet_history (id INTEGER PRIMARY KEY)")
-        conn.execute("CREATE TABLE node_info (node_id INTEGER PRIMARY KEY)")
+        for table in REQUIRED_TABLES:
+            conn.execute(f"CREATE TABLE IF NOT EXISTS {table} (id INTEGER)")
         conn.commit()
     finally:
         conn.close()
@@ -94,3 +96,29 @@ def test_initialized_database_keeps_default_error_handling(tmp_path) -> None:
     resp = client.get("/api/guidance-probe")
     assert resp.status_code == 500  # handler returned None: default handling
     assert "database_not_initialized" not in resp.get_data(as_text=True)
+
+
+def test_v1_missing_activity_table_answers_503(tmp_path) -> None:
+    """The activity store is a hard dependency, not an optional rollup.
+
+    Dropping one activity table must produce the coded bootstrap response, not
+    a generic 500 from the dashboard summary.
+    """
+    from tests.fixtures.database_fixtures import DatabaseFixtures
+
+    path = str(tmp_path / "missing-activity.db")
+    DatabaseFixtures().create_test_database(path)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("DROP TABLE activity_packet_quarter")
+        conn.commit()
+    finally:
+        conn.close()
+
+    app = create_app(AppConfig(database_file=path))
+    app.config["TESTING"] = True
+    client = app.test_client()
+
+    resp = client.get("/api/v1/stats/summary")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"]["code"] == "database_not_initialized"

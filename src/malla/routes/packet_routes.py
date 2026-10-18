@@ -68,6 +68,53 @@ def sort_receptions_for_display(
     return sorted(receptions, key=_sort_key)
 
 
+def _reception_clauses(filters: dict[str, Any], params: list[Any]) -> list[str]:
+    """SQL fragments matching the packets-list membership filters.
+
+    The grouped badge counts rows after every list filter; the expansion must
+    apply the same clauses or the badge and the expanded receptions disagree.
+    """
+    clauses: list[str] = []
+
+    def add(clause: str, value: Any) -> None:
+        clauses.append(clause)
+        params.append(value)
+
+    if filters.get("since") is not None:
+        add("timestamp >= ?", filters["since"])
+    if filters.get("until") is not None:
+        add("timestamp <= ?", filters["until"])
+    if filters.get("gateway_id"):
+        add("gateway_id = ?", filters["gateway_id"])
+    if filters.get("portnum_name"):
+        add("portnum_name = ?", filters["portnum_name"])
+    if filters.get("primary_channel"):
+        add("channel_id = ?", filters["primary_channel"])
+    if filters.get("min_rssi") is not None:
+        add("rssi >= ?", filters["min_rssi"])
+    if filters.get("max_rssi") is not None:
+        add("rssi <= ?", filters["max_rssi"])
+    if filters.get("hop_count") is not None:
+        add("(hop_start - hop_limit) = ?", filters["hop_count"])
+    if filters.get("from_node") is not None:
+        add("from_node_id = ?", filters["from_node"])
+    if filters.get("to_node") is not None:
+        add("to_node_id = ?", filters["to_node"])
+    if filters.get("exclude_from") is not None:
+        add("from_node_id != ?", filters["exclude_from"])
+    if filters.get("exclude_to") is not None:
+        add("to_node_id != ?", filters["exclude_to"])
+    search = filters.get("search")
+    if search:
+        clauses.append(
+            "(portnum_name LIKE ? OR gateway_id LIKE ? OR channel_id LIKE ?"
+            " OR CAST(from_node_id AS TEXT) LIKE ?"
+            " OR CAST(to_node_id AS TEXT) LIKE ?)"
+        )
+        params.extend([f"%{search}%"] * 5)
+    return clauses
+
+
 def get_packet_details(
     packet_id: int,
     reception_filters: dict[str, Any] | None = None,
@@ -176,18 +223,9 @@ def get_packet_details(
             receipt_where = "WHERE mesh_packet_id = ? AND id != ?"
             receipt_params: list[Any] = [packet["mesh_packet_id"], packet_id]
             filters = reception_filters or {}
-            if filters.get("since") is not None:
-                receipt_where += " AND timestamp >= ?"
-                receipt_params.append(filters["since"])
-            if filters.get("until") is not None:
-                receipt_where += " AND timestamp <= ?"
-                receipt_params.append(filters["until"])
-            if filters.get("gateway_id"):
-                receipt_where += " AND gateway_id = ?"
-                receipt_params.append(filters["gateway_id"])
-            if filters.get("portnum_name"):
-                receipt_where += " AND portnum_name = ?"
-                receipt_params.append(filters["portnum_name"])
+            clauses = _reception_clauses(filters, receipt_params)
+            if clauses:
+                receipt_where += " AND " + " AND ".join(clauses)
             cursor.execute(
                 f"""
                 SELECT
@@ -222,18 +260,9 @@ def get_packet_details(
                 packet_id,
             ]
             filters = dict(reception_filters or {})
-            if filters.get("since") is not None:
-                receipt_where += " AND timestamp >= ?"
-                receipt_params.append(filters["since"])
-            if filters.get("until") is not None:
-                receipt_where += " AND timestamp <= ?"
-                receipt_params.append(filters["until"])
-            if filters.get("gateway_id"):
-                receipt_where += " AND gateway_id = ?"
-                receipt_params.append(filters["gateway_id"])
-            if filters.get("portnum_name"):
-                receipt_where += " AND portnum_name = ?"
-                receipt_params.append(filters["portnum_name"])
+            clauses = _reception_clauses(filters, receipt_params)
+            if clauses:
+                receipt_where += " AND " + " AND ".join(clauses)
             cursor.execute(
                 f"""
                 SELECT
