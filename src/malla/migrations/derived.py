@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 
+from .. import activity_rollup
 from ..database.statistics import (
     ensure_query_planner_stats,
     query_planner_stats_present,
@@ -65,6 +66,24 @@ def _apply_primary_channel(conn: sqlite3.Connection, _wm: Watermark) -> Watermar
     return None
 
 
+def _pending_activity_quarters(conn: sqlite3.Connection, _wm: Watermark) -> bool:
+    if activity_rollup.PACKET_TABLE not in tables(conn):
+        return False
+    return activity_rollup.pending(conn)
+
+
+def _apply_activity_quarters(conn: sqlite3.Connection, _wm: Watermark) -> Watermark:
+    """Fill the quarter-hour activity buckets from stored packets.
+
+    Incremental and idempotent, so an interrupted or repeated run costs nothing;
+    the capture daemon keeps it current from here on.
+    """
+    inserted = activity_rollup.refresh(conn)
+    newest = activity_rollup.latest_bucket(conn)
+    logger.info("Activity buckets: %s rows inserted, newest bucket %s", inserted, newest)
+    return None if newest is None else str(newest)
+
+
 def _pending_planner_stats(conn: sqlite3.Connection, _wm: Watermark) -> bool:
     return not query_planner_stats_present(conn.cursor())
 
@@ -82,6 +101,14 @@ PRIMARY_CHANNEL_BACKFILL = Migration(
     pending=_pending_primary_channel,
 )
 
+ACTIVITY_QUARTER_BACKFILL = Migration(
+    name="activity_quarter_backfill",
+    phase=Phase.DERIVED,
+    apply=_apply_activity_quarters,
+    description="fill quarter-hour activity buckets from stored packets",
+    pending=_pending_activity_quarters,
+)
+
 PLANNER_STATS = Migration(
     name="planner_stats",
     phase=Phase.DERIVED,
@@ -93,4 +120,5 @@ PLANNER_STATS = Migration(
 DERIVED_MIGRATIONS: tuple[Migration, ...] = (
     PRIMARY_CHANNEL_BACKFILL,
     PLANNER_STATS,
+    ACTIVITY_QUARTER_BACKFILL,
 )
