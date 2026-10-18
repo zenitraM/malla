@@ -96,6 +96,7 @@
 <script src="{{ url_for('static', filename='js/filter-store.js') }}"></script>
 <script src="{{ url_for('static', filename='js/table-filter-controller.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modern-table.js') }}"></script>
+<script src="{{ url_for('static', filename='js/saved-views.js') }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     // Move sidebar content into the actual sidebar FIRST
@@ -108,6 +109,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize URL filter manager AFTER sidebar content is moved
     const urlManager = new URLFilterManager();
+    window.urlManager = urlManager;
 
     // Load hardware models and roles dynamically
     loadHardwareModels();
@@ -238,7 +240,18 @@ document.addEventListener('DOMContentLoaded', function() {
             if (f.role) params.set('role', f.role);
             if (f.primary_channel) params.set('channel', f.primary_channel);
             if (f.active_only === true || f.active_only === '1') {
-                params.set('last_seen_since', new Date(Date.now() - 24 * 3600e3).toISOString());
+                // Global range wins when set; the checkbox keeps its legacy
+                // 24h meaning otherwise.
+                if (window.MallaRange) {
+                    const rng = window.MallaRange.get();
+                    if (rng.sinceEpoch) {
+                        params.set('last_seen_since', new Date(rng.sinceEpoch * 1000).toISOString());
+                    } else {
+                        params.set('last_seen_since', new Date(Date.now() - 24 * 3600e3).toISOString());
+                    }
+                } else {
+                    params.set('last_seen_since', new Date(Date.now() - 24 * 3600e3).toISOString());
+                }
             }
             const sortMap = { name: 'name', last_seen: 'last_seen' };
             if (state.sortBy && sortMap[state.sortBy]) {
@@ -390,6 +403,16 @@ document.addEventListener('DOMContentLoaded', function() {
     // Update stats function (removed - stats section was removed from UI)
     function updateStats() {
         // No-op - stats section removed
+    }
+
+    // Global range changes re-query when active_only relies on the window.
+    if (window.MallaRange) {
+        window.MallaRange.onRangeChange((range, meta) => {
+            if (meta && meta.via === 'override') return;
+            if (document.getElementById('active_only') && document.getElementById('active_only').checked) {
+                table.loadData();
+            }
+        });
     }
 
     // Initialize the filter controller
