@@ -732,8 +732,11 @@ function initMap() {
     });
     map.addLayer(markerClusterGroup);
 
-    // Load node data
+    // Load node data, then follow the global range control.
     loadNodeLocations();
+    if (window.MallaRange && typeof window.MallaRange.onRangeChange === 'function') {
+        window.MallaRange.onRangeChange(function () { loadNodeLocations(); });
+    }
 }
 
 // Build filter parameters from form
@@ -745,6 +748,19 @@ function buildFilterParams() {
     // Only send server-side filters (gateway, search, etc.)
     // Age and role filtering is now done client-side
 
+    // The location endpoint defaults to 14 days; the global range must win,
+    // and "all" needs an explicit epoch-0 bound or it silently shows 14 days.
+    if (window.MallaRange && typeof window.MallaRange.get === 'function') {
+        const range = window.MallaRange.get();
+        if (range && range.key === 'all') {
+            params.set('since', '1970-01-01T00:00:00.000Z');
+        } else if (range && range.sinceEpoch) {
+            params.set('since', new Date(range.sinceEpoch * 1000).toISOString());
+        }
+        if (range && range.untilEpoch) {
+            params.set('until', new Date(range.untilEpoch * 1000).toISOString());
+        }
+    }
     return params;
 }
 

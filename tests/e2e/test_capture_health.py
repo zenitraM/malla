@@ -2,8 +2,11 @@
 
 import os
 
+import pytest
 import requests
 from playwright.sync_api import Page
+
+from tests.conftest import TestFlaskApp
 
 
 def _seeded_page(page, test_server_url, path="/"):
@@ -61,3 +64,36 @@ class TestCaptureHealth:
         assert "last_packet_time_utc" in body and "ingest_lag_seconds" in body
         assert body["last_packet_time_utc"].endswith("Z")
         assert body["ingest_lag_seconds"] >= 0
+
+
+class EmptyCaptureServer(TestFlaskApp):
+    """Real test app over a migrated-but-empty database (no packets)."""
+
+    def _setup_test_data(self):
+        from src.malla.capture_startup import (
+            init_database as ci,
+        )
+        from src.malla.capture_startup import (
+            run_write_locking_migrations as cw,
+        )
+
+        ci(self.temp_db.name)
+        cw(self.temp_db.name)
+
+
+@pytest.fixture(scope="module")
+def empty_capture_server_url(worker_id):
+    del worker_id  # unique port comes from the ephemeral bind in TestFlaskApp
+    server = EmptyCaptureServer()
+    server.start()
+    return server.url
+
+
+def test_chip_hidden_without_data_in_the_ui(page: Page, empty_capture_server_url: str):
+    """The UI must hide the chip itself, not just the API report a null lag."""
+    page.goto(f"{empty_capture_server_url}/")
+    page.wait_for_selector("#captureHealth", state="attached", timeout=10000)
+    page.wait_for_timeout(1500)
+
+    chip = page.locator("#captureHealth")
+    assert chip.evaluate("el => el.classList.contains('d-none')") is True

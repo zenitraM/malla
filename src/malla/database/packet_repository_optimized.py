@@ -38,11 +38,11 @@ class PacketRepositoryOptimized:
             where_conditions = []
             params = []
 
-            if filters.get("start_time"):
+            if filters.get("start_time") is not None:
                 where_conditions.append("timestamp >= ?")
                 params.append(filters["start_time"])
 
-            if filters.get("end_time"):
+            if filters.get("end_time") is not None:
                 where_conditions.append("timestamp <= ?")
                 params.append(filters["end_time"])
 
@@ -58,11 +58,11 @@ class PacketRepositoryOptimized:
                 where_conditions.append("portnum_name = ?")
                 params.append(filters["portnum"])
 
-            if filters.get("min_rssi"):
+            if filters.get("min_rssi") is not None:
                 where_conditions.append("rssi >= ?")
                 params.append(filters["min_rssi"])
 
-            if filters.get("max_rssi"):
+            if filters.get("max_rssi") is not None:
                 where_conditions.append("rssi <= ?")
                 params.append(filters["max_rssi"])
 

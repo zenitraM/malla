@@ -157,7 +157,11 @@
     }
 
     function deleteView(name) {
-        persist(loadViews().filter((v) => v.name !== name));
+        const ok = persist(loadViews().filter((v) => v.name !== name));
+        toast(
+            ok ? `Deleted view “${name}”` : 'Storage unavailable — view deleted for this session',
+            ok ? 'success' : 'warning'
+        );
     }
 
     function copyShareLink() {

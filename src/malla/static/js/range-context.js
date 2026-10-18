@@ -76,11 +76,17 @@
     }
 
     function get() {
-        var base = current || resolve();
         if (override) {
             return { key: "custom", sinceEpoch: override.sinceEpoch, untilEpoch: override.untilEpoch, overridden: true };
         }
-        return base;
+        if (!current) current = resolve();
+        // Relative presets are anchored at "now"; recompute their start on
+        // every read so a long-lived page does not keep the original window.
+        // Custom windows and "all" are stable and stay cached.
+        if (current.key !== "custom" && current.key !== "all") {
+            current = compute(current.key, null);
+        }
+        return current;
     }
 
     function set(key, custom, opts) {

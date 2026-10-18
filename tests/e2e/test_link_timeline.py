@@ -97,3 +97,23 @@ def test_drawer_empty_state_for_unknown_pair(page: Page, test_server_url: str):
     # Backdrop click closes as well.
     page.locator(".lt-backdrop").click(position={"x": 5, "y": 5})
     expect(page.locator(".lt-drawer")).to_have_count(0)
+
+
+def test_drawer_focus_returns_to_trigger_after_mode_switch(
+    page: Page, test_server, test_server_url: str
+):
+    """Switching Direct/Indirect must not lose the invoking element's focus."""
+    _seed_history(test_server.temp_db.name)
+
+    page.goto(f"{test_server_url}/longest-links")
+    trigger = page.locator("button:has-text('History')").first
+    page.wait_for_selector("button:has-text('History')", timeout=15000)
+    trigger.click()
+    expect(page.locator(".lt-drawer")).to_be_visible()
+
+    page.locator(".lt-drawer .lt-mode button", has_text="Indirect").click()
+    expect(page.locator(".lt-drawer")).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(page.locator(".lt-drawer")).to_have_count(0)
+
+    assert trigger.evaluate("el => el === document.activeElement") is True
