@@ -237,6 +237,7 @@
 
 {{ sidebar_styles() }}
 
+<link rel="stylesheet" href="{{ url_for('static', filename='css/node-picker.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/link-timeline.css') }}">
 <script src="{{ url_for('static', filename='js/link-timeline.js') }}"></script>
 <script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
@@ -370,11 +371,6 @@ function initializeInterface() {
         } else if (window.MallaToast) {
             window.MallaToast.info('That node has no vertices in the current graph window.', { title: 'Not in graph' });
         }
-    });
-
-    $('#clearSearch').on('click', function() {
-        document.querySelectorAll('.node-picker-clear').forEach(b => b.click());
-        clearSelection();
     });
 
     // Load primary channels into filter select
@@ -1070,9 +1066,6 @@ function clearSelection() {
     // Clear hop filter state
     visibleNodeIds = null;
     nodeDistances = null;
-}
-
-function clearSearchResults() {
 }
 
 function setSelectedDetails(title, ...content) {
