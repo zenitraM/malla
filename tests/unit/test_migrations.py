@@ -335,3 +335,64 @@ def test_registry_is_well_formed():
     for migration in MIGRATIONS:
         assert migration.phase in PHASE_ORDER
         assert migration.description, f"{migration.name} needs a description"
+
+
+def test_busy_database_is_waited_for_not_raised(tmp_path):
+    """A writer holding SQLite's lock is a wait, not a fatal OperationalError."""
+
+    path = tmp_path / "busy.db"
+    conn = _conn(path)
+    ensure_meta_table(conn)
+    conn.commit()
+    conn.execute("PRAGMA busy_timeout=50")
+
+    holder = sqlite3.connect(path, timeout=0.1)
+    holder.execute("BEGIN IMMEDIATE")
+    holder.execute("INSERT INTO data (value) VALUES (1)")
+    try:
+        with pytest.raises(TimeoutError, match="database is busy"):
+            run_migrations(
+                conn,
+                (_noop(Phase.SCHEMA),),
+                phases=(Phase.SCHEMA,),
+                lock_timeout=0.2,
+            )
+    finally:
+        holder.rollback()
+        holder.close()
+        conn.close()
+
+
+def test_cli_dry_run_lists_pending_without_creating_the_database(tmp_path, capsys):
+    from malla.migrations import cli
+
+    path = tmp_path / "missing.db"
+    rc = cli.main(["--database", str(path), "--dry-run"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert not path.exists()
+    assert "would apply" in out
+    assert MIGRATIONS[0].name in out
+
+
+def test_cli_dry_run_forget_does_not_create_meta(tmp_path, capsys):
+    from malla.migrations import cli
+
+    path = tmp_path / "existing.db"
+    sqlite3.connect(path).close()
+
+    rc = cli.main(["--database", str(path), "--dry-run", "--forget", "anything"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "would forget" in out
+    conn = sqlite3.connect(path)
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    finally:
+        conn.close()
+    assert "malla_meta" not in tables

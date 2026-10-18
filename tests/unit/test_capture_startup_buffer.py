@@ -118,3 +118,24 @@ def test_derived_phase_does_not_take_the_migration_lock(tmp_path):
     finally:
         conn.close()
     assert holder == (dead_holder,)
+
+
+def test_oversized_payload_is_rejected_before_buffering(monkeypatch):
+    """The 4 KB cap must run before the startup buffer, not at drain time."""
+
+    _reset_buffer()
+    mqtt_capture.ingest_buffer.start()
+    monkeypatch.setattr(mqtt_capture, "MAX_MQTT_PAYLOAD_BYTES", 10)
+    seen: list[tuple[str, bytes]] = []
+    monkeypatch.setattr(
+        mqtt_capture,
+        "process_message",
+        lambda topic, payload: seen.append((topic, payload)),
+    )
+
+    message = _message()
+    message.payload = b"x" * 11
+    mqtt_capture.on_message(None, None, message)  # type: ignore[arg-type]
+
+    assert mqtt_capture.ingest_buffer.depth == 0
+    assert seen == [(TOPIC, b"x" * 11)]

@@ -1303,6 +1303,12 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
     migrations), payloads are queued in memory instead of being dropped; the
     main thread replays them once the database is ready.
     """
+    # Reject oversized payloads before they enter the startup buffer. The
+    # buffer bounds entry count, not bytes, so checking only at drain time
+    # would let a publisher fill memory with a few huge PUBLISHes.
+    if len(msg.payload) > MAX_MQTT_PAYLOAD_BYTES:
+        process_message(msg.topic, msg.payload)
+        return
     if ingest_buffer.append(msg.topic, msg.payload):
         return
     process_message(msg.topic, msg.payload)
@@ -1363,7 +1369,15 @@ def main() -> None:
     # Initialize database and load node cache
     logging.info("Initializing database...")
     startup_step_start = time.time()
-    capture_startup.init_database(DATABASE_FILE, lock=db_lock)
+    try:
+        capture_startup.init_database(DATABASE_FILE, lock=db_lock)
+    except (TimeoutError, sqlite3.OperationalError) as exc:
+        logging.error("Database schema migration failed: %s", exc)
+        logging.error(
+            "Another process may be migrating this database. Retry after it "
+            "finishes, or run 'malla-migrate' to see the pending work."
+        )
+        raise SystemExit(2) from exc
     logging.info(
         "Database initialization step finished in %.3fs",
         time.time() - startup_step_start,
@@ -1423,7 +1437,15 @@ def main() -> None:
     # Write-locking migrations (index builds) and their siblings need no
     # concurrent writers; packets received meanwhile sit in ingest_buffer.
     migrations_started = time.time()
-    capture_startup.run_write_locking_migrations(DATABASE_FILE, lock=db_lock)
+    try:
+        capture_startup.run_write_locking_migrations(DATABASE_FILE, lock=db_lock)
+    except (TimeoutError, sqlite3.OperationalError) as exc:
+        logging.error("Write-locking database migration failed: %s", exc)
+        logging.error(
+            "Another process may be migrating this database. Retry after it "
+            "finishes, or run 'malla-migrate' to see the pending work."
+        )
+        raise SystemExit(2) from exc
     drained = ingest_buffer.drain(process_message)
     logging.info(
         "Startup migrations finished in %.3fs; processed %s buffered packets",
