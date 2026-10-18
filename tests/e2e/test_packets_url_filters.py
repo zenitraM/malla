@@ -22,7 +22,7 @@ class TestPacketsURLFilters:
         api_requests = []
 
         def track_requests(request):
-            if "/api/packets/data" in request.url:
+            if "/api/v1/packets" in request.url:
                 api_requests.append({"url": request.url, "method": request.method})
 
         page.on("request", track_requests)
@@ -109,7 +109,7 @@ class TestPacketsURLFilters:
 
         # Verify the filtering worked by checking the API directly
         response = requests.get(
-            f"{test_server_url}/api/packets/data?from_node={test_from_node}&limit=5"
+            f"{test_server_url}/api/v1/packets?from_node={test_from_node}&page_size=5"
         )
         assert response.status_code == 200
         api_data = response.json()
@@ -162,7 +162,7 @@ class TestPacketsURLFilters:
         api_requests = []
 
         def track_requests(request):
-            if "/api/packets/data" in request.url:
+            if "/api/v1/packets" in request.url:
                 api_requests.append({"url": request.url, "method": request.method})
 
         page.on("request", track_requests)
@@ -217,7 +217,7 @@ class TestPacketsURLFilters:
         api_requests = []
 
         def track_requests(request):
-            if "/api/packets/data" in request.url:
+            if "/api/v1/packets" in request.url:
                 api_requests.append({"url": request.url, "method": request.method})
 
         page.on("request", track_requests)

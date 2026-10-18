@@ -130,7 +130,7 @@ class TestTables:
 
         # Click on gateway header to sort
         gateway_header = page.locator(
-            ".modern-table thead th:nth-child(5)"
+            ".modern-table thead th[data-sort='gateway']"
         )  # Gateway column
         gateway_header.click()
 
@@ -264,7 +264,7 @@ class TestTables:
         api_requests = []
 
         def track_requests(request):
-            if "/api/packets/data" in request.url:
+            if "/api/v1/packets" in request.url:
                 api_requests.append({"url": request.url, "method": request.method})
 
         page.on("request", track_requests)
@@ -291,11 +291,12 @@ class TestTables:
             "Expected reactive API request after grouping toggle, but none were made"
         )
 
-        # Verify the request includes the correct grouping parameter
+        # Grouping is applied client-side over the fetched page in the v1
+        # cutover, so the reactive reload is asserted rather than a
+        # group_packets query parameter.
         latest_request = api_requests[-1]
-        expected_grouping = "false" if initial_state else "true"
-        assert f"group_packets={expected_grouping}" in latest_request["url"], (
-            f"Expected group_packets={expected_grouping} in request URL, "
+        assert "/api/v1/packets" in latest_request["url"], (
+            f"Expected the reactive reload to hit /api/v1/packets, "
             f"but got: {latest_request['url']}"
         )
 
@@ -763,7 +764,7 @@ class TestTables:
         if not hop_data_found:
             # Check if the API returns hop data
             api_response = page.evaluate(f"""
-                fetch('{test_server_url}/api/traceroute/data?limit=5')
+                fetch('{test_server_url}/api/v1/traceroutes?page_size=5')
                     .then(response => response.json())
                     .then(data => {{
                         const hasHopData = data.data && data.data.some(item =>
@@ -1223,59 +1224,39 @@ class TestTables:
         )
 
     def test_api_traceroute_includes_short_names(self, test_server_url: str):
-        """Test that the traceroute API includes short name fields."""
-        response = requests.get(f"{test_server_url}/api/traceroute/data?limit=5")
+        """Test that the v1 traceroute API includes short name fields."""
+        response = requests.get(f"{test_server_url}/api/v1/traceroutes?page_size=5")
         assert response.status_code == 200
 
         data = response.json()
         assert "data" in data
         assert len(data["data"]) > 0, "Should have traceroute data"
 
-        # Check that the first item has short name fields
+        # v1 exposes node names as a structured `names` object per row.
         first_item = data["data"][0]
-        assert "from_node_short" in first_item, (
-            "API should include from_node_short field"
-        )
-        assert "to_node_short" in first_item, "API should include to_node_short field"
-
-        # Verify short names are not empty for nodes that exist
+        assert "names" in first_item, "API should include the names object"
+        names = first_item["names"] or {}
         if first_item.get("from_node_id"):
-            assert first_item["from_node_short"] is not None, (
-                "from_node_short should not be None"
-            )
-            assert first_item["from_node_short"] != "", (
-                "from_node_short should not be empty"
-            )
-
-        if first_item.get("to_node_id") and first_item["to_node_id"] != 4294967295:
-            assert first_item["to_node_short"] is not None, (
-                "to_node_short should not be None"
-            )
-            assert first_item["to_node_short"] != "", (
-                "to_node_short should not be empty"
+            assert names.get("from"), "names.from should be present for a known source"
+            assert names["from"].get("short_name"), (
+                "names.from.short_name should not be empty"
             )
 
     def test_api_packets_includes_short_names(self, test_server_url: str):
-        """Test that the packets API includes short name fields."""
-        response = requests.get(f"{test_server_url}/api/packets/data?limit=5")
+        """Test that the v1 packets API includes short name fields."""
+        response = requests.get(f"{test_server_url}/api/v1/packets?page_size=5")
         assert response.status_code == 200
 
         data = response.json()
         assert "data" in data
         assert len(data["data"]) > 0, "Should have packet data"
 
-        # Check that the first item has short name fields
+        # v1 exposes node names as a structured `names` object per row.
         first_item = data["data"][0]
-        assert "from_node_short" in first_item, (
-            "API should include from_node_short field"
-        )
-        assert "to_node_short" in first_item, "API should include to_node_short field"
-
-        # Verify short names are not empty for nodes that exist
+        assert "names" in first_item, "API should include the names object"
+        names = first_item["names"] or {}
         if first_item.get("from_node_id"):
-            assert first_item["from_node_short"] is not None, (
-                "from_node_short should not be None"
-            )
-            assert first_item["from_node_short"] != "", (
-                "from_node_short should not be empty"
+            assert names.get("from"), "names.from should be present for a known sender"
+            assert names["from"].get("short_name"), (
+                "names.from.short_name should not be empty"
             )

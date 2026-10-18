@@ -125,22 +125,18 @@ document.addEventListener('DOMContentLoaded', function() {
         sidebarContent.remove();
     }
 
-    // Initialize URL filter manager AFTER sidebar content is moved
     const urlManager = new URLFilterManager();
-
-    // Load observed packet channels for filter select
-    loadPrimaryChannels();
+    window.urlManager = urlManager;
 
     async function loadPrimaryChannels() {
         try {
-            const response = await fetch('/api/meshtastic/packet-channels');
-            const data = await response.json();
-            if (data.channels) {
+            const channels = await window.MallaFilters.packetChannels();
+            if (channels.length) {
                 const select = document.getElementById('primary_channel');
                 const allOption = select.querySelector('option[value=""]');
                 select.innerHTML = '';
                 select.appendChild(allOption);
-                data.channels.forEach((ch) => {
+                channels.forEach((ch) => {
                     const option = document.createElement('option');
                     option.value = ch;
                     option.textContent = ch;
@@ -152,10 +148,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Expose urlManager to global scope for debugging and testing
-    window.urlManager = urlManager;
+    loadPrimaryChannels();
 
-    // Initialize sidebar toggle functionality
     const toggleBtn = document.getElementById('toggleSidebar');
     const closeBtn = document.getElementById('closeSidebar');
     const sidebar = document.querySelector('.table-sidebar');
@@ -173,175 +167,193 @@ document.addEventListener('DOMContentLoaded', function() {
     toggleBtn.addEventListener('click', toggleSidebar);
     closeBtn.addEventListener('click', toggleSidebar);
 
-    // Initialize node pickers after DOM is ready
     if (window.initializeAllPickers) {
         window.initializeAllPickers();
     }
 
-    // Initialize page with filters and load data
     async function initializePageWithFilters() {
-        // Small delay to ensure DOM is updated and sidebar content is moved
         await new Promise(resolve => setTimeout(resolve, 100));
-
-        // Apply URL parameters
         const hasParams = await urlManager.applyURLParameters();
-
-        // Initialize the filter controller
         controller.initialLoad(hasParams);
     }
 
-    // Initialize the modern table
+    // ------------------------------------------------------------------
+    // Columns. v1 traceroute rows: names {from,to,gateway,route[]},
+    // display_path, has_return_path, is_complete, numeric rssi/snr.
+    // ------------------------------------------------------------------
     const table = new ModernTable('tracerouteTable', {
-        endpoint: '/api/traceroute/data',
+        endpoint: '/api/v1/traceroutes',
         pageSize: 100,
-        searchPlaceholder: 'Search traceroutes...',
         emptyMessage: 'No traceroutes found',
         deferInitialLoad: true,
         enableSearch: false,
+        // Sidebar form fields -> v1 params; filters without a v1 equivalent
+        // (route_node, return_path_only, primary_channel) refine client-side.
+        requestParams: (state) => {
+            const f = state.filters || {};
+            const params = new URLSearchParams({
+                page: state.page,
+                page_size: state.pageSize,
+            });
+            if (f.from_node) params.set('from', f.from_node);
+            if (f.to_node) params.set('to', f.to_node);
+            if (f.gateway_id) params.set('gateway', f.gateway_id);
+            if (f.start_time) {
+                const d = new Date(f.start_time);
+                if (!Number.isNaN(d.getTime())) params.set('since', d.toISOString());
+            }
+            if (f.end_time) {
+                const d = new Date(f.end_time);
+                if (!Number.isNaN(d.getTime())) params.set('until', d.toISOString());
+            }
+            // v1 traceroute sorts: timestamp | id (index-backed).
+            const sortMap = { timestamp: 'timestamp', id: 'id' };
+            if (state.sortBy && sortMap[state.sortBy]) {
+                params.set('sort', sortMap[state.sortBy]);
+                params.set('order', state.sortOrder || 'desc');
+            }
+            if (f.group_packets === true || f.group_packets === 'true') {
+                params.set('group_by', 'mesh_packet_id');
+            }
+            return params;
+        },
+        refineRows: (rows, filters) => {
+            let out = rows;
+            if (filters.route_node) {
+                const wanted = String(filters.route_node);
+                out = out.filter((r) => String(r.from_node_id) === wanted
+                    || String(r.to_node_id) === wanted
+                    || (Array.isArray(r.names && r.names.route)
+                        && r.names.route.some((n) => String(n.node_id) === wanted)));
+            }
+            if (filters.return_path_only === true || filters.return_path_only === '1') {
+                out = out.filter((r) => r.has_return_path);
+            }
+            if (filters.primary_channel) {
+                out = out.filter((r) => (r.channel_id || '') === filters.primary_channel);
+            }
+            // Grouping is server-side (group_by=mesh_packet_id): pager totals
+            // are group counts; rows carry group:{reception_count, gateways[]}.
+            return out;
+        },
         columns: [
             {
                 key: 'timestamp',
                 title: 'Timestamp',
                 sortable: true,
-                render: (value, row) => {
-                    return renderTimestampColumn(row, 'timestamp', 'id', '/packet/{id}');
-                }
+                sortKey: 'timestamp',
+                render: (value, row) => renderTimestampColumn(row, 'timestamp', 'id', '/packet/{id}')
             },
             {
-                key: 'from_node',
+                key: 'from_node_id',
                 title: 'From',
-                sortable: true,
+                sortable: false,
                 render: (value, row) => {
                     if (row.from_node_id) {
-                        const shortName = row.from_node_short || `${row.from_node_id.toString(16).padStart(8, '0')}`.slice(-4);
+                        const shortName = (row.names && row.names.from && row.names.from.short_name)
+                            || `${row.from_node_id.toString(16).padStart(8, '0')}`.slice(-4);
                         return nodeLink(row.from_node_id, shortName);
                     }
-                    return textNode(value || 'Unknown');
+                    return textNode('Unknown');
                 }
             },
             {
-                key: 'to_node',
+                key: 'to_node_id',
                 title: 'To',
-                sortable: true,
+                sortable: false,
                 render: (value, row) => {
                     if (row.to_node_id && row.to_node_id !== 4294967295) {
-                        const shortName = row.to_node_short || row.to_node_id.toString(16).padStart(8, '0').slice(-4);
+                        const shortName = (row.names && row.names.to && row.names.to.short_name)
+                            || row.to_node_id.toString(16).padStart(8, '0').slice(-4);
                         return nodeLink(row.to_node_id, shortName);
                     }
-                    return textNode(value || 'Broadcast');
+                    return textNode('Broadcast');
                 }
             },
-                        {
+            {
                 key: 'route',
                 title: 'Route',
                 sortable: false,
                 render: (value, row) => {
-                    if (row.route_nodes && row.route_names &&
-                        Array.isArray(row.route_nodes) && Array.isArray(row.route_names) &&
-                        row.route_nodes.length > 0 && row.route_names.length > 0) {
-                        const routeParts = row.route_names.map((nodeName, index) => {
-                            const nodeId = row.route_nodes[index];
-                            if (nodeId) {
-                                return nodeLink(nodeId, nodeName);
+                    const route = row.names && row.names.route;
+                    if (Array.isArray(route) && route.length > 0) {
+                        const parts = route.map((hop) => {
+                            if (hop && hop.node_id != null) {
+                                return nodeLink(hop.node_id, hop.short_name || hop.display_name || hop.hex_id);
                             }
-                            return textNode(nodeName);
+                            return textNode(hop && hop.display_name ? hop.display_name : '?');
                         });
-
-                        return joinNodes(routeParts, ' -> '.replace('->', '→'));
+                        return joinNodes(parts, ' → ');
                     }
-
+                    if (row.display_path) {
+                        return el('span', { className: 'text-muted' }, row.display_path);
+                    }
                     return el('span', { className: 'text-muted' }, 'No route data');
                 }
             },
             {
-                key: 'gateway',
+                key: 'gateway_id',
                 title: 'Gateway',
-                sortable: true,
+                sortable: false,
                 render: (value, row) => {
-                    if (row.is_grouped) {
-                        const count = row.gateway_count;
-                        if (count > 1) {
-                            return el('span', {
-                                className: 'badge bg-info',
-                                title: `Multiple gateways: ${row.gateway_list}`
-                            }, `${count} gateways`);
-                        } else if (count === 1) {
-                            return badge('1 gateway', 'bg-info');
-                        } else {
-                            return el('span', { className: 'text-muted' }, 'N/A');
-                        }
-                    } else {
-                        const gatewayName = row.gateway_name;
-                        const gatewayNodeId = row.gateway_node_id;
-
-                        if (value && value.startsWith('!') && gatewayNodeId) {
-                            const shortName = value.substring(value.length - 4).toUpperCase();
-                            return nodeLink(gatewayNodeId, shortName);
-                        } else if (gatewayName && gatewayNodeId) {
-                            const parenMatch = gatewayName.match(/\(([^)]+)\)$/);
-                            const shortName = parenMatch ? parenMatch[1] : gatewayName.substring(0, 4).toUpperCase();
-                            return nodeLink(gatewayNodeId, shortName);
-                        }
-                        return textNode(value || 'N/A');
+                    const group = row.group;
+                    if (group && group.reception_count > 1) {
+                        const names = (group.gateways || [])
+                            .map((g) => g.display_name || g.short_name)
+                            .filter(Boolean);
+                        return el('span', {
+                            className: 'badge bg-info',
+                            title: `Multiple gateways: ${names.join(', ')}`
+                        }, `${group.reception_count} gateways`);
                     }
+                    if (group) {
+                        return badge('1 gateway', 'bg-info');
+                    }
+                    const gw = row.names && row.names.gateway;
+                    if (gw && gw.node_id != null) {
+                        const shortName = gw.short_name
+                            || (gw.hex_id ? gw.hex_id.slice(1, -4).toUpperCase() : 'GW');
+                        return nodeLink(gw.node_id, shortName);
+                    }
+                    return textNode(value || 'N/A');
                 }
             },
             {
                 key: 'rssi',
                 title: 'RSSI',
-                sortable: true,
+                sortable: false,
                 render: (value, row) => {
-                    if (row.is_grouped) {
-                        return value && value !== 'N/A'
-                            ? el('span', null, value)
-                            : el('span', { className: 'text-muted' }, 'N/A');
-                    } else if (value !== null && value !== '' && value !== 'N/A') {
-                        const rssiValue = parseFloat(value);
-                        const colorClass = getRssiColorClass(rssiValue);
-                        const formattedValue = rssiValue.toFixed(1);
-                        return el('span', { className: colorClass }, `${formattedValue} dBm`);
+                    if (!Number.isFinite(value)) {
+                        return el('span', { className: 'text-muted' }, 'N/A');
                     }
-                    return el('span', { className: 'text-muted' }, 'N/A');
+                    return el('span', { className: getRssiColorClass(value) }, `${value.toFixed(1)} dBm`);
                 }
             },
             {
                 key: 'snr',
                 title: 'SNR',
-                sortable: true,
+                sortable: false,
                 render: (value, row) => {
-                    if (row.is_grouped) {
-                        return value && value !== 'N/A'
-                            ? el('span', null, value)
-                            : el('span', { className: 'text-muted' }, 'N/A');
-                    } else if (value !== null && value !== '' && value !== 'N/A') {
-                        const snrValue = parseFloat(value);
-                        const colorClass = getSnrColorClass(snrValue);
-                        const formattedValue = snrValue.toFixed(2);
-                        return el('span', { className: colorClass }, `${formattedValue} dB`);
+                    if (!Number.isFinite(value)) {
+                        return el('span', { className: 'text-muted' }, 'N/A');
                     }
-                    return el('span', { className: 'text-muted' }, 'N/A');
+                    return el('span', { className: getSnrColorClass(value) }, `${value.toFixed(2)} dB`);
                 }
             },
             {
-                key: 'hops',
+                key: 'hop_count',
                 title: 'Hops',
-                sortable: true,
+                sortable: false,
                 render: (value, row) => {
-                    if (row.is_grouped) {
-                        return value && value !== 'N/A'
-                            ? el('span', null, value)
-                            : el('span', { className: 'text-muted' }, 'N/A');
-                    } else if (value !== null && value !== '') {
-                        const hops = parseInt(value);
-                        if (hops === 0) {
-                            return badge('Direct', 'bg-success');
-                        } else if (hops <= 2) {
-                            return badge(String(hops), 'bg-info');
-                        } else {
-                            return badge(String(hops), 'bg-warning');
-                        }
+                    if (!Number.isFinite(value)) {
+                        return el('span', { className: 'text-muted' }, 'N/A');
                     }
-                    return el('span', { className: 'text-muted' }, 'N/A');
+                    if (value === 0) {
+                        return badge('Direct', 'bg-success');
+                    } else if (value <= 2) {
+                        return badge(String(value), 'bg-info');
+                    }
+                    return badge(String(value), 'bg-warning');
                 }
             },
             {
@@ -383,11 +395,6 @@ document.addEventListener('DOMContentLoaded', function() {
         ]
     });
 
-    // Set default sort
-    table.state.sortBy = 'timestamp';
-    table.state.sortOrder = 'desc';
-
-    // Update stats function
     function updateStats() {
         const groupPacketsCheckbox = document.getElementById('group_packets');
         document.getElementById('statsTotal').textContent = table.state.totalCount || '0';
@@ -396,7 +403,6 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('statsLastUpdate').textContent = new Date().toLocaleTimeString();
     }
 
-    // Initialize the filter controller
     const controller = new TableFilterController({
         table,
         urlManager,
@@ -405,19 +411,12 @@ document.addEventListener('DOMContentLoaded', function() {
         updateStats
     });
 
-    // Debug logging for tests
-    console.log('Traceroute filter controller initialized');
-    console.log('Adding form field listeners');
-
-    // Expose controller methods to global scope for testing/debugging
     window.applyCurrentFilters = () => controller.applyCurrentFilters();
     window.controller = controller;
 
-    // Button handlers
     const applyFiltersBtn = document.getElementById('applyFilters');
     const clearFiltersBtn = document.getElementById('clearFilters');
     const refreshBtn = document.getElementById('refreshTable');
-    const groupPacketsCheckbox = document.getElementById('group_packets');
 
     applyFiltersBtn.addEventListener('click', () => controller.applyCurrentFilters());
     clearFiltersBtn.addEventListener('click', () => controller.clearFilters());
@@ -426,24 +425,21 @@ document.addEventListener('DOMContentLoaded', function() {
         updateStats();
     });
 
-    // Helper functions for signal quality color coding
     function getRssiColorClass(rssi) {
-        if (rssi >= -60) return 'text-success'; // Excellent
-        if (rssi >= -70) return 'text-info';    // Good
-        if (rssi >= -80) return 'text-warning'; // Fair
-        return 'text-danger';                   // Poor
+        if (rssi >= -60) return 'text-success';
+        if (rssi >= -70) return 'text-info';
+        if (rssi >= -80) return 'text-warning';
+        return 'text-danger';
     }
 
     function getSnrColorClass(snr) {
-        if (snr > 5) return 'text-success';     // Excellent
-        if (snr > 0) return 'text-info';       // Good
-        if (snr > -5) return 'text-warning';   // Fair
-        return 'text-danger';                  // Poor
+        if (snr > 5) return 'text-success';
+        if (snr > 0) return 'text-info';
+        if (snr > -5) return 'text-warning';
+        return 'text-danger';
     }
 
-    // Initialize tooltips after table loads
     table.on('dataLoaded', function() {
-        // Initialize Bootstrap tooltips
         const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
         tooltipTriggerList.map(function (tooltipTriggerEl) {
             return new bootstrap.Tooltip(tooltipTriggerEl);
@@ -451,7 +447,6 @@ document.addEventListener('DOMContentLoaded', function() {
         updateStats();
     });
 
-    // Initialize page
     initializePageWithFilters();
 });
 </script>

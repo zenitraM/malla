@@ -16,6 +16,22 @@
 (function () {
   "use strict";
 
+  /**
+   * GET a /api/v1 JSON resource. Prefers the shared api-client (envelope
+   * unwrapping, silent retry); falls back to a direct fetch for early calls.
+   */
+  async function apiGetV1(path) {
+    if (window.MallaAPI && typeof window.MallaAPI.getDetailed === "function") {
+      const { data } = await window.MallaAPI.getDetailed(path, { silent: true });
+      return data;
+    }
+    const res = await fetch(path, { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = await res.json();
+    if (body && typeof body === "object" && "data" in body && "meta" in body) return body.data;
+    return body;
+  }
+
   const METRIC_LABELS = {
     temperature: "Temperature",
     relative_humidity: "Humidity",
@@ -224,8 +240,7 @@
       this.rangeMin = null;
       this.rangeMax = null;
       try {
-        const res = await fetch(`/api/node/${this.nodeId}/telemetry?range=${this.range}`);
-        const data = await res.json();
+        const data = await apiGetV1(`/api/v1/nodes/${this.nodeId}/telemetry?range=${this.range}`);
         if (this.loadingEl) this.loadingEl.style.display = "none";
         this.render((data && data.series) || {});
         this.rangeMin = this.fullMin;
@@ -250,8 +265,7 @@
       min = Math.floor(min);
       max = Math.ceil(max);
       try {
-        const res = await fetch(`/api/node/${this.nodeId}/telemetry?start=${min}&end=${max}`);
-        const data = await res.json();
+        const data = await apiGetV1(`/api/v1/nodes/${this.nodeId}/telemetry?since=${min}&until=${max}`);
         const series = (data && data.series) || {};
         if (!Object.keys(series).length) return; // keep the current view
         this.destroyCharts();
@@ -289,6 +303,8 @@
 
     updateOffline(latest) {
       if (!this.offlineEl) return;
+      // v1 returns ISO strings here; normalize before the numeric age check.
+      if (typeof latest === "string") latest = Date.parse(latest) / 1000;
       if (!isFinite(latest) || Date.now() / 1000 - latest <= OFFLINE_AFTER) {
         this.offlineEl.style.display = "none";
         return;

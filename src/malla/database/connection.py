@@ -50,7 +50,23 @@ def _apply_connection_pragmas(cursor: sqlite3.Cursor) -> None:
 
 
 def _resolve_db_path() -> str:
-    """Resolve the SQLite database path from env override, config, then default."""
+    """Resolve the SQLite database path for the current context.
+
+    Order: the Flask app being served (request/template contexts must always
+    hit the DB that app was configured with, even if another fixture in the
+    same process re-pointed the env var), then the env override, then config,
+    then the historic default.
+    """
+
+    try:
+        from flask import current_app, has_app_context
+
+        if has_app_context():
+            configured = current_app.config.get("DATABASE_FILE")
+            if configured:
+                return str(configured)
+    except Exception:  # pragma: no cover - Flask not importable is not fatal
+        pass
 
     return (
         os.getenv("MALLA_DATABASE_FILE")

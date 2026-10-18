@@ -1,248 +1,1246 @@
-/* Malla Bootstrap Theme */
-/* Leverages Bootstrap 5's CSS custom property system for maximum compatibility */
+/* ============================================================================
+   Malla design system
+   ----------------------------------------------------------------------------
+   Token-based theme on top of Bootstrap 5.3 color modes ([data-bs-theme]).
 
-/* Import Inter font */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+   Layers:
+     1. Primitive tokens   --malla-*  (color ramps, space, radius, shadow,
+                             typography, motion) per color scheme
+     2. Semantic aliases   --bs-* mapped onto primitives so every Bootstrap
+                             component follows the theme automatically
+     3. Components         cards, stat tiles, tables, badges, skeletons,
+                           empty states, toasts, app shell, focus rings
+     4. Legacy surface     selectors kept alive for existing templates/JS
+                           (signal-*, node tooltips, sidebars, map, graph...)
 
-/* Bootstrap theme customization using native CSS custom properties */
+   Light and dark are both first-class: every semantic token is defined twice,
+   never patched per-component after the fact.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   1. Primitive tokens
+   --------------------------------------------------------------------------- */
+
+/* Light scheme */
 :root,
 [data-bs-theme=light] {
-  /* Typography - Bootstrap native approach */
-  --bs-font-sans-serif: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --bs-body-font-family: var(--bs-font-sans-serif);
-  --bs-body-font-weight: 400;
-  --bs-headings-font-weight: 500;
+  /* Neutral ramp (slate) */
+  --malla-gray-50: #f8fafc;
+  --malla-gray-100: #f1f5f9;
+  --malla-gray-200: #e2e8f0;
+  --malla-gray-300: #cbd5e1;
+  --malla-gray-400: #94a3b8;
+  --malla-gray-500: #64748b;
+  --malla-gray-600: #475569;
+  --malla-gray-700: #334155;
+  --malla-gray-800: #1e293b;
+  --malla-gray-900: #0f172a;
 
-  /* Enhanced color palette - Bootstrap native */
-  --bs-primary: #0d6efd;
-  --bs-primary-rgb: 13, 110, 253;
-  --bs-secondary: #6c757d;
-  --bs-success: #198754;
-  --bs-info: #0dcaf0;
-  --bs-warning: #ffc107;
-  --bs-danger: #dc3545;
-  --bs-dark: #212529;
-  --bs-light: #f8f9fa;
+  /* Accent ramps */
+  --malla-blue-100: #dbeafe;
+  --malla-blue-300: #93c5fd;
+  --malla-blue-500: #3b82f6;
+  --malla-blue-600: #2563eb;
+  --malla-blue-700: #1d4ed8;
+  --malla-blue-900: #1e3a8a;
 
-  /* Custom colors for specific roles */
-  --bs-sensor: #e83e8c;
+  --malla-green-100: #dcfce7;
+  --malla-green-300: #86efac;
+  --malla-green-500: #22c55e;
+  --malla-green-600: #16a34a;
+  --malla-green-700: #15803d;
 
-  /* Surface colors with better contrast */
-  --bs-body-bg: #fafbfc;
-  --bs-body-bg-rgb: 250, 251, 252;
-  --bs-body-color: #212529;
-  --bs-body-color-rgb: 33, 37, 41;
-  --bs-tertiary-bg: #f8f9fa;
-  --bs-tertiary-bg-rgb: 248, 249, 250;
-  --bs-secondary-bg: #e9ecef;
-  --bs-secondary-color: #6c757d;
+  --malla-amber-100: #fef3c7;
+  --malla-amber-300: #fcd34d;
+  --malla-amber-500: #f59e0b;
+  --malla-amber-600: #d97706;
+  --malla-amber-700: #b45309;
 
-  /* Border colors */
-  --bs-border-color: #dee2e6;
-  --bs-border-color-translucent: rgba(0, 0, 0, 0.175);
+  --malla-red-100: #fee2e2;
+  --malla-red-300: #fca5a5;
+  --malla-red-500: #ef4444;
+  --malla-red-600: #dc2626;
+  --malla-red-700: #b91c1c;
 
-  /* Modern border radius */
-  --bs-border-radius: 0.5rem;
-  --bs-border-radius-sm: 0.375rem;
-  --bs-border-radius-lg: 0.75rem;
-  --bs-border-radius-xl: 1rem;
+  --malla-cyan-100: #cffafe;
+  --malla-cyan-300: #67e8f9;
+  --malla-cyan-500: #06b6d4;
+  --malla-cyan-600: #0891b2;
+  --malla-cyan-700: #0e7490;
 
-  /* Enhanced shadows using Bootstrap system */
-  --bs-box-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
-  --bs-box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.1);
-  --bs-box-shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.1), 0 4px 10px rgba(0, 0, 0, 0.05);
+  /* Surfaces & text */
+  --malla-bg: #f4f6f9;
+  --malla-bg-accent: #e9edf3;
+  --malla-surface: #ffffff;
+  --malla-surface-2: #f8fafc;
+  --malla-surface-raised: #ffffff;
+  --malla-border: #dfe5ec;
+  --malla-border-strong: #c3ccd6;
+  --malla-text: #17212e;
+  --malla-text-muted: #5b6b7c;
+  --malla-text-faint: #8494a5;
 
-  /* Table theming - Bootstrap native */
-  --bs-table-hover-bg: rgba(var(--bs-primary-rgb), 0.025);
-  --bs-table-striped-bg: rgba(var(--bs-primary-rgb), 0.015);
+  /* Brand + feedback (AA on light surfaces) */
+  --malla-primary: #2563eb;
+  --malla-primary-strong: #1d4ed8;
+  --malla-primary-soft: rgba(37, 99, 235, 0.1);
+  --malla-on-primary: #ffffff;
+  --malla-success: #15803d;
+  --malla-success-soft: rgba(21, 128, 61, 0.12);
+  --malla-warning: #b45309;
+  --malla-warning-strong: #f59e0b;
+  --malla-warning-soft: rgba(180, 83, 9, 0.12);
+  --malla-danger: #c0392b;
+  --malla-danger-soft: rgba(192, 57, 43, 0.1);
+  --malla-info: #0e7490;
+  --malla-info-soft: rgba(8, 145, 178, 0.12);
 
-  /* Transition system */
-  --bs-transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Focus */
+  --malla-focus: #2563eb;
+  --malla-focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.25);
+
+  /* Shadows (layered, low noise) */
+  --malla-shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --malla-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.08);
+  --malla-shadow-md: 0 2px 4px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.08);
+  --malla-shadow-lg: 0 8px 24px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06);
+
+  /* Motion */
+  --malla-ease: cubic-bezier(0.2, 0, 0, 1);
+  --malla-speed-fast: 120ms;
+  --malla-speed: 180ms;
+  --malla-speed-slow: 280ms;
+
+  /* Spacing scale (4pt) */
+  --malla-space-1: 0.25rem;
+  --malla-space-2: 0.5rem;
+  --malla-space-3: 0.75rem;
+  --malla-space-4: 1rem;
+  --malla-space-5: 1.5rem;
+  --malla-space-6: 2rem;
+  --malla-space-7: 3rem;
+
+  /* Radii */
+  --malla-radius-sm: 0.375rem;
+  --malla-radius: 0.5rem;
+  --malla-radius-lg: 0.75rem;
+  --malla-radius-xl: 1rem;
+  --malla-radius-pill: 999px;
 }
 
-/* Enhanced body typography */
+/* Dark scheme */
+[data-bs-theme=dark] {
+  --malla-gray-50: #171e27;
+  --malla-gray-100: #1c242f;
+  --malla-gray-200: #232d3a;
+  --malla-gray-300: #2e3a49;
+  --malla-gray-400: #465364;
+  --malla-gray-500: #6b7a8c;
+  --malla-gray-600: #8d9bac;
+  --malla-gray-700: #aab6c4;
+  --malla-gray-800: #ccd5df;
+  --malla-gray-900: #e6ecf3;
+
+  --malla-blue-100: #17233a;
+  --malla-blue-300: #2b4a7d;
+  --malla-blue-500: #4d8dff;
+  --malla-blue-600: #6ea8fe;
+  --malla-blue-700: #93c0fd;
+  --malla-blue-900: #c7dcfe;
+
+  --malla-green-100: #12291c;
+  --malla-green-300: #1f6b3d;
+  --malla-green-500: #34c374;
+  --malla-green-600: #5bd595;
+  --malla-green-700: #8ee3b3;
+
+  --malla-amber-100: #2d2410;
+  --malla-amber-300: #8a611c;
+  --malla-amber-500: #d99a26;
+  --malla-amber-600: #ecb43f;
+  --malla-amber-700: #f4c866;
+
+  --malla-red-100: #2b1512;
+  --malla-red-300: #7d2e26;
+  --malla-red-500: #e5533f;
+  --malla-red-600: #f0705c;
+  --malla-red-700: #f7957f;
+
+  --malla-cyan-100: #0d272e;
+  --malla-cyan-300: #155e6e;
+  --malla-cyan-500: #22b8cd;
+  --malla-cyan-600: #48cbdd;
+  --malla-cyan-700: #6fd9e6;
+
+  /* Surfaces & text */
+  --malla-bg: #0d1218;
+  --malla-bg-accent: #121924;
+  --malla-surface: #151c26;
+  --malla-surface-2: #1a2330;
+  --malla-surface-raised: #1c2532;
+  --malla-border: #263241;
+  --malla-border-strong: #37455a;
+  --malla-text: #e8edf4;
+  --malla-text-muted: #a5b3c2;
+  --malla-text-faint: #7c8b9c;
+
+  /* Brand + feedback (AA on dark surfaces) */
+  --malla-primary: #5f9bff;
+  --malla-primary-strong: #8ab4ff;
+  --malla-primary-soft: rgba(95, 155, 255, 0.16);
+  --malla-on-primary: #0b1420;
+  --malla-success: #4ade80;
+  --malla-success-soft: rgba(74, 222, 128, 0.14);
+  --malla-warning: #fbbf24;
+  --malla-warning-strong: #fbbf24;
+  --malla-warning-soft: rgba(251, 191, 36, 0.14);
+  --malla-danger: #f87171;
+  --malla-danger-soft: rgba(248, 113, 113, 0.14);
+  --malla-info: #38bdf8;
+  --malla-info-soft: rgba(56, 189, 248, 0.14);
+
+  --malla-focus: #8ab4ff;
+  --malla-focus-ring: 0 0 0 3px rgba(138, 180, 255, 0.3);
+
+  --malla-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --malla-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --malla-shadow-md: 0 2px 4px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.35);
+  --malla-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* ---------------------------------------------------------------------------
+   2. Semantic aliases -> Bootstrap variables
+   --------------------------------------------------------------------------- */
+
+:root,
+[data-bs-theme=light],
+[data-bs-theme=dark] {
+  /* Typography */
+  --bs-font-sans-serif: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --bs-body-font-family: var(--bs-font-sans-serif);
+  --bs-body-font-size: 0.9375rem;
+  --bs-body-font-weight: 400;
+  --bs-body-line-height: 1.5;
+  --bs-headings-font-weight: 600;
+
+  /* Radii */
+  --bs-border-radius-sm: var(--malla-radius-sm);
+  --bs-border-radius: var(--malla-radius);
+  --bs-border-radius-lg: var(--malla-radius-lg);
+  --bs-border-radius-xl: var(--malla-radius-xl);
+  --bs-border-radius-2xl: var(--malla-radius-xl);
+  --bs-border-radius-pill: var(--malla-radius-pill);
+}
+
+[data-bs-theme=light] {
+  color-scheme: light;
+
+  /* Bootstrap colours `code` with a pink that misses AA on our surfaces. */
+  --bs-code-color: #9d174d;
+
+  --bs-body-bg: var(--malla-bg);
+  --bs-body-bg-rgb: 244, 246, 249;
+  --bs-body-color: var(--malla-text);
+  --bs-body-color-rgb: 23, 33, 46;
+  --bs-emphasis-color: var(--malla-text);
+  --bs-secondary-color: var(--malla-text-muted);
+  --bs-secondary-color-rgb: 91, 107, 124;
+  --bs-tertiary-color: var(--malla-text-faint);
+  --bs-primary: var(--malla-primary);
+  --bs-primary-rgb: 37, 113, 235;
+  --bs-primary-text-emphasis: var(--malla-primary-strong);
+  --bs-primary-bg-subtle: var(--malla-blue-100);
+  --bs-primary-border-subtle: var(--malla-blue-300);
+  --bs-secondary: var(--malla-gray-600);
+  --bs-secondary-rgb: 71, 85, 105;
+  --bs-success: var(--malla-success);
+  --bs-success-rgb: 21, 128, 61;
+  --bs-success-text-emphasis: var(--malla-green-700);
+  --bs-success-bg-subtle: var(--malla-green-100);
+  --bs-success-border-subtle: var(--malla-green-300);
+  --bs-info: var(--malla-cyan-600);
+  --bs-info-rgb: 8, 145, 178;
+  --bs-info-text-emphasis: var(--malla-cyan-700);
+  --bs-info-bg-subtle: var(--malla-cyan-100);
+  --bs-info-border-subtle: var(--malla-cyan-300);
+  --bs-warning: #d97706;
+  --bs-warning-rgb: 217, 119, 6;
+  --bs-warning-text-emphasis: var(--malla-amber-700);
+  --bs-warning-bg-subtle: var(--malla-amber-100);
+  --bs-warning-border-subtle: var(--malla-amber-300);
+  --bs-danger: var(--malla-danger);
+  --bs-danger-rgb: 192, 57, 43;
+  --bs-danger-text-emphasis: var(--malla-red-700);
+  --bs-danger-bg-subtle: var(--malla-red-100);
+  --bs-danger-border-subtle: var(--malla-red-300);
+  --bs-light: var(--malla-gray-100);
+  --bs-light-rgb: 241, 245, 249;
+  --bs-dark: var(--malla-gray-800);
+  --bs-dark-rgb: 30, 41, 59;
+  --bs-secondary-bg: var(--malla-bg-accent);
+  --bs-secondary-bg-rgb: 233, 237, 243;
+  --bs-tertiary-bg: var(--malla-gray-100);
+  --bs-tertiary-bg-rgb: 241, 245, 249;
+  --bs-border-color: var(--malla-border);
+  --bs-border-color-translucent: var(--malla-border);
+  --bs-link-color: var(--malla-primary-strong);
+  --bs-link-color-rgb: 29, 78, 216;
+  --bs-link-hover-color: var(--malla-primary-strong);
+  --bs-link-hover-color-rgb: 29, 78, 216;
+  --bs-heading-color: var(--malla-text);
+
+  /* Component-level bootstrap vars */
+  --bs-body-font-family: var(--bs-font-sans-serif);
+  --bs-card-bg: var(--malla-surface);
+  --bs-table-hover-bg: var(--malla-primary-soft);
+  --bs-table-striped-bg: var(--malla-gray-50);
+  --bs-box-shadow-sm: var(--malla-shadow-sm);
+  --bs-box-shadow: var(--malla-shadow-md);
+  --bs-box-shadow-lg: var(--malla-shadow-lg);
+}
+
+[data-bs-theme=dark] {
+  color-scheme: dark;
+
+  --bs-code-color: #f0a6c8;
+
+  --bs-body-bg: var(--malla-bg);
+  --bs-body-bg-rgb: 13, 18, 24;
+  --bs-body-color: var(--malla-text);
+  --bs-body-color-rgb: 232, 237, 244;
+  --bs-emphasis-color: var(--malla-text);
+  --bs-secondary-color: var(--malla-text-muted);
+  --bs-secondary-color-rgb: 165, 179, 194;
+  --bs-tertiary-color: var(--malla-text-faint);
+  --bs-primary: var(--malla-primary);
+  --bs-primary-rgb: 95, 155, 255;
+  --bs-primary-text-emphasis: var(--malla-blue-700);
+  --bs-primary-bg-subtle: var(--malla-blue-100);
+  --bs-primary-border-subtle: var(--malla-blue-300);
+  --bs-secondary: var(--malla-gray-600);
+  --bs-secondary-rgb: 139, 155, 172;
+  --bs-success: var(--malla-success);
+  --bs-success-rgb: 74, 222, 128;
+  --bs-success-text-emphasis: var(--malla-green-700);
+  --bs-success-bg-subtle: var(--malla-green-100);
+  --bs-success-border-subtle: var(--malla-green-300);
+  --bs-info: var(--malla-info);
+  --bs-info-rgb: 56, 189, 248;
+  --bs-info-text-emphasis: var(--malla-cyan-700);
+  --bs-info-bg-subtle: var(--malla-cyan-100);
+  --bs-info-border-subtle: var(--malla-cyan-300);
+  --bs-warning: var(--malla-warning);
+  --bs-warning-rgb: 251, 191, 36;
+  --bs-warning-text-emphasis: var(--malla-amber-700);
+  --bs-warning-bg-subtle: var(--malla-amber-100);
+  --bs-warning-border-subtle: var(--malla-amber-300);
+  --bs-danger: var(--malla-danger);
+  --bs-danger-rgb: 248, 113, 113;
+  --bs-danger-text-emphasis: var(--malla-red-700);
+  --bs-danger-bg-subtle: var(--malla-red-100);
+  --bs-danger-border-subtle: var(--malla-red-300);
+  --bs-light: var(--malla-gray-100);
+  --bs-light-rgb: 28, 36, 47;
+  --bs-dark: var(--malla-gray-100);
+  --bs-dark-rgb: 232, 237, 244;
+  --bs-secondary-bg: var(--malla-surface-2);
+  --bs-secondary-bg-rgb: 26, 35, 48;
+  --bs-tertiary-bg: var(--malla-surface-2);
+  --bs-tertiary-bg-rgb: 26, 35, 48;
+  --bs-border-color: var(--malla-border);
+  --bs-border-color-translucent: var(--malla-border);
+  --bs-link-color: var(--malla-blue-600);
+  --bs-link-color-rgb: 110, 168, 254;
+  --bs-link-hover-color: var(--malla-blue-700);
+  --bs-link-hover-color-rgb: 147, 192, 253;
+  --bs-heading-color: var(--malla-text);
+
+  --bs-card-bg: var(--malla-surface);
+  --bs-table-hover-bg: var(--malla-primary-soft);
+  --bs-table-striped-bg: var(--malla-surface-2);
+  --bs-box-shadow-sm: var(--malla-shadow-sm);
+  --bs-box-shadow: var(--malla-shadow-md);
+  --bs-box-shadow-lg: var(--malla-shadow-lg);
+}
+
+/* ---------------------------------------------------------------------------
+   3. Base
+   --------------------------------------------------------------------------- */
+
+html {
+  scroll-behavior: smooth;
+}
+
 html body {
-  font-family: var(--bs-font-sans-serif) !important;
+  font-family: var(--bs-font-sans-serif);
   font-weight: var(--bs-body-font-weight);
+  background: var(--malla-bg);
+  color: var(--malla-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
-/* Headings with appropriate weights */
 h1, h2, h3, h4, h5, h6,
 .h1, .h2, .h3, .h4, .h5, .h6 {
   font-weight: var(--bs-headings-font-weight);
+  letter-spacing: -0.01em;
+  color: var(--bs-heading-color);
 }
 
-h1, .h1 {
-  font-weight: 600;
+h1, .h1 { letter-spacing: -0.02em; }
+
+code, kbd, pre, samp {
+  font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
-/* Bootstrap component enhancements */
+/* Focus rings: keyboard only, visible on both themes */
+:focus-visible {
+  outline: 2px solid var(--malla-focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 
-/* Cards with modern elevation */
+:focus:not(:focus-visible) {
+    outline: none;
+}
+
+/* Selection */
+::selection {
+  background: var(--malla-primary-soft);
+}
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--malla-gray-400) transparent;
+}
+
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--malla-gray-400);
+  border-radius: var(--malla-radius-pill);
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--malla-gray-500); }
+
+/* Skip link */
+.skip-link {
+  position: absolute;
+  top: -48px;
+  left: 8px;
+  z-index: 2000;
+  padding: 0.5rem 1rem;
+  background: var(--malla-primary);
+  color: var(--malla-on-primary);
+  border-radius: 0 0 var(--malla-radius) var(--malla-radius);
+  text-decoration: none;
+  transition: top var(--malla-speed) var(--malla-ease);
+}
+
+.skip-link:focus-visible {
+  top: 0;
+  color: var(--malla-on-primary);
+}
+
+/* ---------------------------------------------------------------------------
+   4. App shell
+   --------------------------------------------------------------------------- */
+
+.app-navbar {
+  --malla-nav-h: 3.5rem;
+  min-height: var(--malla-nav-h);
+  background: var(--malla-surface);
+  border-bottom: 1px solid var(--malla-border);
+  box-shadow: var(--malla-shadow-xs);
+}
+
+.app-navbar .navbar-brand {
+  font-weight: 700;
+  color: var(--malla-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  letter-spacing: -0.01em;
+}
+
+.app-navbar .navbar-brand {
+  padding-block: 0.25rem;
+}
+
+.app-navbar .nav-link {
+  color: var(--malla-text-muted);
+  font-weight: 500;
+  font-size: 0.9rem;
+  border-radius: var(--malla-radius-sm);
+  padding: 0.375rem 0.75rem;
+  transition: color var(--malla-speed) var(--malla-ease),
+    background-color var(--malla-speed) var(--malla-ease);
+}
+
+.app-navbar .nav-link:hover {
+  color: var(--malla-text);
+  background: var(--malla-primary-soft);
+}
+
+.app-navbar .nav-link.active,
+.app-navbar .nav-link.dropdown-toggle.active {
+  color: var(--malla-primary-strong);
+  background: var(--malla-primary-soft);
+}
+
+.app-navbar .nav-link.active {
+  position: relative;
+}
+
+.app-navbar .dropdown-menu {
+  border: 1px solid var(--malla-border);
+  border-radius: var(--malla-radius);
+  box-shadow: var(--malla-shadow-lg);
+  background: var(--malla-surface-raised);
+  padding: 0.375rem;
+}
+
+.app-navbar .dropdown-item {
+  border-radius: var(--malla-radius-sm);
+  font-size: 0.9rem;
+  padding: 0.45rem 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--malla-text);
+}
+
+.app-navbar .dropdown-item:hover,
+.app-navbar .dropdown-item:focus-visible {
+  background: var(--malla-primary-soft);
+  color: var(--malla-primary);
+}
+
+/* Header control buttons (theme / timezone) */
+.nav-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid var(--malla-border);
+  border-radius: var(--malla-radius);
+  background: var(--malla-surface);
+  color: var(--malla-text-muted);
+  transition: color var(--malla-speed) var(--malla-ease),
+    border-color var(--malla-speed) var(--malla-ease),
+    background-color var(--malla-speed) var(--malla-ease),
+    transform var(--malla-speed-fast) var(--malla-ease);
+}
+
+.nav-control:hover {
+  color: var(--malla-primary);
+  border-color: var(--malla-border-strong);
+  background: var(--malla-primary-soft);
+}
+
+.nav-control:active { transform: scale(0.94); }
+.nav-control i { font-size: 1rem; line-height: 1; }
+
+/* Page header pattern: title / subtitle / actions */
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--malla-space-3);
+  margin-bottom: var(--malla-space-5);
+}
+
+.page-header .page-title {
+  margin: 0;
+  font-size: clamp(1.35rem, 2.2vw, 1.7rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.page-header .page-subtitle {
+  margin: 0.25rem 0 0;
+  color: var(--malla-text-muted);
+  font-size: 0.925rem;
+}
+
+.page-header .page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--malla-space-2);
+  flex-wrap: wrap;
+}
+
+/* Footer */
+.app-footer {
+  margin-top: var(--malla-space-7);
+  padding: var(--malla-space-5) 0 var(--malla-space-6);
+  border-top: 1px solid var(--malla-border);
+  color: var(--malla-text-muted);
+  font-size: 0.85rem;
+}
+
+.app-footer a {
+  color: var(--malla-text-muted);
+  text-decoration-color: var(--malla-border-strong);
+}
+
+.app-footer a:hover { color: var(--malla-primary); }
+
+.app-footer .footer-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-footer .live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--malla-success);
+  box-shadow: 0 0 0 3px var(--malla-success-soft);
+}
+
+/* ---------------------------------------------------------------------------
+   5. Bootstrap component restyles
+   --------------------------------------------------------------------------- */
+
+/* Cards */
 .card {
-  border: 1px solid var(--bs-border-color);
-  box-shadow: var(--bs-box-shadow-sm);
-  transition: var(--bs-transition);
+  background: var(--malla-surface);
+  border: 1px solid var(--malla-border);
+  border-radius: var(--malla-radius-lg);
+  box-shadow: var(--malla-shadow-xs);
+  transition: box-shadow var(--malla-speed) var(--malla-ease),
+    border-color var(--malla-speed) var(--malla-ease),
+    transform var(--malla-speed) var(--malla-ease);
 }
 
 .card:hover {
-  box-shadow: var(--bs-box-shadow);
-  transform: translateY(-1px);
+  box-shadow: var(--malla-shadow-sm);
+  border-color: var(--malla-border-strong);
 }
 
-/* Tables - Compact and modern */
-.table {
-  --bs-table-hover-bg: rgba(var(--bs-primary-rgb), 0.025);
-  font-size: 0.875rem;
+.card-header {
+  background: transparent;
+  border-bottom: 1px solid var(--malla-border);
+  font-weight: 600;
+  padding: var(--malla-space-3) var(--malla-space-4);
 }
 
-.table > :not(caption) > * > * {
-  border-bottom-width: 1px;
-  border-color: var(--bs-border-color);
-  padding: 0.5rem;
+.card-header .card-title {
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--malla-text);
 }
 
-.table thead th {
-  background: var(--bs-primary);
-  color: white;
-  font-weight: 500;
-  border: none;
-  padding: 0.6rem 0.5rem;
-  font-size: 0.8rem;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  transition: background-color 0.2s ease;
-}
+.card-body { padding: var(--malla-space-4); }
 
-.table thead th:hover {
-  background: color-mix(in srgb, var(--bs-primary) 85%, black);
-}
-
-/* Buttons with enhanced states */
+/* Buttons */
 .btn {
-  font-weight: 400;
-  transition: var(--bs-transition);
-  border-radius: var(--bs-border-radius);
+  font-weight: 500;
+  border-radius: var(--malla-radius);
+  transition: color var(--malla-speed) var(--malla-ease),
+    background-color var(--malla-speed) var(--malla-ease),
+    border-color var(--malla-speed) var(--malla-ease),
+    box-shadow var(--malla-speed) var(--malla-ease),
+    transform var(--malla-speed-fast) var(--malla-ease);
 }
 
-.btn:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--bs-box-shadow);
+.btn:active { transform: translateY(0.5px); }
+
+.btn-primary {
+    --bs-btn-color: var(--malla-on-primary);
+    --bs-btn-hover-color: var(--malla-on-primary);
+    --bs-btn-active-color: var(--malla-on-primary);
+    --bs-btn-disabled-color: var(--malla-on-primary);
+    --bs-btn-bg: var(--malla-primary);
+    --bs-btn-border-color: var(--malla-primary);
+    --bs-btn-hover-bg: var(--malla-primary-strong);
+    --bs-btn-hover-border-color: var(--malla-primary-strong);
+    --bs-btn-active-bg: var(--malla-primary-strong);
+    --bs-btn-active-border-color: var(--malla-primary-strong);
+    --bs-btn-disabled-bg: var(--malla-primary);
+    --bs-btn-disabled-border-color: var(--malla-primary);
 }
 
-.btn:active {
-  transform: translateY(0);
+/* Outline buttons: Bootstrap ships fixed hex colours that miss AA on our
+   surfaces (e.g. #0dcaf0 cyan on white, #0d6efd on the dark background). */
+.btn-outline-primary {
+  --bs-btn-color: var(--malla-primary);
+  --bs-btn-border-color: var(--malla-primary);
+  --bs-btn-hover-bg: var(--malla-primary);
+  --bs-btn-hover-border-color: var(--malla-primary);
+  --bs-btn-hover-color: var(--malla-on-primary);
+  --bs-btn-active-bg: var(--malla-primary);
+  --bs-btn-active-border-color: var(--malla-primary);
+  --bs-btn-active-color: var(--malla-on-primary);
 }
 
-/* Form controls */
+.btn-outline-info {
+  --bs-btn-color: var(--malla-info);
+  --bs-btn-border-color: var(--malla-info);
+  --bs-btn-hover-bg: var(--malla-info);
+  --bs-btn-hover-border-color: var(--malla-info);
+  --bs-btn-hover-color: #ffffff;
+  --bs-btn-active-bg: var(--malla-info);
+  --bs-btn-active-border-color: var(--malla-info);
+  --bs-btn-active-color: #ffffff;
+}
+
+.btn-outline-success {
+  --bs-btn-color: var(--malla-success);
+  --bs-btn-border-color: var(--malla-success);
+  --bs-btn-hover-bg: var(--malla-success);
+  --bs-btn-hover-border-color: var(--malla-success);
+  --bs-btn-hover-color: var(--malla-on-primary);
+  --bs-btn-active-bg: var(--malla-success);
+  --bs-btn-active-border-color: var(--malla-success);
+  --bs-btn-active-color: var(--malla-on-primary);
+}
+
+.btn-outline-warning {
+  --bs-btn-color: var(--malla-warning);
+  --bs-btn-border-color: var(--malla-warning);
+  --bs-btn-hover-bg: var(--malla-warning-strong);
+  --bs-btn-hover-border-color: var(--malla-warning-strong);
+  --bs-btn-hover-color: #2b1d02;
+  --bs-btn-active-bg: var(--malla-warning-strong);
+  --bs-btn-active-border-color: var(--malla-warning-strong);
+  --bs-btn-active-color: #2b1d02;
+}
+
+.btn-outline-danger {
+  --bs-btn-color: var(--malla-danger);
+  --bs-btn-border-color: var(--malla-danger);
+  --bs-btn-hover-bg: var(--malla-danger);
+  --bs-btn-hover-border-color: var(--malla-danger);
+  --bs-btn-hover-color: #ffffff;
+  --bs-btn-active-bg: var(--malla-danger);
+  --bs-btn-active-border-color: var(--malla-danger);
+  --bs-btn-active-color: #ffffff;
+}
+
+/* Outline toggle set (range switchers, view toggles) */
+.btn-group .btn-outline-secondary,
+.btn-group .btn-outline-primary {
+  --bs-btn-border-color: var(--malla-border);
+  --bs-btn-color: var(--malla-text-muted);
+  --bs-btn-hover-bg: var(--malla-primary-soft);
+  --bs-btn-hover-color: var(--malla-primary);
+  --bs-btn-hover-border-color: var(--malla-border-strong);
+}
+
+.btn-group .btn.active {
+  --bs-btn-bg: var(--malla-primary-soft);
+  --bs-btn-border-color: var(--malla-primary);
+  --bs-btn-color: var(--malla-primary);
+  font-weight: 600;
+}
+
+/* Forms */
 .form-control,
 .form-select {
-  border-radius: var(--bs-border-radius-sm);
-  border: 1px solid var(--bs-border-color);
-  transition: var(--bs-transition);
-  font-weight: 400;
+  background-color: var(--malla-surface);
+  border-color: var(--malla-border);
+  color: var(--malla-text);
+  border-radius: var(--malla-radius-sm);
+  transition: border-color var(--malla-speed) var(--malla-ease),
+    box-shadow var(--malla-speed) var(--malla-ease);
 }
+
+.form-control::placeholder { color: var(--malla-text-faint); }
 
 .form-control:focus,
 .form-select:focus {
-  border-color: var(--bs-primary);
-  box-shadow: 0 0 0 0.2rem rgba(var(--bs-primary-rgb), 0.15);
+  background-color: var(--malla-surface);
+  color: var(--malla-text);
+  border-color: var(--malla-primary);
+  box-shadow: var(--malla-focus-ring);
 }
 
-/* Navigation */
-.navbar {
-  box-shadow: var(--bs-box-shadow-sm);
-  backdrop-filter: blur(10px);
+.input-group-text {
+  background: var(--malla-surface-2);
+  border-color: var(--malla-border);
+  color: var(--malla-text-muted);
 }
 
-.nav-link {
-  font-weight: 400;
-  transition: var(--bs-transition);
+.form-label { font-weight: 500; color: var(--malla-text); }
+
+/* Badges & pills */
+.badge {
+  font-weight: 600;
+  border-radius: var(--malla-radius-pill);
+  padding: 0.35em 0.65em;
+  letter-spacing: 0.01em;
 }
 
-.navbar-brand {
+/* Progress */
+.progress {
+  background: var(--malla-bg-accent);
+  border-radius: var(--malla-radius-pill);
+}
+
+.progress-bar {
+  border-radius: var(--malla-radius-pill);
+  transition: width var(--malla-speed-slow) var(--malla-ease);
+}
+
+/* Alerts */
+.alert {
+  border-radius: var(--malla-radius);
+  border: 1px solid var(--malla-border);
+}
+
+/* Nav tabs (in-page) */
+.nav-tabs {
+  border-bottom: 1px solid var(--malla-border);
+  gap: 0.25rem;
+}
+
+.nav-tabs .nav-link {
+  color: var(--malla-text-muted);
+  border: 1px solid transparent;
+  border-radius: var(--malla-radius) var(--malla-radius) 0 0;
   font-weight: 500;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.9rem;
+  transition: color var(--malla-speed) var(--malla-ease),
+    background-color var(--malla-speed) var(--malla-ease);
 }
 
-/* Modern scrollbar styling */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--bs-secondary) transparent;
+.nav-tabs .nav-link:hover {
+  color: var(--malla-text);
+  border-color: transparent;
+  background: var(--malla-primary-soft);
+  isolation: isolate;
 }
 
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+.nav-tabs .nav-link.active {
+  color: var(--malla-primary);
+  background: var(--malla-surface);
+  border-color: var(--malla-border) var(--malla-border) var(--malla-surface);
+  font-weight: 600;
 }
 
-*::-webkit-scrollbar-track {
+/* Bootstrap toasts (used by the shared toast helper) */
+.toast-container {
+  position: fixed;
+  top: 4.5rem;
+  right: 1rem;
+  z-index: 2100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(22rem, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  background: var(--malla-surface-raised);
+  border: 1px solid var(--malla-border);
+  border-radius: var(--malla-radius);
+  box-shadow: var(--malla-shadow-lg);
+  color: var(--malla-text);
+  overflow: hidden;
+}
+
+.toast-header {
   background: transparent;
+  border-bottom: 1px solid var(--malla-border);
+  color: var(--malla-text);
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
 }
 
-*::-webkit-scrollbar-thumb {
-  background: var(--bs-secondary);
-  border-radius: 4px;
+.toast-body {
+  padding: 0.6rem 0.75rem;
+  font-size: 0.875rem;
+  color: var(--malla-text);
+  word-break: break-word;
 }
 
-*::-webkit-scrollbar-thumb:hover {
-  background: var(--bs-primary);
+.toast .btn-close {
+  filter: none;
 }
 
-/* Dark mode support - Bootstrap native */
-[data-bs-theme=dark] {
-  --bs-body-bg: #212529;
-  --bs-body-bg-rgb: 33, 37, 41;
-  --bs-body-color: #dee2e6;
-  --bs-body-color-rgb: 222, 226, 230;
-  --bs-tertiary-bg: #2b3035;
-  --bs-tertiary-bg-rgb: 43, 48, 53;
-  --bs-secondary-bg: #343a40;
-  --bs-secondary-color: #adb5bd;
-
-  /* Border colors for dark mode */
-  --bs-border-color: #495057;
-  --bs-border-color-translucent: rgba(255, 255, 255, 0.15);
-
-  /* Dark/light color variants for dark mode */
-  --bs-dark: #f8f9fa;
-  --bs-light: #495057;
-
-  /* Custom colors for dark mode */
-  --bs-sensor: #f8a2c2;
+[data-bs-theme=dark] .toast .btn-close {
+  filter: invert(1) grayscale(100%) brightness(200%);
 }
 
-[data-bs-theme=dark] .card {
-  background-color: var(--bs-tertiary-bg);
-  border-color: var(--bs-border-color);
+.toast-indicator {
+    width: 0.4rem;
+    align-self: stretch;
+    border-radius: 2px;
+    margin: 0.5rem 0 0.5rem 0.5rem;
 }
 
-[data-bs-theme=dark] .card:hover {
-  background-color: var(--bs-secondary-bg);
+.toast-indicator.success { background: var(--malla-success); }
+.toast-indicator.error { background: var(--malla-danger); }
+.toast-indicator.warning { background: var(--malla-warning-strong); }
+.toast-indicator.info { background: var(--malla-info); }
+
+/* Tooltips */
+.tooltip {
+  --bs-tooltip-bg: var(--malla-gray-900);
+  --bs-tooltip-color: var(--malla-gray-50);
+  --bs-tooltip-border-radius: var(--malla-radius-sm);
+  --bs-tooltip-opacity: 1;
 }
 
-[data-bs-theme=dark] .tooltip-inner {
-  --bs-tooltip-color: var(--bs-body-color);
-  --bs-tooltip-bg: var(--bs-tertiary-bg);
+[data-bs-theme=dark] .tooltip {
+  --bs-tooltip-bg: var(--malla-surface-raised);
+  --bs-tooltip-color: var(--malla-text);
 }
 
 .tooltip-inner {
   text-align: left;
   max-width: 280px;
+  box-shadow: var(--malla-shadow-md);
 }
 
-.node-link {
+/* Modals, dropdowns, popovers follow surface tokens automatically via --bs-* */
+
+/* ---------------------------------------------------------------------------
+   6. Components
+   --------------------------------------------------------------------------- */
+
+/* Stat tile (KPI) */
+.stat-tile {
   position: relative;
-  color: var(--bs-primary);
+  background: var(--malla-surface);
+  border: 1px solid var(--malla-border);
+  border-radius: var(--malla-radius-lg);
+  box-shadow: var(--malla-shadow-xs);
+  padding: var(--malla-space-4);
+  min-width: 0;
+  transition: box-shadow var(--malla-speed) var(--malla-ease),
+    border-color var(--malla-speed) var(--malla-ease),
+    transform var(--malla-speed) var(--malla-ease);
+}
+
+.stat-tile:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--malla-shadow-sm);
+  border-color: var(--malla-border-strong);
+}
+
+.stat-tile .stat-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--malla-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.stat-tile .stat-value {
+  font-size: 1.65rem;
+  font-weight: 700;
+  line-height: 1.15;
+  margin-top: 0.35rem;
+  color: var(--malla-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.stat-tile .stat-hint {
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--malla-text-muted);
+}
+
+.stat-tile .stat-icon {
+  position: absolute;
+  top: var(--malla-space-3);
+  right: var(--malla-space-3);
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  place-items: center;
+  border-radius: var(--malla-radius);
+  background: var(--malla-primary-soft);
+  color: var(--malla-primary);
+  font-size: 1.1rem;
+}
+
+.stat-tile.accent-success .stat-icon { background: var(--malla-success-soft); color: var(--malla-success); }
+.stat-tile.accent-warning .stat-icon { background: var(--malla-warning-soft); color: var(--malla-warning); }
+.stat-tile.accent-danger .stat-icon { background: var(--malla-danger-soft); color: var(--malla-danger); }
+.stat-tile.accent-info .stat-icon { background: var(--malla-info-soft); color: var(--malla-info); }
+
+/* Skeleton loaders */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--malla-surface-2);
+  border-radius: var(--malla-radius-sm);
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--malla-text) 7%, transparent),
+    transparent
+  );
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  100% { transform: translateX(100%); }
+}
+
+.skeleton-text { height: 0.8rem; margin: 0.35rem 0; }
+.skeleton-text-lg { height: 1.6rem; width: 40%; }
+.skeleton-chart { height: 100%; min-height: 120px; width: 100%; }
+.skeleton-tile { height: 5.5rem; }
+.skeleton-row { height: 1.6rem; margin: 0.3rem 0; }
+
+/* Empty states */
+.empty-state {
+  text-align: center;
+  padding: var(--malla-space-7) var(--malla-space-4);
+  color: var(--malla-text-muted);
+}
+
+.empty-state .empty-state-icon {
+  font-size: 2.5rem;
+  color: var(--malla-text-faint);
+  margin-bottom: var(--malla-space-3);
+}
+
+.empty-state .empty-state-title {
+  font-weight: 600;
+  color: var(--malla-text);
+  margin-bottom: 0.25rem;
+}
+
+.empty-state .empty-state-description { font-size: 0.875rem; }
+
+/* Status pills: link quality */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: var(--malla-radius-pill);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.pill .pill-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pill-success { background: var(--malla-success-soft); color: var(--malla-success); }
+.pill-warning { background: var(--malla-warning-soft); color: var(--malla-warning); }
+.pill-danger { background: var(--malla-danger-soft); color: var(--malla-danger); }
+.pill-info { background: var(--malla-info-soft); color: var(--malla-info); }
+.pill-neutral { background: var(--malla-primary-soft); color: var(--malla-text-muted); }
+
+/* Presence (online / recent / offline) */
+.presence-online { color: var(--malla-success); }
+.presence-recent { color: var(--malla-warning); }
+.presence-offline { color: var(--malla-text-faint); }
+
+/* Node detail hero */
+.node-hero {
+  background: var(--malla-surface);
+  border: 1px solid var(--malla-border);
+  border-radius: var(--malla-radius-lg);
+  box-shadow: var(--malla-shadow-xs);
+  padding: var(--malla-space-5);
+  margin-bottom: var(--malla-space-5);
+}
+
+.node-hero .hero-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: clamp(1.3rem, 2.4vw, 1.8rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.node-hero .hero-meta {
+  color: var(--malla-text-muted);
+  font-size: 0.9rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.25rem;
+  margin-top: 0.5rem;
+}
+
+.node-hero .hero-meta strong { color: var(--malla-text); font-weight: 600; }
+
+/* Auto refresh status row */
+.refresh-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--malla-text-muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.refresh-status .refresh-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--malla-success);
+}
+
+.refresh-status.paused .refresh-dot {
+  background: var(--malla-text-faint);
+}
+
+
+/* Badge contrast: Bootstrap pairs these utility backgrounds with white text,
+   which fails AA against our bright dark-mode (and cyan light-mode) tokens.
+   Keep the token hues; pick the text colour that passes on each scheme. */
+.badge.bg-primary { background-color: var(--malla-primary) !important; }
+.badge.bg-success { background-color: var(--malla-success) !important; }
+.badge.bg-info { background-color: var(--malla-info) !important; }
+.badge.bg-danger { background-color: var(--malla-danger) !important; }
+.badge.bg-warning { background-color: var(--malla-warning-strong) !important; }
+.badge.bg-secondary { background-color: var(--malla-gray-600) !important; }
+
+[data-bs-theme=light] .badge.bg-primary,
+[data-bs-theme=light] .badge.bg-success,
+[data-bs-theme=light] .badge.bg-info,
+[data-bs-theme=light] .badge.bg-danger,
+[data-bs-theme=light] .badge.bg-secondary {
+  color: #ffffff !important;
+}
+
+[data-bs-theme=light] .badge.bg-warning { color: #2b1d02 !important; }
+
+[data-bs-theme=dark] .badge.bg-dark {
+  background-color: var(--malla-gray-400) !important;
+  color: #ffffff !important;
+}
+
+/* Compact badges built by the map JS pick their text colour from the inline
+   background's luminance (readableTextOn) — no blanket override needed. */
+
+[data-bs-theme=dark] .badge.bg-primary,
+[data-bs-theme=dark] .badge.bg-success,
+[data-bs-theme=dark] .badge.bg-info,
+[data-bs-theme=dark] .badge.bg-danger,
+[data-bs-theme=dark] .badge.bg-warning,
+[data-bs-theme=dark] .badge.bg-secondary {
+  color: #0b1119 !important;
+}
+
+/* Outline-secondary follows Bootstrap's hard-coded #6c757d rather than
+   --bs-secondary; point it at the theme's muted text instead. */
+.btn-outline-secondary {
+  --bs-btn-color: var(--malla-text-muted);
+  --bs-btn-border-color: var(--malla-border-strong);
+  --bs-btn-hover-bg: var(--malla-primary-soft);
+  --bs-btn-hover-color: var(--malla-text);
+  --bs-btn-hover-border-color: var(--malla-border-strong);
+  --bs-btn-active-bg: var(--malla-primary-soft);
+  --bs-btn-active-color: var(--malla-text);
+  --bs-btn-active-border-color: var(--malla-border-strong);
+}
+
+/* Soft-state text: pills and signal chips need AA on their tinted backgrounds
+   in light mode (dark mode already uses the bright ramp steps). */
+[data-bs-theme=light] .text-warning { color: #92400e !important; }
+[data-bs-theme=light] .text-info { color: #0e7490 !important; }
+[data-bs-theme=light] .text-primary { color: var(--malla-primary-strong) !important; }
+
+.pill-neutral { color: var(--malla-text-muted); }
+[data-bs-theme=light] .pill-neutral { color: var(--malla-text-muted); }
+[data-bs-theme=light] .pill-success,
+[data-bs-theme=light] .signal-good,
+[data-bs-theme=light] .signal-excellent { color: #14532d; }
+[data-bs-theme=light] .pill-warning,
+[data-bs-theme=light] .signal-fair { color: #78350f; }
+[data-bs-theme=light] .pill-danger,
+[data-bs-theme=light] .signal-poor { color: #7f1d1d; }
+[data-bs-theme=light] .pill-info { color: #0c4a6e; }
+
+/* Chart placeholder boxes */
+.chart-box { position: relative; min-height: 0; }
+
+/* ---------------------------------------------------------------------------
+   7. Legacy surface (selectors preserved from the previous theme)
+   --------------------------------------------------------------------------- */
+
+/* Metric tiles used across pages (node detail, legacy dashboard blocks) */
+.card-metric { text-align: center; padding: var(--malla-space-4); }
+
+.metric-value {
+  font-size: 1.9rem;
+  font-weight: 700;
+  color: var(--malla-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.metric-label {
+  color: var(--malla-text-muted);
+  font-size: 0.85rem;
   font-weight: 500;
 }
 
-.node-link:hover {
-  color: var(--bs-primary);
-  filter: brightness(0.85);
+/* Legacy signal classes -> tokenized soft backgrounds */
+.signal-excellent,
+.signal-good,
+.signal-fair,
+.signal-poor {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--malla-radius-pill);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
+
+.signal-excellent { background: var(--malla-success-soft); color: var(--malla-success); }
+.signal-good { background: var(--malla-success-soft); color: var(--malla-success); }
+.signal-info { background: var(--malla-info-soft); color: var(--malla-info); }
+.signal-fair { background: var(--malla-warning-soft); color: var(--malla-warning); }
+.signal-poor { background: var(--malla-danger-soft); color: var(--malla-danger); }
+
+/* Node links + tooltips (base.html tooltip system) */
+.node-link {
+  position: relative;
+  color: var(--bs-link-color);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.node-link:hover { color: var(--bs-link-hover-color); }
 
 .node-tooltip-content {
   min-width: 200px;
@@ -256,14 +1254,11 @@ h1, .h1 {
   line-height: 1.15;
   margin-bottom: 0.35rem;
   padding-bottom: 0.3rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  color: #fff;
+  border-bottom: 1px solid var(--malla-border);
+  color: var(--malla-text);
 }
 
-.node-tooltip-table {
-  display: grid;
-  gap: 0;
-}
+.node-tooltip-table { display: grid; }
 
 .node-tooltip-row {
   display: grid;
@@ -273,22 +1268,20 @@ h1, .h1 {
 }
 
 .node-tooltip-row + .node-tooltip-row {
-  border-top: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--malla-border) 60%, transparent);
 }
 
 .node-tooltip-label,
-.node-tooltip-value {
-  padding: 0.18rem 0;
-  vertical-align: top;
-}
+.node-tooltip-value { padding: 0.18rem 0; vertical-align: top; }
 
 .node-tooltip-label {
   font-weight: 600;
-  color: var(--bs-secondary-color);
+  color: var(--malla-text-muted);
   white-space: nowrap;
 }
 
 .node-tooltip-value {
+  color: var(--malla-text);
   word-break: break-word;
 }
 
@@ -297,155 +1290,291 @@ h1, .h1 {
   font-size: 0.76rem;
 }
 
-/* Application-specific components using Bootstrap utilities */
-
-/* Modern table container - using Bootstrap classes where possible */
-.modern-table-container {
-  background: var(--bs-body-bg);
-  border-radius: var(--bs-border-radius);
-  box-shadow: var(--bs-box-shadow);
+/* Table containers (modern-table.js and static pages) */
+.modern-table-container,
+.modern-table-card {
+  background: var(--malla-surface);
+  border: 1px solid var(--malla-border);
+  border-radius: var(--malla-radius-lg);
+  box-shadow: var(--malla-shadow-xs);
   overflow: hidden;
 }
 
+.modern-filters-card {
+  background: var(--malla-surface);
+  border: 1px solid var(--malla-border);
+  border-radius: var(--malla-radius-lg);
+  box-shadow: var(--malla-shadow-xs);
+}
+
 .modern-table thead th {
-  background: var(--bs-primary);
-  color: white;
-  font-weight: 500;
-  padding: 0.6rem 0.5rem;
-  font-size: 0.8rem;
-  border: none;
+  background: var(--malla-surface-2);
+  color: var(--malla-text-muted);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--malla-border);
   position: sticky;
   top: 0;
   z-index: 10;
-  transition: background-color 0.2s ease;
+  transition: background-color var(--malla-speed) var(--malla-ease),
+    color var(--malla-speed) var(--malla-ease);
 }
 
-.modern-table thead th:hover {
-  background: color-mix(in srgb, var(--bs-primary) 85%, black);
-}
-
-/* Sorting CSS moved to modern-table.css to avoid conflicts */
-
-.modern-table tbody tr {
-  transition: var(--bs-transition);
-}
-
-.modern-table tbody tr:hover {
-  background-color: var(--bs-table-hover-bg);
-  transition: background-color 0.2s ease;
-}
-
-.modern-table tbody tr:nth-of-type(odd) {
-  background-color: var(--bs-table-striped-bg);
-}
+.modern-table thead th:hover { background: var(--malla-bg-accent); color: var(--malla-text); }
 
 .modern-table tbody td {
-  padding: 0.5rem;
+  padding: 0.5rem 0.625rem;
   font-size: 0.875rem;
-  line-height: 1;
+  vertical-align: middle;
+  border-bottom: 1px solid color-mix(in srgb, var(--malla-border) 55%, transparent);
+  color: var(--malla-text);
 }
 
-/* Form elements in tables */
-.modern-table .form-control,
-.modern-table .form-select {
-  border-radius: var(--bs-border-radius-sm);
-  border: 1px solid var(--bs-border-color);
+.modern-table tbody tr { transition: background-color var(--malla-speed-fast) var(--malla-ease); }
+.modern-table tbody tr:nth-of-type(odd) { background-color: var(--malla-table-striped, transparent); }
+.modern-table tbody tr:hover { background-color: var(--malla-primary-soft); }
+
+.modern-table a {
+  color: var(--bs-link-color);
+  text-decoration: none;
+  font-weight: 500;
 }
 
-/* Badge styling in tables - smaller for compact design */
+.modern-table a:hover { color: var(--bs-link-hover-color); text-decoration: underline; }
+
 .modern-table .badge {
   font-size: 0.7em;
-  font-weight: 500;
-  padding: 0.25em 0.5em;
+  font-weight: 600;
+  padding: 0.25em 0.55em;
 }
 
-/* Link styling in tables */
-.modern-table a {
-  color: var(--bs-primary);
-  text-decoration: none;
-  transition: color 0.2s ease;
-}
-
-.modern-table a:hover {
-  color: var(--bs-primary);
-  filter: brightness(1.2);
-  text-decoration: underline;
-}
-
-/* Compact button groups in tables */
 .modern-table .btn-group .btn {
   padding: 0.2rem 0.4rem;
   font-size: 0.75rem;
 }
 
-/* Sidebar components - using Bootstrap design tokens */
-.table-sidebar {
-  background: var(--bs-body-bg);
-  border-right: 1px solid var(--bs-border-color);
-  box-shadow: var(--bs-box-shadow);
+/* Density: compact & comfortable modifiers (table toolbar toggle) */
+.table-density-compact .modern-table tbody td { padding: 0.25rem 0.5rem; font-size: 0.8125rem; }
+.table-density-comfortable .modern-table tbody td { padding: 0.7rem 0.75rem; font-size: 0.9rem; }
+.table-hidden-col { display: none; }
+
+/* Row hover affordance: show row actions on hover */
+.row-actions { opacity: 0.35; transition: opacity var(--malla-speed) var(--malla-ease); }
+tr:hover .row-actions { opacity: 1; }
+
+/* Generic table header used by static tables */
+.table thead th {
+  background: var(--malla-surface-2);
+  color: var(--malla-text-muted);
+  font-weight: 600;
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--malla-border);
 }
 
-.modern-filters-card {
-  background: var(--bs-body-bg);
-  border: 1px solid var(--bs-border-color);
-  border-radius: var(--bs-border-radius);
-  box-shadow: var(--bs-box-shadow-sm);
+.table > :not(caption) > * > * { border-bottom-color: color-mix(in srgb, var(--malla-border) 55%, transparent); }
+
+/* Sidebar family (table filter sidebar + map/graph sidebar) */
+.table-sidebar,
+.sidebar {
+  background: var(--malla-surface);
+  border-color: var(--malla-border);
+  color: var(--malla-text);
 }
 
-/* Enhanced focus states using Bootstrap system */
-.btn:focus-visible,
-.form-control:focus,
-.form-select:focus {
-  outline: 2px solid var(--bs-primary);
-  outline-offset: 2px;
+.table-sidebar { border-right: 1px solid var(--malla-border); }
+.sidebar { border-left: 1px solid var(--malla-border); }
+
+.sidebar-header {
+  background: var(--malla-surface-2);
+  border-bottom: 1px solid var(--malla-border);
+  color: var(--malla-text);
 }
 
-/* Responsive typography using Bootstrap approach */
-@media (min-width: 768px) {
-  html {
-    font-size: 1rem;
-  }
+.sidebar-section { border-bottom: 1px solid var(--malla-border); }
+.sidebar-section h6 { color: var(--malla-text); }
+
+.node-list-item,
+.search-result-item {
+  border: 1px solid var(--malla-border);
+  color: var(--malla-text);
+  border-radius: var(--malla-radius-sm);
 }
 
-@media (min-width: 1200px) {
-  html {
-    font-size: 1.05rem;
-  }
+.node-list-item:hover,
+.search-result-item:hover { background: var(--malla-surface-2); }
+
+.node-list-item.selected,
+.search-result-item.selected {
+  background: var(--malla-primary-soft);
+  border-color: var(--malla-primary);
 }
 
-/* Mobile responsiveness for tables */
-@media (max-width: 768px) {
-  .modern-table {
-    font-size: 0.8rem; /* Even smaller on mobile */
-  }
-
-  .modern-table thead th,
-  .modern-table tbody td {
-    padding: 0.4rem 0.3rem; /* Very compact on mobile */
-  }
+/* Overlays */
+.loading-overlay,
+.error-overlay {
+  background: color-mix(in srgb, var(--malla-bg) 82%, transparent);
+  color: var(--malla-text);
+  backdrop-filter: blur(2px);
 }
 
-/* Animation utilities - Bootstrap compatible */
+.error-overlay { color: var(--malla-danger); }
+
+/* Node labels in graph SVGs */
+.node-label { fill: var(--malla-text); }
+
+/* Diff colours */
+.positive-diff { color: var(--malla-success) !important; }
+.negative-diff { color: var(--malla-danger) !important; }
+.neutral-diff { color: var(--malla-text-muted) !important; }
+
+/* Payload / yaml blocks */
+.payload-hex,
+.yaml-content {
+  background: var(--malla-surface-2);
+  color: var(--malla-text);
+  border: 1px solid var(--malla-border);
+  border-radius: var(--malla-radius-sm);
+}
+
+/* Stats cards (legacy) */
+.stats-card {
+  background: var(--malla-surface);
+  border: 1px solid var(--malla-border);
+  color: var(--malla-text);
+}
+
+.stat-label { color: var(--malla-text-muted); }
+.stat-value { color: var(--malla-text); }
+
+/* Gateway / node selector cards */
+.gateway-selector,
+.node-selector {
+  background: var(--malla-surface);
+  color: var(--malla-text);
+  border: 1px solid var(--malla-border);
+}
+
+.graph-container,
+.traceroute-graph-container { background: var(--malla-surface); }
+
+/* Legend swatches (traceroute graph) */
+.legend-line { width: 18px; height: 3px; margin-right: 8px; display: inline-block; }
+.legend-rf-link { background: var(--malla-primary); }
+.legend-gateway-connection { height: 2px; background: var(--malla-info); border-top: 1px dashed var(--malla-info); }
+.legend-direct-reception { height: 2px; background: var(--malla-warning-strong); border-top: 1px dashed var(--malla-warning-strong); }
+
+/* Map hop count chip */
+.map-hop-count-label {
+  background: var(--malla-surface);
+  border: 1px solid var(--malla-border);
+  border-radius: var(--malla-radius-sm);
+  padding: 2px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--malla-text);
+  box-shadow: var(--malla-shadow-xs);
+}
+
+/* Leaflet dark-mode parity */
+[data-bs-theme=dark] .leaflet-popup-content-wrapper,
+[data-bs-theme=dark] .leaflet-popup-tip {
+  background: var(--malla-surface-raised);
+  color: var(--malla-text);
+}
+
+[data-bs-theme=dark] .leaflet-control-layers,
+[data-bs-theme=dark] .leaflet-control-zoom a,
+[data-bs-theme=dark] .leaflet-control-attribution {
+  background: var(--malla-surface);
+  color: var(--malla-text);
+  border-color: var(--malla-border);
+}
+
+[data-bs-theme=dark] .leaflet-control-attribution { color: var(--malla-text-faint); }
+[data-bs-theme=dark] .leaflet-control-attribution a { color: var(--malla-blue-600); }
+[data-bs-theme=dark] .leaflet-control-zoom a:hover { background: var(--malla-surface-2); }
+[data-bs-theme=dark] .leaflet-bar a { border-bottom-color: var(--malla-border); }
+
+[data-bs-theme=dark] .marker-cluster-small,
+[data-bs-theme=dark] .marker-cluster-medium,
+[data-bs-theme=dark] .marker-cluster-large {
+  background-color: var(--malla-primary-soft);
+}
+
+[data-bs-theme=dark] .marker-cluster-small div,
+[data-bs-theme=dark] .marker-cluster-medium div,
+[data-bs-theme=dark] .marker-cluster-large div {
+  background-color: var(--malla-primary);
+  color: var(--malla-on-primary);
+  font-weight: 600;
+}
+
+/* Plotly legend/annotation text picks tokens via JS theme helper; this covers
+   mode-bar chrome on dark backgrounds. */
+[data-bs-theme=dark] .js-plotly-plot .modebar {
+  background: transparent;
+}
+
+[data-bs-theme=dark] .js-plotly-plot .modebar-btn path {
+  fill: var(--malla-text-muted);
+}
+
+[data-bs-theme=dark] .js-plotly-plot .modebar-btn:hover path {
+  fill: var(--malla-text);
+}
+
+/* ---------------------------------------------------------------------------
+   8. Motion & responsive
+   --------------------------------------------------------------------------- */
+
 @keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-.fade-in-up {
-  animation: fadeInUp 0.6s ease-out;
+.fade-in-up { animation: fadeInUp 0.45s var(--malla-ease) both; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .skeleton::after { animation: none; }
 }
 
-/* Print styles - Bootstrap compatible */
+/* Slightly larger canvas on wide screens */
+@media (min-width: 1200px) {
+  html { font-size: 16px; }
+}
+
+/* Phones first: usable at 360px */
+@media (max-width: 575.98px) {
+  .page-header { margin-bottom: var(--malla-space-4); }
+  .stat-tile .stat-value { font-size: 1.35rem; }
+  .card-body { padding: var(--malla-space-3); }
+  .node-hero { padding: var(--malla-space-4); }
+  .modern-table thead th { font-size: 0.68rem; }
+  .toast-container { right: 0.5rem; width: min(22rem, calc(100vw - 1rem)); }
+}
+
+/* Print */
 @media print {
-  .table-sidebar,
+  .app-navbar,
+  .app-footer,
   .btn,
-  .navbar {
+  .table-sidebar,
+  .toast-container,
+  #toast-container {
     display: none !important;
   }
 
@@ -453,450 +1582,27 @@ h1, .h1 {
     box-shadow: none;
     border: 1px solid #000;
   }
-}
-
-/* Dark mode adjustments for tables */
-[data-bs-theme=dark] .modern-table-container,
-[data-bs-theme=dark] .modern-filters-card {
-  background: var(--bs-tertiary-bg);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-[data-bs-theme=dark] .modern-table tbody tr:nth-of-type(odd) {
-  background-color: rgba(255, 255, 255, 0.03);
-}
-
-[data-bs-theme=dark] .modern-table tbody tr:hover {
-  background-color: rgba(var(--bs-primary-rgb), 0.15);
-}
-
-/* Bootstrap utility class overrides for dark mode */
-[data-bs-theme=dark] .bg-light {
-  background-color: var(--bs-tertiary-bg) !important;
-  color: var(--bs-body-color) !important;
-}
-
-[data-bs-theme=dark] .text-dark {
-  color: var(--bs-body-color) !important;
-}
-
-/* Card with bg-light override */
-[data-bs-theme=dark] .card.bg-light {
-  background-color: var(--bs-tertiary-bg) !important;
-  border-color: var(--bs-border-color) !important;
-  color: var(--bs-body-color) !important;
-}
-
-/* Badge with bg-light override - make it more visible in dark mode */
-[data-bs-theme=dark] .badge.bg-light {
-  background-color: var(--bs-secondary-bg) !important;
-  color: var(--bs-body-color) !important;
-  border: 1px solid var(--bs-border-color);
-}
-
-/* Ensure text contrast for warning badges in dark mode */
-[data-bs-theme=dark] .badge.bg-warning {
-  color: var(--bs-dark) !important;
-  background-color: rgb(189, 142, 0) !important;
-}
-
-[data-bs-theme=dark] .badge.bg-info {
-  color: var(--bs-dark) !important;
-  background-color: rgb(0, 145, 174) !important;
-}
-
-/* Table layout overrides for dark mode */
-[data-bs-theme=dark] .table-header {
-  background: var(--bs-body-bg) !important;
-  border-bottom-color: var(--bs-border-color) !important;
-  color: var(--bs-body-color) !important;
-}
-
-[data-bs-theme=dark] .table-content {
-  background: var(--bs-body-bg) !important;
-  color: var(--bs-body-color) !important;
-}
-
-[data-bs-theme=dark] .table-container {
-  background: var(--bs-tertiary-bg) !important;
-}
-
-[data-bs-theme=dark] .table-sidebar {
-  background: var(--bs-body-bg) !important;
-  border-left-color: var(--bs-border-color) !important;
-  color: var(--bs-body-color) !important;
-}
-
-[data-bs-theme=dark] .sidebar-header {
-  background: var(--bs-tertiary-bg) !important;
-  border-bottom-color: var(--bs-border-color) !important;
-  color: var(--bs-body-color) !important;
-}
-
-[data-bs-theme=dark] .sidebar-section {
-  border-bottom-color: var(--bs-border-color) !important;
-}
-
-[data-bs-theme=dark] .sidebar-section h6 {
-  color: var(--bs-body-color) !important;
-}
-
-[data-bs-theme=dark] .table-sidebar.collapsed ~ .table-main #toggleSidebar {
-  background: var(--bs-body-bg) !important;
-  border-color: var(--bs-border-color) !important;
-  color: var(--bs-body-color) !important;
-  box-shadow: var(--bs-box-shadow) !important;
-}
-
-[data-bs-theme=dark] .modern-table-pagination {
-  background: var(--bs-tertiary-bg) !important;
-  border-top-color: var(--bs-border-color) !important;
-}
-
-/* Table info styling for dark mode - use darker background for better readability */
-[data-bs-theme=dark] .table-info {
-  --bs-table-striped-bg: var(--bs-border-color) !important;
-}
-
-/* Metric label styling for dark mode - make it lighter and more visible */
-[data-bs-theme=dark] .metric-label {
-  color: var(--bs-secondary-color) !important;
-}
-
-/* Gateway selector card dark mode support */
-[data-bs-theme=dark] .gateway-selector {
-  background: var(--bs-tertiary-bg) !important;
-  color: var(--bs-body-color) !important;
-}
-
-/* Node selector card dark mode support */
-[data-bs-theme=dark] .node-selector {
-  background: var(--bs-tertiary-bg) !important;
-  color: var(--bs-body-color) !important;
-}
-
-/* Graph container dark mode support */
-[data-bs-theme=dark] .graph-container {
-  background: var(--bs-tertiary-bg) !important;
-}
-
-/* Shared sidebar dark mode support */
-[data-bs-theme=dark] .sidebar {
-  background: var(--bs-body-bg) !important;
-  border-left-color: var(--bs-border-color) !important;
-  color: var(--bs-body-color) !important;
-}
-
-[data-bs-theme=dark] .sidebar.collapsed #toggleSidebar {
-  background: var(--bs-body-bg) !important;
-  border-color: var(--bs-border-color) !important;
-  color: var(--bs-body-color) !important;
-  box-shadow: var(--bs-box-shadow) !important;
-}
-
-/* Traceroute graph container dark mode support */
-[data-bs-theme=dark] .traceroute-graph-container {
-  background: var(--bs-body-bg) !important;
-}
-
-/* Loading and error overlays for dark mode */
-[data-bs-theme=dark] .loading-overlay,
-[data-bs-theme=dark] .error-overlay {
-  background: rgba(var(--bs-tertiary-bg-rgb), 0.9) !important;
-  color: var(--bs-body-color) !important;
-}
-
-[data-bs-theme=dark] .error-overlay {
-  color: var(--bs-danger) !important;
-}
-
-/* Node labels in graphs for dark mode */
-[data-bs-theme=dark] .node-label {
-  fill: var(--bs-body-color) !important;
-}
-
-/* Node list item styling for dark mode */
-[data-bs-theme=dark] .node-list-item,
-[data-bs-theme=dark] .search-result-item {
-  border-color: var(--bs-border-color) !important;
-  color: var(--bs-body-color) !important;
-}
-
-[data-bs-theme=dark] .node-list-item:hover,
-[data-bs-theme=dark] .search-result-item:hover {
-  background-color: var(--bs-tertiary-bg) !important;
-}
-
-[data-bs-theme=dark] .node-list-item.selected,
-[data-bs-theme=dark] .search-result-item.selected {
-  background-color: rgba(var(--bs-primary-rgb), 0.2) !important;
-  border-color: var(--bs-primary) !important;
-}
-
-/* Leaflet map dark mode support */
-[data-bs-theme=dark] .leaflet-popup-content-wrapper,
-[data-bs-theme=dark] .leaflet-popup-tip {
-  background: var(--bs-body-bg) !important;
-  color: var(--bs-body-color) !important;
-}
-
-[data-bs-theme=dark] .leaflet-control-layers,
-[data-bs-theme=dark] .leaflet-control-zoom a,
-[data-bs-theme=dark] .leaflet-control-attribution {
-  background: var(--bs-body-bg) !important;
-  color: var(--bs-body-color) !important;
-  border-color: var(--bs-border-color) !important;
-}
-
-[data-bs-theme=dark] .leaflet-control-zoom a:hover {
-  background: var(--bs-tertiary-bg) !important;
-}
-
-/* Marker cluster styling for dark mode */
-[data-bs-theme=dark] .marker-cluster-small,
-[data-bs-theme=dark] .marker-cluster-medium,
-[data-bs-theme=dark] .marker-cluster-large {
-  background-color: rgba(var(--bs-primary-rgb), 0.8) !important;
-}
-
-[data-bs-theme=dark] .marker-cluster-small div,
-[data-bs-theme=dark] .marker-cluster-medium div,
-[data-bs-theme=dark] .marker-cluster-large div {
-  background-color: rgba(var(--bs-primary-rgb), 0.9) !important;
-  color: white !important;
-}
-
-/* Utility classes following Bootstrap naming conventions */
-.shadow-modern {
-  box-shadow: var(--bs-box-shadow) !important;
-}
-
-.shadow-modern-sm {
-  box-shadow: var(--bs-box-shadow-sm) !important;
-}
 
-.shadow-modern-lg {
-  box-shadow: var(--bs-box-shadow-lg) !important;
+  body { background: #fff; color: #000; }
 }
 
-.rounded-modern {
-  border-radius: var(--bs-border-radius) !important;
-}
-
-.rounded-modern-lg {
-  border-radius: var(--bs-border-radius-lg) !important;
-}
-
-/* Signal quality indicators using Bootstrap color system */
-.signal-excellent {
-  color: var(--bs-success) !important;
-}
-
-.signal-good {
-  color: var(--bs-info) !important;
-}
-
-.signal-fair {
-  color: var(--bs-warning) !important;
-}
-
-.signal-poor {
-  color: var(--bs-danger) !important;
-}
-
-/* Signal quality indicators with background colors for light mode */
-.signal-excellent {
-  background-color: #d4edda !important;
-  color: #155724 !important;
-}
-
-.signal-good {
-  background-color: #fff3cd !important;
-  color: #856404 !important;
-}
-
-.signal-fair {
-  background-color: #f8d7da !important;
-  color: #721c24 !important;
-}
-
-.signal-poor {
-  background-color: #f5c6cb !important;
-  color: #721c24 !important;
-}
-
-/* Dark mode signal quality indicators - adjusted colors for better contrast on dark backgrounds */
-[data-bs-theme=dark] .signal-excellent {
-  background-color: #0f5132 !important;
-  color: #75b798 !important;
-}
-
-[data-bs-theme=dark] .signal-good {
-  background-color: #664d03 !important;
-  color: #ffda6a !important;
-}
-
-[data-bs-theme=dark] .signal-fair {
-  background-color: #58151c !important;
-  color: #f1aeb5 !important;
-}
-
-[data-bs-theme=dark] .signal-poor {
-  background-color: #58151c !important;
-  color: #f5c2c7 !important;
-}
-
-/* Timezone and dark mode toggle button styling */
-#timezone-toggle,
-#theme-toggle {
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  transition: var(--bs-transition);
-}
-
-#timezone-toggle:hover,
-#theme-toggle:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.5);
-  transform: translateY(-1px);
-}
-
-#timezone-toggle:focus,
-#theme-toggle:focus {
-  box-shadow: 0 0 0 0.2rem rgba(255, 255, 255, 0.25);
-}
-
-#timezone-toggle i,
-#theme-toggle i {
-  font-size: 0.9rem;
-  transition: var(--bs-transition);
-}
-
-/* Dark mode specific adjustments for toggle buttons */
-[data-bs-theme=dark] #timezone-toggle,
-[data-bs-theme=dark] #theme-toggle {
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-[data-bs-theme=dark] #timezone-toggle:hover,
-[data-bs-theme=dark] #theme-toggle:hover {
-  background-color: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-}
+/* ---------------------------------------------------------------------------
+   9. Small utilities
+   --------------------------------------------------------------------------- */
 
-/* Legend line styles for traceroute graph */
-.legend-line {
-  width: 18px;
-  height: 3px;
-  margin-right: 8px;
-  display: inline-block;
-}
-
-.legend-rf-link {
-  background: var(--bs-primary);
-}
-
-.legend-gateway-connection {
-  height: 2px;
-  background: var(--bs-info);
-  border-top: 1px dashed var(--bs-info);
-}
-
-.legend-direct-reception {
-  height: 2px;
-  background: var(--bs-warning);
-  border-top: 1px dashed var(--bs-warning);
-}
-
-/* Map hop count label */
-.map-hop-count-label {
-  background: var(--bs-body-bg);
-  border: 1px solid var(--bs-border-color);
-  border-radius: 3px;
-  padding: 2px 4px;
-  font-size: 10px;
-  font-weight: bold;
-  color: var(--bs-body-color);
-  box-shadow: var(--bs-box-shadow-sm);
-}
-
-/* Payload hex and YAML content styling for dark mode */
-[data-bs-theme=dark] .payload-hex {
-  background-color: var(--bs-tertiary-bg) !important;
-  color: var(--bs-body-color) !important;
-  border: 1px solid var(--bs-border-color);
-}
-
-[data-bs-theme=dark] .yaml-content {
-  background-color: var(--bs-tertiary-bg) !important;
-  color: var(--bs-body-color) !important;
-  border: 1px solid var(--bs-border-color);
-}
-
-/* Stats card styling for dark mode */
-[data-bs-theme=dark] .stats-card {
-  background-color: var(--bs-tertiary-bg) !important;
-  border-color: var(--bs-border-color) !important;
-  color: var(--bs-body-color) !important;
-}
-
-/* Stat label and value styling for dark mode */
-[data-bs-theme=dark] .stat-label {
-  color: var(--bs-secondary-color) !important;
-}
-
-[data-bs-theme=dark] .stat-value {
-  color: var(--bs-body-color) !important;
-}
-
-/* Diff classes styling for dark mode - maintain colors for visual distinction */
-[data-bs-theme=dark] .positive-diff {
-  color: #198754 !important; /* Keep green for positive values */
-}
-
-[data-bs-theme=dark] .negative-diff {
-  color: #dc3545 !important; /* Keep red for negative values */
-}
-
-[data-bs-theme=dark] .neutral-diff {
-  color: #6c757d !important; /* Keep gray for neutral values */
-}
-
-/* Link colors for dark mode - lighter and more readable */
-[data-bs-theme=dark] a {
-  color: #6ea8fe !important; /* Lighter blue for better readability */
-}
-
-[data-bs-theme=dark] a:hover {
-  color: #9ec5fe !important; /* Even lighter on hover */
-}
-
-[data-bs-theme=dark] .node-link {
-  color: #6ea8fe !important;
-}
-
-[data-bs-theme=dark] .node-link:hover {
-  color: #9ec5fe !important;
-}
-
-[data-bs-theme=dark] .modern-table a {
-  color: #6ea8fe !important;
-}
+.shadow-modern { box-shadow: var(--malla-shadow-md) !important; }
+.shadow-modern-sm { box-shadow: var(--malla-shadow-sm) !important; }
+.shadow-modern-lg { box-shadow: var(--malla-shadow-lg) !important; }
+.rounded-modern { border-radius: var(--malla-radius) !important; }
+.rounded-modern-lg { border-radius: var(--malla-radius-lg) !important; }
 
-[data-bs-theme=dark] .modern-table a:hover {
-  color: #9ec5fe !important;
-}
-
-/* Keep primary color links in nav elements at Bootstrap default */
-[data-bs-theme=dark] .nav-link,
-[data-bs-theme=dark] .navbar-brand {
-  color: rgba(255, 255, 255, 0.75) !important;
-}
+.text-secondary-emphasis { color: var(--malla-text-muted) !important; }
 
-[data-bs-theme=dark] .nav-link:hover,
-[data-bs-theme=dark] .navbar-brand:hover {
-  color: rgba(255, 255, 255, 1) !important;
-}
+.mono { font-family: var(--bs-font-monospace); font-size: 0.85em; }
 
-[data-bs-theme=dark] .nav-link.active {
-  color: rgba(255, 255, 255, 1) !important;
-}
+/* Keep nav text readable in dark mode (navbar is a themed surface, not
+   bootstrap contextual background) */
+[data-bs-theme=dark] .app-navbar .nav-link { color: var(--malla-text-muted); }
+[data-bs-theme=dark] .app-navbar .nav-link:hover { color: var(--malla-text); }
+[data-bs-theme=dark] .app-navbar .nav-link.active { color: var(--malla-primary); }
+[data-bs-theme=dark] .app-navbar .navbar-brand { color: var(--malla-text); }

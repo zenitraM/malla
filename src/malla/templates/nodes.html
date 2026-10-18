@@ -75,7 +75,7 @@
 
     <!-- Legend Section -->
     <div class="sidebar-section">
-        <h6><i class="bi bi-palette"></i> Legend</h6>
+        <h3 class="h6"><i class="bi bi-palette"></i> Legend</h3>
         <div class="legend-content">
             <div class="legend-item">
                 <span class="badge bg-primary me-2">Client</span>
@@ -135,10 +135,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load hardware models from API
     async function loadHardwareModels() {
         try {
-            const response = await fetch('/api/meshtastic/hardware-models');
-            const data = await response.json();
+            const hardwareModels = await window.MallaFilters.hardwareModels();
 
-            if (data.hardware_models) {
+            if (hardwareModels.length) {
                 const select = document.getElementById('hw_model');
                 // Keep the "All Hardware" option
                 const allOption = select.querySelector('option[value=""]');
@@ -146,7 +145,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 select.appendChild(allOption);
 
                 // Add hardware model options
-                data.hardware_models.forEach(([value, displayName]) => {
+                hardwareModels.forEach(([value, displayName]) => {
                     const option = document.createElement('option');
                     option.value = value;
                     option.textContent = displayName;
@@ -161,10 +160,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load node roles from API
     async function loadNodeRoles() {
         try {
-            const response = await fetch('/api/meshtastic/node-roles');
-            const data = await response.json();
+            const nodeRoles = await window.MallaFilters.roles();
 
-            if (data.node_roles) {
+            if (nodeRoles.length) {
                 const select = document.getElementById('role');
                 // Keep the "All Roles" option
                 const allOption = select.querySelector('option[value=""]');
@@ -172,7 +170,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 select.appendChild(allOption);
 
                 // Add role options
-                data.node_roles.forEach(([value, displayName]) => {
+                nodeRoles.forEach(([value, displayName]) => {
                     const option = document.createElement('option');
                     option.value = value;
                     option.textContent = displayName;
@@ -187,16 +185,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load primary channels from API
     async function loadPrimaryChannels() {
         try {
-            const response = await fetch('/api/meshtastic/channels');
-            const data = await response.json();
+            const channels = await window.MallaFilters.channels();
 
-            if (data.channels) {
+            if (channels.length) {
                 const select = document.getElementById('primary_channel');
                 const allOption = select.querySelector('option[value=""]');
                 select.innerHTML = '';
                 select.appendChild(allOption);
 
-                data.channels.forEach((ch) => {
+                channels.forEach((ch) => {
                     const option = document.createElement('option');
                     option.value = ch;
                     option.textContent = ch;
@@ -208,25 +205,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Fetch ALL node data once and keep it client-side for filtering
-    // ------------------------------------------------------------------
-    let allNodeData = [];
-
-    async function fetchAllNodes() {
-        try {
-            // Fetch up to 10k nodes in a single request – more than enough for typical deployments
-            const response = await fetch('/api/nodes/data?limit=10000&page=1');
-            const json = await response.json();
-            // The endpoint returns an object with a "data" property
-            allNodeData = json.data || [];
-        } catch (err) {
-            console.error('Error fetching all node data:', err);
-            allNodeData = [];
-        }
-    }
-
-    // Initialize page with filters and load data
+    // Initialize page with filters once the sidebar selects are populated
     async function initializePageWithFilters() {
         // Apply URL parameters
         const hasParams = await urlManager.applyURLParameters();
@@ -235,24 +214,52 @@ document.addEventListener('DOMContentLoaded', function() {
         controller.initialLoad(hasParams);
     }
 
-    // Load supporting data (hardware models, roles) AND all nodes, then start
-    Promise.all([loadHardwareModels(), loadNodeRoles(), loadPrimaryChannels(), fetchAllNodes()]).then(async () => {
+    Promise.all([loadHardwareModels(), loadNodeRoles(), loadPrimaryChannels()]).then(async () => {
         initializePageWithFilters();
     });
 
     // Initialize the modern table
     const table = new ModernTable('nodesTable', {
-        endpoint: '/api/nodes/data',
+        // v1: server-side pagination/sort/filters.
+        endpoint: '/api/v1/nodes',
         enableSearch: false,
-        enablePagination: false,
         pageSize: 100,
         deferInitialLoad: true,
-        defaultSort: { column: 'last_packet_str', direction: 'desc' },
+        // Translate sidebar form fields (see URLFilterManager contract) to
+        // /api/v1/nodes query parameters. Filters without a server-side
+        // equivalent (hw_model, named_only) are refined client-side below.
+        requestParams: (state) => {
+            const f = state.filters || {};
+            const params = new URLSearchParams({
+                page: state.page,
+                page_size: state.pageSize,
+            });
+            if (f.search) params.set('q', f.search);
+            if (f.role) params.set('role', f.role);
+            if (f.primary_channel) params.set('channel', f.primary_channel);
+            if (f.active_only === true || f.active_only === '1') {
+                params.set('last_seen_since', new Date(Date.now() - 24 * 3600e3).toISOString());
+            }
+            const sortMap = { name: 'name', last_seen: 'last_seen' };
+            if (state.sortBy && sortMap[state.sortBy]) {
+                params.set('sort', sortMap[state.sortBy]);
+                params.set('order', state.sortOrder || 'desc');
+            }
+            return params;
+        },
+        refineRows: (rows, filters) => {
+            let out = rows;
+            if (filters.hw_model) out = out.filter((n) => (n.hw_model || '') === filters.hw_model);
+            if (filters.named_only === true || filters.named_only === '1') {
+                out = out.filter((n) => n.long_name || n.short_name);
+            }
+            return out;
+        },
         columns: [
             {
                 key: 'hex_id',
                 title: 'Node ID',
-                sortable: true,
+                sortable: false,
                 render: (value, row) => {
                     return el('a', {
                         href: safePath(`/node/${encodeURIComponent(String(row.node_id))}`),
@@ -262,21 +269,23 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             },
             {
-                key: 'node_name',
+                key: 'long_name',
                 title: 'Name',
                 sortable: true,
+                sortKey: 'name',
                 render: (value, row) => {
+                    const name = value || row.short_name || 'Unnamed';
                     return el('a', {
                         href: safePath(`/node/${encodeURIComponent(String(row.node_id))}`),
                         className: 'text-decoration-none',
                         title: 'View node details'
-                    }, value || 'Unnamed');
+                    }, name);
                 }
             },
             {
                 key: 'hw_model',
                 title: 'Hardware',
-                sortable: true,
+                sortable: false,
                 render: (value, row) => {
                     return badge(value && value !== 'Unknown' ? value : 'Unknown', value && value !== 'Unknown' ? 'bg-info' : 'bg-light text-dark');
                 }
@@ -284,7 +293,7 @@ document.addEventListener('DOMContentLoaded', function() {
             {
                 key: 'role',
                 title: 'Role',
-                sortable: true,
+                sortable: false,
                 render: (value, row) => {
                     if (value && value !== 'Unknown') {
                         const roleColors = {
@@ -303,17 +312,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             },
             {
-                key: 'last_packet_str',
+                key: 'last_seen',
                 title: 'Last Seen',
                 sortable: true,
-                sortKey: 'last_packet_time',
+                sortKey: 'last_seen',
                 render: (value, row) => {
-                    if (value && value !== 'Never') {
-                        const timestamp = row.last_packet_time || value;
+                    if (value) {
                         return el('small', {
                             className: 'timestamp-display',
-                            dataset: { timestamp }
-                        }, formatTimestamp(timestamp));
+                            dataset: { timestamp: value }
+                        }, formatTimestamp(value));
                     }
                     return el('span', { className: 'text-muted' }, 'Never');
                 }
@@ -321,7 +329,7 @@ document.addEventListener('DOMContentLoaded', function() {
             {
                 key: 'packet_count_24h',
                 title: '24h Activity',
-                sortable: true,
+                sortable: false,
                 render: (value, row) => {
                     const count = parseInt(value) || 0;
                     if (count > 0) {
@@ -337,7 +345,7 @@ document.addEventListener('DOMContentLoaded', function() {
             {
                 key: 'primary_channel',
                 title: 'Channel',
-                sortable: true,
+                sortable: false,
                 render: (value) => {
                     return value ? badge(value, 'bg-secondary') : el('span', { className: 'text-muted' }, 'Unknown');
                 }
@@ -378,84 +386,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         ]
     });
-
-    // We no longer paginate or infinite-scroll; the whole dataset will be rendered at once.
-
-    // ------------------------------------------------------------------
-    // Override ModernTable logic – perform all processing client-side
-    // ------------------------------------------------------------------
-    table.loadData = async function() {
-        // If dataset not yet available (should not happen after initial Promise), fetch it now
-        if (allNodeData.length === 0) {
-            await fetchAllNodes();
-        }
-
-        this.state.loading = true;
-        // Only show loading spinner when first page loads
-        if (this.state.page === 1) this.showLoading();
-
-        try {
-            // Start with full dataset
-            let filtered = [...allNodeData];
-            const filters = this.state.filters || {};
-
-            // --- Search filter -------------------------------------------------
-            const searchQuery = (filters.search || '').toString().trim().toLowerCase();
-            if (searchQuery) {
-                filtered = filtered.filter((n) => {
-                    const haystack = [
-                        n.node_name,
-                        n.long_name,
-                        n.short_name,
-                        n.hex_id,
-                        n.hw_model,
-                        n.role
-                    ].map(v => (v || '').toString().toLowerCase()).join(' ');
-                    return haystack.includes(searchQuery);
-                });
-            }
-
-            // --- Role filter ---------------------------------------------------
-            if (filters.role) filtered = filtered.filter((n) => n.role === filters.role);
-            // --- Hardware model filter ----------------------------------------
-            if (filters.hw_model) filtered = filtered.filter((n) => n.hw_model === filters.hw_model);
-            // --- Primary channel filter --------------------------------------
-            if (filters.primary_channel) filtered = filtered.filter((n) => n.primary_channel === filters.primary_channel);
-            // --- Active only ---------------------------------------------------
-            if (filters.active_only === true || filters.active_only === '1') {
-                filtered = filtered.filter((n) => (n.packet_count_24h || 0) > 0);
-            }
-            // --- Named only ----------------------------------------------------
-            if (filters.named_only === true || filters.named_only === '1') {
-                filtered = filtered.filter((n) => (n.long_name || n.short_name));
-            }
-
-            // --- Sorting -------------------------------------------------------
-            if (!this.state.sortBy) {
-                this.state.sortBy = 'last_packet_time';
-                this.state.sortOrder = 'desc';
-            }
-            const dir = this.state.sortOrder === 'asc' ? 1 : -1;
-            const key = this.state.sortBy;
-            filtered.sort((a, b) => {
-                const av = a[key] ?? '';
-                const bv = b[key] ?? '';
-                return av < bv ? -1 * dir : (av > bv ? 1 * dir : 0);
-            });
-
-            // --- Render entire dataset (no pagination) -------------------------
-            this.state.totalCount = filtered.length;
-            this.state.data = filtered;
-            this.renderTableBody();
-
-            this.emit('dataLoaded', { data: this.state.data, totalCount: this.state.totalCount });
-        } catch (error) {
-            console.error('Error processing node data locally:', error);
-            this.showError(error.message || 'Failed to process data');
-        } finally {
-            this.state.loading = false;
-        }
-    };
 
     // Update stats function (removed - stats section was removed from UI)
     function updateStats() {

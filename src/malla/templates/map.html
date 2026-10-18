@@ -38,11 +38,12 @@
 
         <!-- Node Search and List Combined -->
         <div class="sidebar-section">
-            <h6><i class="bi bi-search"></i> Search & Filter Nodes</h6>
+            <h3 class="h6"><i class="bi bi-search"></i> Search & Filter Nodes</h3>
             <div class="input-group input-group-sm mb-2">
                 <input type="text" class="form-control" id="nodeSearch" placeholder="Search by node name or ID...">
-                <button class="btn btn-outline-secondary" type="button" id="clearSearch">
-                    <i class="bi bi-x"></i>
+                <button class="btn btn-outline-secondary" type="button" id="clearSearch"
+                        aria-label="Clear node search" title="Clear node search">
+                    <i class="bi bi-x" aria-hidden="true"></i>
                 </button>
             </div>
 
@@ -54,7 +55,7 @@
                         <span id="searchCount">0</span> results
                     </small>
                 </div>
-                <div id="nodeList" class="node-list">
+                <div id="nodeList" class="node-list" tabindex="0" aria-label="Node list">
                     <div class="text-center text-muted py-4">
                         <div class="spinner-border spinner-border-sm" role="status">
                             <span class="visually-hidden">Loading...</span>
@@ -73,7 +74,7 @@
 
         <!-- Filters -->
         <div class="sidebar-section">
-            <h6><i class="bi bi-funnel"></i> Filters</h6>
+            <h3 class="h6"><i class="bi bi-funnel"></i> Filters</h3>
             <form id="locationFilterForm">
                 <div class="mb-3">
                     <label for="maxAge" class="form-label">Max Age</label>
@@ -133,7 +134,7 @@
 
         <!-- Map Stats -->
         <div class="sidebar-section">
-            <h6><i class="bi bi-bar-chart"></i> Statistics</h6>
+            <h3 class="h6"><i class="bi bi-bar-chart"></i> Statistics</h3>
             <div id="mapStats" class="stats-content">
                 <div><strong>Nodes:</strong> <span id="statsNodes">0</span></div>
                 <div><strong>With Location:</strong> <span id="statsWithLocation">0</span></div>
@@ -144,7 +145,7 @@
 
         <!-- Link visibility checkboxes -->
         <div class="sidebar-section">
-            <h6><i class="bi bi-diagram-3"></i> Link Types</h6>
+            <h3 class="h6"><i class="bi bi-diagram-3"></i> Link Types</h3>
             <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="tracerouteLinksCheckbox" checked>
                 <label class="form-check-label" for="tracerouteLinksCheckbox">Traceroute Links</label>
@@ -157,7 +158,7 @@
 
         <!-- Hop depth selector (shown only when a node is selected) -->
         <div class="sidebar-section" id="hopDepthSection" style="display: none;">
-            <h6><i class="bi bi-stack"></i> Hop Depth</h6>
+            <h3 class="h6"><i class="bi bi-stack"></i> Hop Depth</h3>
             <div class="small text-muted mb-2">Choose how many RF hops from the selected node remain visible.</div>
             <select class="form-select form-select-sm" id="hopDepthSelect">
                 <option value="1" selected>1 hop</option>
@@ -451,6 +452,26 @@ function updateMapTheme() {
 }
 
 // Initialize the page
+// Pick black or white text for a given background (#rgb/#rrggbb) using
+// relative luminance, so dynamically coloured badges stay AA-readable.
+function readableTextOn(color) {
+    if (!color || typeof color !== 'string') return '#ffffff';
+    let hex = color.trim();
+    if (hex[0] === '#') hex = hex.slice(1);
+    if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('');
+    if (hex.length !== 6) return '#ffffff';
+    const n = parseInt(hex, 16);
+    const channel = (v) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    };
+    const L = 0.2126 * channel((n >> 16) & 255)
+        + 0.7152 * channel((n >> 8) & 255)
+        + 0.0722 * channel(n & 255);
+    // Pick whichever of white/ink gives the higher contrast ratio.
+    return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? '#ffffff' : '#0b1119';
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Check if sidebar should be collapsed by default (from URL parameter)
     // Pure frontend implementation - reads URL parameter directly
@@ -467,8 +488,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Wait for jQuery to be available
     function waitForJQuery() {
         if (typeof $ !== 'undefined') {
-            initializeInterface();
+            // initMap first: initializeInterface() dispatches change events for
+            // pre-filled filter fields, whose handlers call updateMapDisplay()
+            // (needs markerClusterGroup to exist).
             initMap();
+            initializeInterface();
 
             // Listen for theme changes
             window.addEventListener('themeChanged', function(event) {
@@ -632,16 +656,15 @@ function initializeInterface() {
     // --------------------------------------------------------------
     async function loadPrimaryChannels() {
         try {
-            const response = await fetch('/api/meshtastic/channels');
-            const data = await response.json();
-            if (data.channels) {
+            const channels = await window.MallaFilters.channels();
+            if (channels.length) {
                 const select = document.getElementById('channelFilter');
                 const allOption = select.querySelector('option[value=""]');
                 select.replaceChildren();
                 if (allOption) {
                     select.appendChild(allOption);
                 }
-                data.channels.forEach((ch) => {
+                channels.forEach((ch) => {
                     const option = document.createElement('option');
                     option.value = ch;
                     option.textContent = ch;
@@ -721,8 +744,54 @@ async function loadNodeLocations() {
         showLoading();
 
         const params = buildFilterParams();
-        const response = await fetch(`/api/locations?${params.toString()}`);
-        const data = await response.json();
+        // v1 composite: paged location rows + opt-in link overlays
+        // (links are computed over the whole window, so page 1 only).
+        const rows = [];
+        let links = { traceroute_links: [], packet_links: [] };
+        let page = 1;
+        let hasNext = true;
+        while (hasNext && page <= 4) {
+            const query = new URLSearchParams(params);
+            query.set('page', String(page));
+            query.set('page_size', '5000');
+            if (page === 1) query.set('include_links', 'true');
+            const url = `/api/v1/locations?${query.toString()}`;
+            let body;
+            if (window.MallaAPI && typeof window.MallaAPI.getDetailed === 'function') {
+                const detailed = await window.MallaAPI.getDetailed(url, { silent: true });
+                // `links` is a top-level sibling of the envelope (payload).
+                body = {
+                    data: detailed.data,
+                    meta: detailed.meta,
+                    links: detailed.payload ? detailed.payload.links : null,
+                };
+            } else {
+                const resp = await fetch(url, { headers: { Accept: 'application/json' } });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                body = await resp.json();
+            }
+            rows.push(...(Array.isArray(body.data) ? body.data : []));
+            if (page === 1 && body.links) links = body.links;
+            hasNext = !!(body.meta && body.meta.pagination && body.meta.pagination.has_next);
+            page += 1;
+        }
+        // v1 normalises `timestamp` to ISO-8601; the client-side age/date
+        // filters and formatters below all expect epoch seconds.
+        const toEpoch = (value) => {
+            if (value == null) return value;
+            if (typeof value === 'number') return value;
+            const ms = Date.parse(value);
+            return Number.isNaN(ms) ? value : ms / 1000;
+        };
+        const data = {
+            locations: rows.map((loc) => (
+                loc && loc.timestamp != null
+                    ? { ...loc, timestamp: toEpoch(loc.timestamp) }
+                    : loc
+            )),
+            traceroute_links: links.traceroute_links || [],
+            packet_links: links.packet_links || [],
+        };
 
         if (data.error) {
             showError(data.error);
@@ -959,7 +1028,13 @@ function buildNodeListItem(node, selectHandler) {
             node.role ? textNode(' ') : null,
             node.role ? el('span', {
                 className: 'badge badge-sm',
-                style: { backgroundColor: roleColor, fontSize: '0.6em' }
+                // Role colours span bright pastels and dark slates; choose the
+                // text colour that passes contrast on the actual background.
+                style: {
+                    backgroundColor: roleColor,
+                    color: readableTextOn(roleColor),
+                    fontSize: '0.6em'
+                }
             }, formatRole(node.role)) : null
         ),
         el('small', { className: 'text-muted' }, `!${nodeIdHex}`),
