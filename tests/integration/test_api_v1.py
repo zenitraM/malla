@@ -1013,3 +1013,80 @@ class TestApiV1GroupedModes:
         error = response.get_json()["error"]
         assert error["code"] == "invalid_parameter"
         assert error["details"] == {"group_by": "banana"}
+
+
+class TestPacketDetailReceptionFilters:
+    """The detail endpoint must interpret the same filters as the list."""
+
+    @pytest.mark.integration
+    def test_decimal_gateway_id_matches_hex(self, client):
+        grouped = client.get(
+            "/api/v1/packets?group_by=mesh_packet_id&page_size=500"
+        ).get_json()["data"]
+        row = next(r for r in grouped if r["group"]["reception_count"] > 1)
+        gateway_hex = row["gateway_id"]
+        gateway_decimal = int(gateway_hex[1:], 16)
+
+        by_hex = client.get(
+            f"/api/v1/packets/{row['id']}?gateway_id={gateway_hex}"
+        ).get_json()["data"]
+        by_decimal = client.get(
+            f"/api/v1/packets/{row['id']}?gateway_id={gateway_decimal}"
+        ).get_json()["data"]
+
+        assert by_decimal["other_receptions"] == by_hex["other_receptions"]
+        assert by_decimal["reception_count"] == by_hex["reception_count"]
+
+    @pytest.mark.integration
+    def test_min_rssi_narrows_the_expanded_receptions(self, client):
+        grouped = client.get(
+            "/api/v1/packets?group_by=mesh_packet_id&page_size=500"
+        ).get_json()["data"]
+        row = next(r for r in grouped if r["group"]["reception_count"] > 1)
+        all_receptions = client.get(f"/api/v1/packets/{row['id']}").get_json()["data"]
+        rssis = [
+            r["rssi"]
+            for r in all_receptions["other_receptions"]
+            if r["rssi"] is not None
+        ]
+        assert rssis
+        threshold = min(rssis) + 1
+        expected = 1 + sum(
+            1
+            for r in all_receptions["other_receptions"]
+            if r["rssi"] is not None and r["rssi"] >= threshold
+        )
+
+        filtered = client.get(
+            f"/api/v1/packets/{row['id']}?min_rssi={threshold}"
+        ).get_json()["data"]
+        assert filtered["reception_count"] == expected
+
+    @pytest.mark.integration
+    def test_database_error_handler_maps_missing_index(self, client):
+        import sqlite3
+
+        from src.malla.routes.api_v1 import _handle_database_error
+
+        with client.application.app_context():
+            response = _handle_database_error(
+                sqlite3.OperationalError(
+                    "no such index: idx_packet_history_from_time_desc"
+                )
+            )
+        assert response.status_code == 503
+        assert response.get_json()["error"]["code"] == "database_not_initialized"
+
+
+class TestLocationsWindowBound:
+    @pytest.mark.integration
+    def test_explicit_all_time_window_is_clamped(self, client):
+        from src.malla.routes.api_v1 import LOCATIONS_MAX_WINDOW_DAYS
+
+        body = client.get("/api/v1/locations?since=0&until=9999999999").get_json()
+        query = body["meta"]["query"]
+        from datetime import datetime
+
+        since = datetime.fromisoformat(query["since"].replace("Z", "+00:00"))
+        until = datetime.fromisoformat(query["until"].replace("Z", "+00:00"))
+        assert (until - since).total_seconds() <= LOCATIONS_MAX_WINDOW_DAYS * 86400 + 1

@@ -1421,10 +1421,13 @@ async function refreshDashboard({ silent = false } = {}) {
 
 // Initialize dashboard when DOM is ready.
 document.addEventListener('DOMContentLoaded', function () {
-    // Range: URL param wins, then last-used, then 7d.
-    timelineRange = rangeFromUrl()
+    // Range: URL param wins, then last-used, then 7d. Only write the URL when
+    // the range did not come from it, or a shared ?range=6h link is rewritten
+    // to the stored/default value while the timeline keeps the URL's range.
+    const urlRange = rangeFromUrl();
+    timelineRange = urlRange
         || (() => { try { return validRange(localStorage.getItem('mallaTimelineRange')) || '7d'; } catch (e) { return '7d'; } })();
-    setRangeInUrl(timelineRange);
+    if (!urlRange) setRangeInUrl(timelineRange);
     syncRangeButtons(timelineRange);
 
     refreshDashboard();

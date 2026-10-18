@@ -71,6 +71,10 @@ PAGE_SIZE_DEFAULT = 100
 PAGE_SIZE_MAX = 500
 # Bulk latest positions and per-node history bounds.
 LOCATIONS_DEFAULT_WINDOW_DAYS = 14
+#: Bound an explicit window: the legacy endpoint accepted any span and could
+#: be asked to scan the whole retained history. Ten years leaves "all time"
+#: effectively intact while keeping the query bounded.
+LOCATIONS_MAX_WINDOW_DAYS = 3650
 LOCATIONS_PAGE_SIZE_DEFAULT = 1000
 LOCATIONS_PAGE_SIZE_MAX = 5000
 LOCATION_HISTORY_MAX = 2000
@@ -147,6 +151,31 @@ def _handle_node_not_found(exc: NodeNotFoundError) -> Response:
 @api_v1_bp.errorhandler(ValueError)
 def _handle_value_error(exc: ValueError) -> Response:
     return _error_response(_error_payload("invalid_parameter", str(exc)), 400)
+
+
+@api_v1_bp.errorhandler(sqlite3.OperationalError)
+def _handle_database_error(exc: sqlite3.OperationalError) -> Response:
+    """Turn a missing table/column/index into the actionable 503.
+
+    A legacy database can have every table but lack an index that a query pins
+    with ``INDEXED BY``; SQLite reports that as ``no such index`` and it must
+    not become a generic 500.
+    """
+    message = str(exc)
+    if any(
+        fragment in message
+        for fragment in ("no such table", "no such column", "no such index")
+    ):
+        return _error_response(
+            _error_payload(
+                "database_not_initialized",
+                "Database not initialized. Run the capture daemon once "
+                "(malla-capture) to bootstrap it, then retry.",
+            ),
+            503,
+        )
+    logger.exception("Unhandled database error in API v1: %s", exc)
+    return _error_response(_error_payload("internal_error", message), 500)
 
 
 @api_v1_bp.errorhandler(Exception)
@@ -1481,21 +1510,33 @@ def packets_list() -> Response:
 def packet_detail(packet_id: int) -> Response:
     """Full detail for one packet, including receptions and relay candidates."""
     # Grouped-expansion parity: the grouped badge counts only rows inside the
-    # page's filtered query, so honour the same window/membership here when
-    # the expansion forwards it (grouped-rows.js).
+    # page's filtered query, so reuse the list endpoint's parser (including
+    # gateway-id normalization and every membership filter) rather than
+    # maintaining a second, narrower interpretation.
+    filters, search, _query = _packet_filters()
     reception_filters: dict[str, Any] = {}
-    since = _parse_timestamp("since")
-    if since is not None:
-        reception_filters["since"] = since
-    until = _parse_timestamp("until")
-    if until is not None:
-        reception_filters["until"] = until
-    gateway_id = (request.args.get("gateway_id") or "").strip()
-    if gateway_id:
-        reception_filters["gateway_id"] = gateway_id
-    portnum = (request.args.get("portnum") or "").strip()
-    if portnum:
-        reception_filters["portnum_name"] = portnum
+    if "start_time" in filters:
+        reception_filters["since"] = filters["start_time"]
+    if "end_time" in filters:
+        reception_filters["until"] = filters["end_time"]
+    if "gateway_id" in filters:
+        reception_filters["gateway_id"] = filters["gateway_id"]
+    if "portnum" in filters:
+        reception_filters["portnum_name"] = filters["portnum"]
+    for key in (
+        "min_rssi",
+        "max_rssi",
+        "hop_count",
+        "primary_channel",
+        "from_node",
+        "to_node",
+        "exclude_from",
+        "exclude_to",
+    ):
+        if key in filters:
+            reception_filters[key] = filters[key]
+    if search:
+        reception_filters["search"] = search
 
     details = get_packet_details(packet_id, reception_filters or None)
     if details is None:
@@ -1520,7 +1561,7 @@ def packet_detail(packet_id: int) -> Response:
             if isinstance(row, dict):
                 row.pop("timestamp_str", None)
                 _iso_fields(row, "timestamp")
-    return _ok(details, {"query": {"packet_id": packet_id}})
+    return _ok(details, {"query": {"packet_id": packet_id, **_query}})
 
 
 # ---------------------------------------------------------------------------
@@ -1980,6 +2021,9 @@ def locations_list() -> Response:
             since=_iso(since),
             until=_iso(until),
         )
+    max_window = LOCATIONS_MAX_WINDOW_DAYS * 86400
+    if until - since > max_window:
+        since = until - max_window
 
     gateway_id = _node_id_param("gateway_id")
     filters: dict[str, Any] = {"start_time": since, "end_time": until}
@@ -2717,10 +2761,77 @@ def _build_openapi() -> dict[str, Any]:
                             "in": "path",
                             "required": True,
                             "schema": {"type": "integer"},
-                        }
+                        },
+                        _query_param(
+                            "since",
+                            {"type": "string"},
+                            "Reception window start (epoch/ISO-8601).",
+                        ),
+                        _query_param(
+                            "until",
+                            {"type": "string"},
+                            "Reception window end (epoch/ISO-8601).",
+                        ),
+                        _query_param(
+                            "gateway_id",
+                            {"type": "string"},
+                            "Only receptions from this gateway (any id form).",
+                        ),
+                        _query_param(
+                            "portnum",
+                            {"type": "string"},
+                            "Only receptions with this portnum name.",
+                        ),
+                        _query_param(
+                            "primary_channel",
+                            {"type": "string"},
+                            "Only receptions on this channel id.",
+                        ),
+                        _query_param(
+                            "min_rssi", {"type": "integer"}, "Minimum reception RSSI."
+                        ),
+                        _query_param(
+                            "max_rssi", {"type": "integer"}, "Maximum reception RSSI."
+                        ),
+                        _query_param(
+                            "hop_count",
+                            {"type": "integer"},
+                            "Only receptions with this hop count.",
+                        ),
+                        _query_param(
+                            "from_node",
+                            {"type": "string"},
+                            "Only receptions from this node (any id form).",
+                        ),
+                        _query_param(
+                            "to_node",
+                            {"type": "string"},
+                            "Only receptions addressed to this node (any id form).",
+                        ),
+                        _query_param(
+                            "exclude_from",
+                            {"type": "string"},
+                            "Exclude receptions from this node (any id form).",
+                        ),
+                        _query_param(
+                            "exclude_to",
+                            {"type": "string"},
+                            "Exclude receptions addressed to this node (any id form).",
+                        ),
+                        _query_param(
+                            "exclude_self",
+                            {"type": "boolean", "default": False},
+                            "Exclude receptions sent by the gateway itself.",
+                        ),
+                        _query_param(
+                            "q",
+                            {"type": "string"},
+                            "Free-text reception filter (same fields as the list).",
+                        ),
                     ],
                     "responses": {
                         "200": _json_response("Packet detail.", {"type": "object"}),
+                        "400": _error_response_schema("Invalid query parameter."),
                         "404": _error_response_schema("Unknown packet."),
                     },
                 }
