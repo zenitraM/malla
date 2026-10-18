@@ -106,6 +106,17 @@
             });
         }
 
+        // The grouping checkbox lives outside #filtersForm, so the form loop
+        // above cannot restore it; without this the applied view silently
+        // keeps the current grouping and its row count disagrees.
+        const grouping = document.getElementById('group_packets')
+            || document.getElementById('groupPackets')
+            || document.getElementById('groupTraceroutes');
+        if (grouping && 'group_packets' in filters) {
+            const value = filters.group_packets;
+            grouping.checked = value === true || value === 'true' || value === '1' || value === 'on';
+        }
+
         // Existing apply path: table.setFilters + URL sync from the form state.
         if (typeof window.applyCurrentFilters === 'function') {
             window.applyCurrentFilters();

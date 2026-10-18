@@ -35,7 +35,7 @@ def test_save_apply_delete_roundtrip(page: Page, test_server_url: str):
     page.locator("#hop_count").select_option("0")
     page.locator("#applyFilters").click()
     page.wait_for_url(re.compile(r"hop_count=0"), timeout=10000)
-    filtered_count = _wait_table_ready(page)
+    _wait_table_ready(page)
 
     # Save current as 'mine' (inline name input, Enter confirms).
     _open_views_menu(page)
@@ -55,12 +55,21 @@ def test_save_apply_delete_roundtrip(page: Page, test_server_url: str):
     _wait_table_ready(page)
 
     _open_views_menu(page)
-    page.locator(".sv-sidebar-section .sv-apply", has_text=VIEW_NAME).first.click()
+    # Apply can race the page's initial unfiltered load; the table must issue
+    # the filtered request and keep its response, so bind the assertion to the
+    # request the click actually produced rather than to a pre-apply count.
+    with page.expect_request(
+        lambda r: "/api/v1/packets" in r.url and "hop_count=0" in r.url,
+        timeout=10000,
+    ) as applied:
+        page.locator(".sv-sidebar-section .sv-apply", has_text=VIEW_NAME).first.click()
     page.wait_for_url(re.compile(r"hop_count=0"), timeout=10000)
     expect(page.locator("#hop_count")).to_have_value("0")
-    # The apply refetches; wait for the count to land instead of racing it.
+    expect(page.locator("#group_packets")).to_be_checked()
+    applied_body = page.request.get(applied.value.url).json()
+    expected_rows = min(applied_body["meta"]["pagination"]["total"], 100)
     expect(page.locator(".modern-table tbody tr")).to_have_count(
-        filtered_count, timeout=10000
+        expected_rows, timeout=10000
     )
 
     # Delete the view; it leaves storage and the menu.
