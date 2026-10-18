@@ -141,9 +141,9 @@ ACTIVITY_QUARTER_TABLES_SQL = f"""
     ) WITHOUT ROWID;
 """
 
-CREATE_INDEXES_SQL = (
-    f"CREATE INDEX IF NOT EXISTS idx_{NODE_TABLE}_node ON {NODE_TABLE}(node_id)",
-)
+# No secondary index: the timeline reads the node table by bucket range and
+# aggregates ``COUNT(DISTINCT node_id)``, which scans the primary-key order.
+# ``idx_activity_node_quarter_node`` was declared but never selected.
 
 
 def bucket_start(epoch: float) -> int:

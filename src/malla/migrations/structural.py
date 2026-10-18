@@ -315,8 +315,6 @@ def _apply_activity_quarter_tables(
     conn: sqlite3.Connection, _wm: Watermark
 ) -> Watermark:
     conn.executescript(activity_rollup.ACTIVITY_QUARTER_TABLES_SQL)
-    for sql in activity_rollup.CREATE_INDEXES_SQL:
-        conn.execute(sql)
     return None
 
 
