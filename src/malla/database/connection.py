@@ -154,9 +154,11 @@ def init_database() -> None:
     """Verify the database is reachable and already migrated.
 
     Schema creation and migrations belong to ``malla-capture`` (or the
-    ``malla-migrate`` CLI): the web UI never writes DDL, so the daemon can never
-    be blocked by a web process building an index. An uninitialized database is
-    reported clearly here instead of failing one request at a time.
+    ``malla-migrate`` CLI). The web never runs them, so the daemon can never be
+    blocked by a web process building an index; its only write is the DERIVED
+    planner-stats bootstrap (``malla_meta`` / ``sqlite_stat1``) described in
+    ``malla.database.statistics``. An uninitialized database is reported
+    clearly here instead of failing one request at a time.
     """
     db_path = _resolve_db_path()
 
