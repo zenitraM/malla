@@ -415,36 +415,8 @@
   border-bottom: 1px solid var(--malla-border);
 }
 
-.group-receptions-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.25rem 0.35rem;
-}
-
-.group-reception {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  font-size: 0.8125rem;
-}
-
-.group-reception-gw {
-  min-width: 12ch;
-}
-
 .group-reception-tag {
   font-size: 0.65rem;
-}
-
-.group-reception-metric {
-  font-variant-numeric: tabular-nums;
-}
-
-.group-reception-offset {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Per-reception deep link inside expanded grouped rows */
