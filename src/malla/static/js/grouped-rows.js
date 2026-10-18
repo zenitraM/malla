@@ -26,31 +26,58 @@
     function expansionQuery() {
         const params = new URLSearchParams();
         const range = window.MallaRange && window.MallaRange.get ? window.MallaRange.get() : null;
+        // Uncapped 'all' carries no sinceEpoch; a retention-capped 'all' does,
+        // and that bound must survive.
         if (range && range.sinceEpoch) {
             params.set('since', new Date(range.sinceEpoch * 1000).toISOString());
         }
         if (range && range.untilEpoch) {
             params.set('until', new Date(range.untilEpoch * 1000).toISOString());
         }
-        if (range && range.key === 'all') params.delete('since');
-        const um = window.urlManager;
-        const filters = um && typeof um.getCurrentFilters === 'function' ? um.getCurrentFilters() : null;
-        if (filters) {
-            // datetime-local strings need ISO conversion, mirroring the table
-            // builder; explicit page times override the global range.
-            if (filters.start_time) {
-                const d = new Date(filters.start_time);
-                if (!Number.isNaN(d.getTime())) params.set('since', d.toISOString());
-            }
-            if (filters.end_time) {
-                const d = new Date(filters.end_time);
-                if (!Number.isNaN(d.getTime())) params.set('until', d.toISOString());
-            }
-            if (filters.gateway_id) params.set('gateway_id', String(filters.gateway_id));
-            if (filters.portnum) params.set('portnum', String(filters.portnum));
+        // The table's own filter state is authoritative when the page has a
+        // table; urlManager covers pages that only carry the global range.
+        const tableFilters =
+            (window.table && window.table.state && window.table.state.filters) || null;
+        const urlFilters =
+            window.urlManager && typeof window.urlManager.getCurrentFilters === 'function'
+                ? window.urlManager.getCurrentFilters()
+                : null;
+        const filters = Object.assign({}, urlFilters, tableFilters);
+        // datetime-local strings need ISO conversion, mirroring the table
+        // builder; explicit page times override the global range.
+        if (filters.start_time) {
+            const d = new Date(filters.start_time);
+            if (!Number.isNaN(d.getTime())) params.set('since', d.toISOString());
         }
-        const qs = params.toString();
-        return qs ? `?${qs}` : '';
+        if (filters.end_time) {
+            const d = new Date(filters.end_time);
+            if (!Number.isNaN(d.getTime())) params.set('until', d.toISOString());
+        }
+        [
+            'gateway_id',
+            'portnum',
+            'min_rssi',
+            'max_rssi',
+            'hop_count',
+            'primary_channel',
+            'from_node',
+            'to_node',
+            'exclude_from',
+            'exclude_to',
+        ].forEach((key) => {
+            const value = filters[key];
+            if (value !== undefined && value !== null && value !== '') {
+                params.set(key, String(value));
+            }
+        });
+        if (
+            filters.exclude_self === true ||
+            filters.exclude_self === '1' ||
+            filters.exclude_self === 'true'
+        ) {
+            params.set('exclude_self', 'true');
+        }
+        return params.toString() ? `?${params.toString()}` : '';
     }
 
     function getJSON(path) {

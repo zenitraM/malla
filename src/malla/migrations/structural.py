@@ -223,11 +223,6 @@ INDEX_SPECS: tuple[tuple[str, str, str], ...] = (
         "CREATE INDEX IF NOT EXISTS idx_packet_history_portnum_name_time ON packet_history(portnum_name, timestamp DESC)",
     ),
     (
-        "idx_packet_history_telemetry_node_time",
-        "packet_history",
-        "CREATE INDEX IF NOT EXISTS idx_packet_history_telemetry_node_time ON packet_history(from_node_id, timestamp DESC) WHERE portnum_name = 'TELEMETRY_APP' AND raw_payload IS NOT NULL",
-    ),
-    (
         "idx_packet_history_rssi",
         "packet_history",
         "CREATE INDEX IF NOT EXISTS idx_packet_history_rssi ON packet_history(rssi)",
@@ -258,6 +253,10 @@ LEGACY_INDEX_NAMES: tuple[str, ...] = (
     "idx_packet_timestamp",
     "idx_packet_from_node",
 )
+
+#: Indexes a previous release created but no query selects. Dropping them
+#: keeps the write path cheaper on databases that already ran the old spec.
+OBSOLETE_INDEX_NAMES: tuple[str, ...] = ("idx_packet_history_telemetry_node_time",)
 
 
 def tables(conn: sqlite3.Connection) -> set[str]:
@@ -334,7 +333,7 @@ def _core_indexes_pending(conn: sqlite3.Connection, _wm: Watermark) -> bool:
     if missing_indexes(conn):
         return True
     return "packet_history" in tables(conn) and any(
-        name in indexes(conn) for name in LEGACY_INDEX_NAMES
+        name in indexes(conn) for name in (*LEGACY_INDEX_NAMES, *OBSOLETE_INDEX_NAMES)
     )
 
 
@@ -347,7 +346,7 @@ def _apply_core_indexes(conn: sqlite3.Connection, _wm: Watermark) -> Watermark:
         conn.execute(sql)
         present_indexes.add(index)
     if "packet_history" in present_tables:
-        for name in LEGACY_INDEX_NAMES:
+        for name in (*LEGACY_INDEX_NAMES, *OBSOLETE_INDEX_NAMES):
             conn.execute(f"DROP INDEX IF EXISTS {name}")
     return None
 
@@ -378,8 +377,6 @@ def _apply_activity_quarter_tables(
     conn: sqlite3.Connection, _wm: Watermark
 ) -> Watermark:
     conn.executescript(activity_rollup.ACTIVITY_QUARTER_TABLES_SQL)
-    for sql in activity_rollup.CREATE_INDEXES_SQL:
-        conn.execute(sql)
     return None
 
 

@@ -588,8 +588,10 @@ function initializeInterface() {
             updateWindowChip();
             applyClientSideFilters();
             const key = rangeKey();
+            // Reset the debounce on every move so a rapid A→B→A selection
+            // still lands one fetch for the final window.
+            if (_refetchTimer) clearTimeout(_refetchTimer);
             if (key !== _lastFetchWindow) {
-                if (_refetchTimer) clearTimeout(_refetchTimer);
                 _refetchTimer = setTimeout(() => {
                     _lastFetchWindow = key;
                     if (typeof loadNodeLocations === 'function') loadNodeLocations();
@@ -718,10 +720,15 @@ function buildFilterParams() {
     const params = new URLSearchParams();
 
     // Bound the server window to the shared range as well: the endpoint
-    // caps at 14 days, so wider selections need the explicit window.
+    // caps at 14 days, so wider selections need the explicit window, and
+    // "all" needs an explicit epoch-0 bound or it silently shows 14 days.
     if (window.MallaRange && window.MallaRange.get) {
         const r = window.MallaRange.get();
-        if (r.sinceEpoch) params.set('since', new Date(r.sinceEpoch * 1000).toISOString());
+        if (r.key === 'all') {
+            params.set('since', '1970-01-01T00:00:00.000Z');
+        } else if (r.sinceEpoch) {
+            params.set('since', new Date(r.sinceEpoch * 1000).toISOString());
+        }
         if (r.untilEpoch) params.set('until', new Date(r.untilEpoch * 1000).toISOString());
     }
 
@@ -810,8 +817,8 @@ async function loadNodeLocations() {
 }
 
 // Time window: the global range is the map's only time control; the window
-// is never edited here, only reflected (data is fetched window-less and
-// filtered client-side; wider windows refetch (see the range listener).)
+// is never edited here, only reflected. The fetch is bounded by it and the
+// range listener refetches when the effective window moves.
 function rangeKey() {
     if (!window.MallaRange || !window.MallaRange.get) return "";
     const r = window.MallaRange.get();

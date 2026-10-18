@@ -358,13 +358,17 @@ class TestMapLayout:
         stats_section = page.locator("#mapStats")
         expect(stats_section).to_be_visible()
 
-        # Node counts vary with the fixture clock; nodes and located nodes
-        # must at least agree and be non-trivial.
+        # Node counts vary with the fixture clock; compare against the same
+        # API the page consumes rather than a weak lower bound.
+        body = page.request.get(
+            f"{test_server_url}/api/v1/locations?page_size=5000"
+        ).json()
+        api_total = body["meta"]["pagination"]["total"]
         stats_nodes = int(page.locator("#statsNodes").text_content() or 0)
         stats_loc = int(page.locator("#statsWithLocation").text_content() or 0)
-        assert stats_nodes >= 15, f"unexpected node count {stats_nodes}"
-        assert stats_loc == stats_nodes, (
-            f"all fixture nodes have coordinates: {stats_loc} != {stats_nodes}"
+        assert stats_loc == api_total, f"located {stats_loc} != API total {api_total}"
+        assert stats_nodes >= stats_loc, (
+            f"locations exceed nodes: {stats_loc} > {stats_nodes}"
         )
         # We should have some traceroute links from our enhanced fixtures
         stats_links = page.locator("#statsLinks").text_content()
@@ -773,3 +777,27 @@ class TestMapLayout:
         assert current_count == filtered_count, (
             "Filter should persist after search operations"
         )
+
+    @pytest.mark.e2e
+    def test_map_all_time_sends_an_explicit_window(self, page: Page, test_server_url):
+        """The endpoint's 14-day default must not silently narrow All time."""
+        page.goto(f"{test_server_url}/map")
+        page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
+        page.wait_for_function("!!window.MallaRange", timeout=10000)
+
+        page.evaluate("window.MallaRange.set('all')")
+        page.wait_for_function(
+            """() => performance.getEntriesByType('resource').some(
+                (e) => e.name.includes('/api/v1/locations')
+                    && e.name.includes('since=1970')
+            )""",
+            timeout=10000,
+        )
+
+        urls = page.evaluate(
+            """() => performance.getEntriesByType('resource')
+                .map((e) => e.name)
+                .filter((u) => u.includes('/api/v1/locations'))"""
+        )
+        assert urls, "map never requested locations"
+        assert "since=1970" in urls[-1], urls[-1]

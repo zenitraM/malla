@@ -425,11 +425,22 @@
                 const mins = lag / 60;
                 const text = mins < 60 ? `${Math.max(1, Math.round(mins))}m` : `${Math.round(mins / 60)}h`;
                 document.getElementById('captureHealthText').textContent = `▲ ${text}`;
-                const state = mins < 5 ? 'ok' : mins < 30 ? 'warn' : 'stale';
+                const rollup = meta && meta.rollup_freshness;
+                let state = mins < 5 ? 'ok' : mins < 30 ? 'warn' : 'stale';
+                // A stale rollup is a serving defect even when ingest is live:
+                // every per-node aggregate the pages show comes from it.
+                if (rollup && rollup.stale) state = 'stale';
                 health.dataset.state = state;
                 if (window.bootstrap && bootstrap.Tooltip.getInstance(health)) {
                     const tip = bootstrap.Tooltip.getInstance(health);
-                    tip.setContent({ '.tooltip-inner': `Ingest ${state} — newest packet ${Math.round(mins)} min ago` });
+                    let detail = `Ingest ${state} — newest packet ${Math.round(mins)} min ago`;
+                    if (rollup && rollup.age_seconds != null) {
+                        const rollupAge = rollup.age_seconds < 3600
+                            ? `${Math.max(1, Math.round(rollup.age_seconds / 60))} min`
+                            : `${Math.round(rollup.age_seconds / 3600)} h`;
+                        detail += `; rollups ${rollup.stale ? 'stale' : 'fresh'} (newest bucket ${rollupAge} ago)`;
+                    }
+                    tip.setContent({ '.tooltip-inner': detail });
                 }
             }
             function refreshHealth() {

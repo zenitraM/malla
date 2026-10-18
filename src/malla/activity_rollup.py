@@ -146,9 +146,9 @@ ACTIVITY_QUARTER_TABLES_SQL = f"""
     ) WITHOUT ROWID;
 """
 
-CREATE_INDEXES_SQL = (
-    f"CREATE INDEX IF NOT EXISTS idx_{NODE_TABLE}_node ON {NODE_TABLE}(node_id)",
-)
+# No secondary index: the timeline reads the node table by bucket range and
+# aggregates ``COUNT(DISTINCT node_id)``, which scans the primary-key order.
+# ``idx_activity_node_quarter_node`` was declared but never selected.
 
 
 def bucket_start(epoch: float) -> int:
@@ -318,11 +318,14 @@ def prune_before(conn: sqlite3.Connection, cutoff: float) -> int:
         cursor = conn.execute(f"DELETE FROM {table} WHERE bucket < ?", (cutoff_bucket,))
         deleted += cursor.rowcount
 
-    # Re-fold every surviving bucket from the rows that are still present, so
-    # the retention edge never carries counts of already-deleted packets.
+    # Only the retention-edge bucket can be stale: older buckets are gone and
+    # newer buckets were folded from packets that are still present. Delete
+    # and re-fold just that bucket from the surviving rows; re-folding the
+    # whole retained store on every prune rewrites millions of rows under the
+    # capture's writer lock.
     for table in TABLES:
-        conn.execute(f"DELETE FROM {table} WHERE bucket >= ?", (cutoff_bucket,))
-    _aggregate_range(conn, cutoff_bucket, bucket_start(time.time()))
+        conn.execute(f"DELETE FROM {table} WHERE bucket = ?", (cutoff_bucket,))
+    _aggregate_range(conn, cutoff_bucket, cutoff_bucket + BUCKET_SECONDS)
     return deleted
 
 

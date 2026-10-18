@@ -38,11 +38,11 @@ class PacketRepositoryOptimized:
             where_conditions = []
             params = []
 
-            if filters.get("start_time"):
+            if filters.get("start_time") is not None:
                 where_conditions.append("timestamp >= ?")
                 params.append(filters["start_time"])
 
-            if filters.get("end_time"):
+            if filters.get("end_time") is not None:
                 where_conditions.append("timestamp <= ?")
                 params.append(filters["end_time"])
 

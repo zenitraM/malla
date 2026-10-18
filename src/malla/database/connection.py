@@ -113,6 +113,8 @@ REQUIRED_TABLES: tuple[str, ...] = (
     "link_day_rollup",
     "route_day_rollup",
     "activity_node_quarter",
+    "activity_packet_quarter",
+    "activity_gateway_quarter",
 )
 
 
