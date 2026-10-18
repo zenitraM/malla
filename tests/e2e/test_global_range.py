@@ -89,3 +89,23 @@ class TestGlobalRange:
         assert "range=6h" in page.url
         label = page.locator("#globalRangeLabel")
         assert "6h" in (label.text_content() or "")
+
+
+def test_relative_preset_advances_between_reads(page: Page, test_server_url: str):
+    """A preset's since must track now, not freeze at first resolution."""
+    page.goto(f"{test_server_url}/packets")
+    page.wait_for_function("!!window.MallaRange", timeout=15000)
+    first = page.evaluate("window.MallaRange.get().sinceEpoch")
+    page.wait_for_timeout(1200)
+    second = page.evaluate("window.MallaRange.get().sinceEpoch")
+    assert second > first, (first, second)
+
+
+def test_dashboard_preserves_shared_range_url_on_load(page: Page, test_server_url: str):
+    """A shared ?range=6h link must not be rewritten to the stored default."""
+    page.goto(f"{test_server_url}/?range=6h")
+    page.wait_for_selector("#timelineRangeButtons", timeout=10000)
+    page.wait_for_timeout(600)
+    assert "range=6h" in page.url
+    active = page.locator("#timelineRangeButtons button.active")
+    assert active.get_attribute("data-range") == "24h"

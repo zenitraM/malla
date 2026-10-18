@@ -66,7 +66,9 @@ def test_save_apply_delete_roundtrip(page: Page, test_server_url: str):
     # Delete the view; it leaves storage and the menu.
     _open_views_menu(page)
     page.locator(".sv-sidebar-section .sv-delete").first.click()
-    page.wait_for_timeout(200)
+    expect(page.locator(".toast-body", has_text="Deleted view")).to_be_visible(
+        timeout=5000
+    )
     stored_after = page.evaluate(
         "JSON.parse(localStorage.getItem('malla.savedViews.packets') || '[]')"
     )
