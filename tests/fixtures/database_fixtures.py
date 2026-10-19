@@ -46,11 +46,13 @@ class DatabaseFixtures:
             # Bring it up to date with the migration framework, so tables,
             # columns and indexes the app relies on (e.g. the activity buckets,
             # idx_packet_history_from_time_desc) exist here exactly as the
-            # capture daemon would create them.
+            # capture daemon would create them. DERIVED is excluded: it runs
+            # before the fixture rows exist, so its backfills would analyze
+            # empty tables and record zero-row planner statistics.
             run_migrations(
                 conn,
                 MIGRATIONS,
-                phases=(Phase.SCHEMA, Phase.BLOCKING, Phase.DERIVED),
+                phases=(Phase.SCHEMA, Phase.BLOCKING),
                 take_lock=False,
             )
 

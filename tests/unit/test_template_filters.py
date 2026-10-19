@@ -4,26 +4,7 @@ Unit tests for template filters.
 
 import pytest
 
-from malla.web_ui import create_app
-
-
-@pytest.fixture(scope="module")
-def app():
-    import tempfile
-
-    from tests.fixtures.database_fixtures import DatabaseFixtures
-
-    tf = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-    tf.close()
-    DatabaseFixtures().create_test_database(tf.name)
-    application = create_app(_cfg_for(tf.name))
-    yield application
-
-
-def _cfg_for(db_path):
-    from malla.config import AppConfig
-
-    return AppConfig(database_file=db_path)
+pytestmark = pytest.mark.unit
 
 
 class TestTemplateFilters:

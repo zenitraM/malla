@@ -51,7 +51,6 @@ class TestGlobalRange:
                 break
             page.wait_for_timeout(250)
         assert ok, "expected since ≈24h ago on the wire"
-
         assert "range=24h" in page.url
 
     def test_dashboard_follows_global_range(self, page: Page, test_server_url: str):
