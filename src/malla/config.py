@@ -61,6 +61,14 @@ class AppConfig:
     # Number of hours after which to delete old data (0 = never delete)
     data_retention_hours: int = 0
 
+    # Firmware fingerprint backfill (capture daemon)
+    # On its first start after this feature is installed, the capture daemon
+    # computes firmware evidence for the packets already in the database, this
+    # many days back, in a background thread. 0 disables the automatic run;
+    # `malla-fingerprint-backfill` can always be run by hand.
+    # Corresponding env var: MALLA_FINGERPRINT_BACKFILL_DAYS
+    fingerprint_backfill_days: int = 30
+
     # Reverse proxy settings
     # Comma-separated IPs of trusted reverse proxies. When set, ProxyFix trusts
     # one trusted proto hop, and Gunicorn is configured to accept forwarded
