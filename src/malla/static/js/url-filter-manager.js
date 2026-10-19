@@ -33,7 +33,14 @@ class URLFilterManager {
      */
     updateURL(filters) {
         const url = new URL(window.location);
-        url.search = ''; // Clear existing params
+        // The global time range shares this URL but is owned by
+        // range-context.js; never drop it while rewriting the filter set.
+        const preserved = ['range', 'range_since', 'range_until']
+            .map((key) => [key, url.searchParams.get(key)])
+            .filter(([, value]) => value !== null);
+        url.search = ''; // Clear existing filter params
+
+        preserved.forEach(([key, value]) => url.searchParams.set(key, value));
 
         // Add non-empty filters to URL
         Object.entries(filters).forEach(([key, value]) => {

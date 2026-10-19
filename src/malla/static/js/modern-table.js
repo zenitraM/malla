@@ -27,6 +27,7 @@ class ModernTable {
             totalPages: 0,
             isGrouped: false
         };
+        this._loadSeq = 0;
 
         // UI preferences: density (global) and per-table hidden columns,
         // persisted in localStorage. Feature flags default on.
@@ -341,8 +342,11 @@ class ModernTable {
     }
 
     async loadData() {
-        if (this.state.loading) return;
-
+        // Latest-wins: a filter change during an in-flight load must issue its
+        // own request, and the older response must not overwrite it. Dropping
+        // the newer request instead leaves the table showing stale rows under
+        // a URL that already reflects the new filters.
+        const seq = ++this._loadSeq;
         this.state.loading = true;
         this.showLoading();
 
@@ -382,6 +386,7 @@ class ModernTable {
             }
 
             const data = await response.json();
+            if (seq !== this._loadSeq) return; // superseded by a newer load
             const page = normalizePageResponse(data, this.state.pageSize);
             let rows = page.rows;
             // Optional client-side refinement (filters with no server-side
@@ -400,10 +405,11 @@ class ModernTable {
             this.updatePagination();
             this.emit('dataLoaded', { data: this.state.data, totalCount: this.state.totalCount });
         } catch (error) {
+            if (seq !== this._loadSeq) return;
             console.error('Error loading table data:', error);
             this.showError(error.message);
         } finally {
-            this.state.loading = false;
+            if (seq === this._loadSeq) this.state.loading = false;
         }
     }
 

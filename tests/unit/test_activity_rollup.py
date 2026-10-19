@@ -458,3 +458,16 @@ def test_prune_refold_does_not_rewrite_later_buckets(tmp_path):
     ).fetchone()[0]
     assert stored == 999999
     conn.close()
+
+
+def test_refresh_loop_stops_when_rollup_tables_are_absent(tmp_path) -> None:
+    """A verify-only web process must not spin on an unmigrated database."""
+    import sqlite3
+
+    from src.malla.capture_rollups import _refresh_loop
+
+    db_path = tmp_path / "unmigrated.db"
+    sqlite3.connect(db_path).close()
+
+    # Old behavior warned and slept forever; the guard must return promptly.
+    _refresh_loop(str(db_path))

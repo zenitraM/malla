@@ -142,7 +142,7 @@
                     </div>
                     <div id="activityTimelinePanelsError" class="text-center py-4 text-muted" style="display: none;">
                         <i class="bi bi-exclamation-triangle"></i> Could not load activity data.
-                        <a href="#" onclick="loadActivityTimeline(timelineRange); return false;">Retry</a>
+                        <a href="#" onclick="refreshDashboard(); return false;">Retry</a>
                     </div>
                     <div id="activityTimelinePanels" class="row g-3" style="display: none;">
                         <div class="col-6">
@@ -600,9 +600,19 @@ function syncRangeButtons(range) {
     });
 }
 
+function urlRangeKey() {
+    return new URLSearchParams(window.location.search).get('range');
+}
+
 function rangeFromUrl() {
-    const param = new URLSearchParams(window.location.search).get('range');
-    return validRange(param);
+    const param = urlRangeKey();
+    if (!param) return null;
+    if (validRange(param)) return param;
+    // The dashboard's timeline has no 15m/1h/6h preset; map the shared global
+    // range onto the nearest selector without rewriting the URL.
+    if (param === '15m' || param === '1h' || param === '6h') return '24h';
+    if (param === 'custom') return '7d';
+    return null;
 }
 
 function setRangeInUrl(range) {
@@ -1390,6 +1400,10 @@ async function refreshSummary({ silent = false } = {}) {
     } catch (error) {
         if (!silent) {
             hideAllLoadingSpinners();
+            // Surface the timeline failure with a working retry (the old
+            // loadActivityTimeline global is gone).
+            const errBox = document.getElementById('activityTimelinePanelsError');
+            if (errBox) errBox.style.display = '';
             console.error('Summary load failed:', error);
         }
         return false;
@@ -1424,10 +1438,11 @@ document.addEventListener('DOMContentLoaded', function () {
     // Range: URL param wins, then last-used, then 7d. Only write the URL when
     // the range did not come from it, or a shared ?range=6h link is rewritten
     // to the stored/default value while the timeline keeps the URL's range.
+    const urlKey = urlRangeKey();
     const urlRange = rangeFromUrl();
     timelineRange = urlRange
         || (() => { try { return validRange(localStorage.getItem('mallaTimelineRange')) || '7d'; } catch (e) { return '7d'; } })();
-    if (!urlRange) setRangeInUrl(timelineRange);
+    if (!urlKey) setRangeInUrl(timelineRange);
     syncRangeButtons(timelineRange);
 
     refreshDashboard();
@@ -1444,7 +1459,33 @@ document.addEventListener('DOMContentLoaded', function () {
                 setRangeInUrl(range);
                 syncRangeButtons(range);
                 refreshSummary();
+                // Keep the global context in lock-step (marks overridden so
+                // table pages do not loop back onto us).
+                if (window.MallaRange) {
+                    window.MallaRange.set(range, null, { via: 'override' });
+                }
             }
+        });
+    }
+
+    // Global range drives this page when changed from the navbar: map the
+    // preset onto the dashboard selector (custom/15m/6h fall back to the
+    // nearest of 24h/7d for the timeline; the KPI tiles re-query either way).
+    if (window.MallaRange) {
+        window.MallaRange.onRangeChange(function (range, meta) {
+            if (meta && meta.via === 'override') return; // this page caused it
+            var key = range.key;
+            var mapped = ['24h', '7d', '30d', 'all'].includes(key) ? key
+                : (key === '15m' || key === '1h' || key === '6h') ? '24h' : '7d';
+            if (mapped !== timelineRange) {
+                timelineRange = mapped;
+                try { localStorage.setItem('mallaTimelineRange', mapped); } catch (e) { /* private mode */ }
+                syncRangeButtons(mapped);
+            }
+            // The address bar keeps the global key written by range-context
+            // (including 15m/1h/6h/custom); rewriting it to `mapped` would make
+            // reloads and shared links disagree with the navbar.
+            refreshSummary();
         });
     }
 
