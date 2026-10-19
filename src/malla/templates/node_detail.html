@@ -45,6 +45,8 @@
         font-size: 0.75rem;
     }
     .matrix-table td { text-align: center; }
+.info-popover { line-height: 1; vertical-align: baseline; text-decoration: none; }
+.info-popover:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; border-radius: 50%; }
 </style>
 {% endblock %}
 
@@ -120,6 +122,37 @@
     <div class="row">
         <!-- Node Information -->
         <div class="col-lg-8">
+            {% if successor %}
+            <div class="alert alert-info d-flex align-items-start gap-2" role="alert" id="renumbered-alert">
+                <i class="bi bi-arrow-right-circle fs-5"></i>
+                <div>
+                    <strong>This radio now reports as
+                        <a href="/node/{{ successor.node_id }}" class="alert-link"><code>{{ successor.hex_id }}</code> {{ successor.node_name }}</a>.</strong>
+                    Firmware 2.8 derives the node number from the node's public key, so since the upgrade
+                    (new id first seen {{ successor.first_seen_str or 'recently' }}) its packets, position and telemetry are recorded under the new id.
+                    This page no longer updates and the map hides its old marker.
+                    <small class="text-muted">(linked by {{ successor.via }})</small>
+                </div>
+            </div>
+            {% endif %}
+            {% if predecessors %}
+            <div class="alert alert-secondary py-2" role="alert" id="predecessor-alert">
+                <i class="bi bi-clock-history"></i>
+                Previously known as
+                {% for p in predecessors %}<a href="/node/{{ p.node_id }}" class="alert-link"><code>{{ p.hex_id }}</code> {{ p.node_name }}</a>{% if p.last_updated_str %} (until {{ p.last_updated_str }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+                &mdash; history from before the firmware 2.8 upgrade lives there.
+            </div>
+            {% endif %}
+            {% if position_hint %}
+            <div class="alert alert-warning" role="alert" id="position-hint-alert">
+                <i class="bi bi-geo-alt"></i>
+                <strong>No position {% if position_hint.last_position_str %}shared since {{ position_hint.last_position_str }}{% else %}received from this id{% endif %}.</strong>
+                Firmware 2.8 switches position and telemetry broadcasts off on public channels when it is installed{% if position_hint.predecessor %}
+                (the old id <code>{{ position_hint.predecessor.hex_id }}</code> last shared a position on {{ position_hint.predecessor.date }}){% endif %}.
+                To share location again, set the channel's position precision above 0 in the Meshtastic app
+                (Channel &rarr; Position); telemetry has its own toggles under Module config.
+            </div>
+            {% endif %}
             <!-- Basic Information -->
             <div class="card mb-4">
                 <div class="card-header">
@@ -163,6 +196,23 @@
                                 <tr>
                                     <th>MAC Address:</th>
                                     <td><code>{{ node.mac_address }}</code></td>
+                                </tr>
+                                {% endif %}
+                                {% if same_mac_nodes %}
+                                <tr>
+                                    <th>Same Device:</th>
+                                    <td>
+                                        <ul class="list-unstyled mb-0 same-mac-nodes">
+                                            {% for sibling in same_mac_nodes %}
+                                            <li>
+                                                <a href="/node/{{ sibling.node_id }}"><code>{{ sibling.hex_id }}</code></a>
+                                                {{ sibling.node_name }}
+                                                <span class="badge {{ 'bg-info' if sibling.relation == 'newer' else 'bg-secondary' }}">{{ sibling.relation }} id</span>
+                                                {% if sibling.first_seen_str %}<small class="text-muted">first seen {{ sibling.first_seen_str }}{% if sibling.last_updated_str %}, last {{ sibling.last_updated_str }}{% endif %}</small>{% endif %}
+                                            </li>
+                                            {% endfor %}
+                                        </ul>
+                                    </td>
                                 </tr>
                                 {% endif %}
                                 <tr>
@@ -212,11 +262,19 @@
                                 <tr>
                                     <th>Firmware Version:</th>
                                     <td>
-                                        <span class="text-muted">Not available</span>
-                                        <i class="bi bi-info-circle text-muted ms-1"
-                                           data-bs-toggle="tooltip"
-                                           data-bs-placement="top"
-                                           title="Firmware version information is not transmitted in standard nodeinfo packets. It would require admin access to query device metadata."></i>
+                                        {% if firmware and firmware.source == 'reported' %}
+                                        <span class="badge bg-success">{{ firmware.label }}</span>
+                                        <small class="text-muted">reported{% if firmware.reported_at_str %} {{ firmware.reported_at_str }}{% endif %}</small>
+                                        {% elif firmware and firmware.source == 'fingerprint' %}
+                                        <span class="badge bg-secondary">{{ firmware.label }}</span>
+                                        <small class="text-muted">estimated</small>
+                                        {% else %}
+                                        <span class="text-muted">Unknown</span>
+                                        {% endif %}
+                                        <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline text-muted info-popover" tabindex="0"
+                                                aria-label="Evidence" data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                                data-bs-placement="top" data-bs-html="true"
+                                                data-bs-content="{% if firmware %}{% for item in firmware.evidence_items %}<div class='d-flex justify-content-between gap-3'><span>{{ item.trait }}</span><span class='text-muted text-nowrap'>{{ item.range }}</span></div>{% endfor %}{% else %}no evidence yet{% endif %}"><i class="bi bi-info-circle"></i></button>
                                     </td>
                                 </tr>
                                 <tr>
@@ -791,6 +849,13 @@
 
 <script data-node-id="{{ node.node_id }}">
 document.addEventListener('DOMContentLoaded', function() {
+    // Explanations live in popovers: hover shows them on desktop, and on touch
+    // devices a tap focuses the button and shows them until the next tap.
+    if (window.bootstrap && bootstrap.Popover) {
+        document.querySelectorAll('[data-bs-toggle="popover"]').forEach(function (el) {
+            new bootstrap.Popover(el);
+        });
+    }
     // Set progress bar widths from data attributes
     document.querySelectorAll('.progress-bar[data-width]').forEach(function(bar) {
         const width = bar.getAttribute('data-width');

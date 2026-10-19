@@ -65,12 +65,19 @@ class NodeService:
             node_id_int, max_distance_km=10.0
         )
 
+        firmware = NodeRepository.get_firmware_estimate(
+            node_id_int, role=node.get("role"), hw_model=node.get("hw_model")
+        )
+        same_mac_nodes = NodeRepository.get_same_mac_nodes(node_id_int)
+
         # Combine all data
         return {
             "node": node,
             "traceroute_stats": traceroute_stats,
             "location_history": location_history,
             "neighbors": neighbors,
+            "firmware": firmware,
+            "same_mac_nodes": same_mac_nodes,
         }
 
     @staticmethod

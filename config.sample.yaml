@@ -79,6 +79,10 @@ debug: false
 # Number of hours after which to delete old data (0 = never delete)
 # data_retention_hours: 0
 
+# Days of stored history the capture daemon fingerprints for firmware
+# estimates on its first start after upgrading (0 = skip the automatic run)
+# fingerprint_backfill_days: 30
+
 # OpenTelemetry settings
 # Endpoint for sending traces (e.g. "http://localhost:4317")
 # otlp_endpoint: ""

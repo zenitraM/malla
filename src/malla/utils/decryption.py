@@ -102,6 +102,42 @@ def decrypt_packet_payload(
         return b""
 
 
+AEAD_TAG_SIZE = 12
+
+
+def decrypt_packet_payload_ccm(
+    encrypted_payload: bytes,
+    packet_id: int,
+    sender_id: int,
+    dest_id: int,
+    key: bytes,
+) -> bytes:
+    """Decrypt an AES-CCM (firmware 2.8.1 ``use_aead``) channel payload.
+
+    Layout: ciphertext + 12-byte tag; nonce = packet id (8, LE) + sender
+    (4, LE) + one zero byte; associated data = sender (4, LE) + destination
+    (4, LE). Returns empty bytes when the tag does not verify.
+    """
+    if len(encrypted_payload) <= AEAD_TAG_SIZE or len(key) not in (16, 32):
+        return b""
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESCCM
+
+        nonce = (
+            (packet_id & 0xFFFFFFFFFFFFFFFF).to_bytes(8, "little")
+            + (sender_id & 0xFFFFFFFF).to_bytes(4, "little")
+            + b"\x00"
+        )
+        aad = (sender_id & 0xFFFFFFFF).to_bytes(4, "little") + (
+            dest_id & 0xFFFFFFFF
+        ).to_bytes(4, "little")
+        return AESCCM(key, tag_length=AEAD_TAG_SIZE).decrypt(
+            nonce, bytes(encrypted_payload), aad
+        )
+    except Exception:  # noqa: BLE001
+        return b""
+
+
 def try_decrypt_mesh_packet(
     mesh_packet, channel_name: str = "", key_base64: str = DEFAULT_CHANNEL_KEY
 ) -> bool:
@@ -141,10 +177,15 @@ def try_decrypt_mesh_packet(
         # Derive the decryption key
         key = derive_key_from_channel_name(channel_name, key_base64)
 
-        # Decrypt the payload
-        decrypted_payload = decrypt_packet_payload(
-            encrypted_payload, packet_id, sender_id, key
+        # AES-CCM (2.8.1 use_aead channels) first: it authenticates, so a hit
+        # is never a false positive; then classic AES-CTR.
+        decrypted_payload = decrypt_packet_payload_ccm(
+            encrypted_payload, packet_id, sender_id, getattr(mesh_packet, "to", 0), key
         )
+        if not decrypted_payload:
+            decrypted_payload = decrypt_packet_payload(
+                encrypted_payload, packet_id, sender_id, key
+            )
 
         if not decrypted_payload:
             logger.debug("Decryption returned empty payload")

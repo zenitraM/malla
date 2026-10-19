@@ -6,6 +6,7 @@ This module provides data access layer with business logic for different entitie
 
 import json
 import logging
+import sqlite3
 import time
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -14,6 +15,12 @@ from meshtastic import mesh_pb2, telemetry_pb2
 from meshtastic.protobuf import mqtt_pb2
 
 from ..config import get_config
+from ..fingerprint import (
+    EVIDENCE_COLUMNS,
+    FirmwareEvidence,
+    estimate,
+    summarize_distribution,
+)
 from ..utils.decryption import try_decrypt_mesh_packet
 from ..utils.formatting import format_time_ago
 from ..utils.node_utils import convert_node_id, get_bulk_node_short_names
@@ -167,6 +174,7 @@ def _aggregate(
         band.extend(run_band)
     return avg_line, band
 
+
 RELAY_CANDIDATE_CACHE_TTL_SECONDS = 1800
 RELAY_CANDIDATE_CACHE_MAX_ENTRIES = 4096
 _relay_candidate_cache: dict[tuple[int, int], tuple[float, list[dict[str, Any]]]] = {}
@@ -223,6 +231,42 @@ def _store_relay_candidates(
 # view, so a short TTL cache keeps the common case O(1) while the numbers stay
 # fresh to within a few seconds. Keyed by gateway_id (None => site-wide).
 DASHBOARD_STATS_CACHE_TTL_SECONDS = 30
+FIRMWARE_DISTRIBUTION_CACHE_TTL_SECONDS = 300
+# Renumbered-node map (firmware 2.8 key-derived ids), see
+# NodeRepository.get_renumbered_map. Refreshed every few minutes.
+RENUMBERED_CACHE_TTL_SECONDS = 300
+# An old id heard this long after its successor appeared is not a renumbering.
+RENUMBERED_GRACE_SECONDS = 3600
+_renumbered_cache: tuple[float, dict[int, dict[str, Any]]] | None = None
+# How many of a node's newest position packets to inspect when the newest
+# one carries no coordinates (firmware 2.8 sends such packets).
+POSITION_FALLBACK_SCAN = 25
+
+
+def _successor_entry(row: Any, via: str) -> dict[str, Any]:
+    node_id = int(row["node_id"])
+    first_seen = row["first_seen"]
+    return {
+        "node_id": node_id,
+        "hex_id": f"!{node_id:08x}",
+        "long_name": row["long_name"],
+        "short_name": row["short_name"],
+        "node_name": row["long_name"] or row["short_name"] or f"!{node_id:08x}",
+        "first_seen": first_seen,
+        "first_seen_str": datetime.fromtimestamp(first_seen, UTC).strftime("%Y-%m-%d")
+        if first_seen
+        else None,
+        "via": via,
+    }
+
+
+def _position_has_fix(position: Any) -> bool:
+    """True when a decoded Position carries real coordinates."""
+    return bool(position.latitude_i) and bool(position.longitude_i)
+
+
+_firmware_distribution_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+_hardware_distribution_cache: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}
 _dashboard_stats_cache: dict[str | None, tuple[float, dict[str, Any]]] = {}
 
 
@@ -830,7 +874,9 @@ class PacketRepository:
                     "hop_count",
                     "relay_node",
                 }
-                order_column = order_by if order_by in valid_order_columns else "timestamp"
+                order_column = (
+                    order_by if order_by in valid_order_columns else "timestamp"
+                )
                 order_dir_sql = "DESC" if order_dir.lower() == "desc" else "ASC"
 
                 # Main query
@@ -1351,8 +1397,22 @@ class NodeRepository:
                         COALESCE(stats.last_packet_time, ni.last_updated) as last_packet_time,
                         datetime(COALESCE(stats.last_packet_time, ni.last_updated), 'unixepoch') as last_packet_str,
                         stats.avg_rssi,
-                        stats.avg_snr
+                        stats.avg_snr,
+                        nf.nodeinfo_count,
+                        nf.has_public_key,
+                        nf.has_unmessagable_field,
+                        nf.id_from_public_key,
+                        nf.mac_mismatch,
+                        nf.relay_self_count,
+                        nf.relay_none_count,
+                        nf.xeddsa_signed_count,
+                        nf.hop_start_zero_count,
+                        nf.hop_start_set_count,
+                        nf.hop_start_mask,
+                        nf.firmware_version,
+                        nf.firmware_version_at
                     FROM node_info ni
+                    LEFT JOIN node_fingerprint nf ON nf.node_id = ni.node_id
                     LEFT JOIN (
                         SELECT
                             from_node_id as node_id,
@@ -1411,8 +1471,22 @@ class NodeRepository:
                         ni.last_updated as last_packet_time,
                         datetime(ni.last_updated, 'unixepoch') as last_packet_str,
                         NULL as avg_rssi,
-                        NULL as avg_snr
+                        NULL as avg_snr,
+                        nf.nodeinfo_count,
+                        nf.has_public_key,
+                        nf.has_unmessagable_field,
+                        nf.id_from_public_key,
+                        nf.mac_mismatch,
+                        nf.relay_self_count,
+                        nf.relay_none_count,
+                        nf.xeddsa_signed_count,
+                        nf.hop_start_zero_count,
+                        nf.hop_start_set_count,
+                        nf.hop_start_mask,
+                        nf.firmware_version,
+                        nf.firmware_version_at
                     FROM node_info ni
+                    LEFT JOIN node_fingerprint nf ON nf.node_id = ni.node_id
                     {where_clause}
                     ORDER BY {order_column} {order_dir}
                     LIMIT ? OFFSET ?
@@ -1422,6 +1496,9 @@ class NodeRepository:
             query_params = params + [limit, offset]
             cursor.execute(query, query_params)
             nodes = [dict(row) for row in cursor.fetchall()]
+            for node in nodes:
+                NodeRepository._attach_firmware_estimate(node)
+                NodeRepository.annotate_renumbered(node)
 
             conn.close()
 
@@ -1435,6 +1512,408 @@ class NodeRepository:
         except Exception as e:
             logger.error(f"Error getting nodes: {e}")
             raise
+
+    @staticmethod
+    def _attach_firmware_estimate(node: dict[str, Any]) -> None:
+        """Replace raw node_fingerprint columns on *node* with a verdict."""
+        evidence = FirmwareEvidence.from_row(node)
+        verdict = estimate(
+            evidence, role=node.get("role"), hw_model=node.get("hw_model")
+        )
+        for column in EVIDENCE_COLUMNS:
+            node.pop(column, None)
+        node["firmware_label"] = verdict["label"]
+        node["firmware_source"] = verdict["source"]
+        node["firmware_reasons"] = verdict["reasons"]
+        node["firmware_evidence"] = verdict["evidence"]
+        node["firmware_reported_version"] = verdict["reported_version"]
+
+    @staticmethod
+    def get_node_fingerprint(node_id: int) -> dict[str, Any] | None:
+        """Raw accumulated fingerprint evidence for a node, if any."""
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM node_fingerprint WHERE node_id = ?", (node_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except sqlite3.OperationalError as e:
+            # Databases written before the table existed simply have no evidence.
+            logger.debug(f"node_fingerprint unavailable: {e}")
+            return None
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get_firmware_estimate(
+        node_id: int, role: str | None = None, hw_model: str | None = None
+    ) -> dict[str, Any]:
+        """Firmware verdict (exact reported version or fingerprint band)."""
+        row = NodeRepository.get_node_fingerprint(node_id)
+        return estimate(FirmwareEvidence.from_row(row), role=role, hw_model=hw_model)
+
+    @staticmethod
+    def get_firmware_distribution(days: int = 7) -> dict[str, Any]:
+        """How many recently-heard nodes fall into each firmware bucket.
+
+        "Recently heard" is any node that sent a packet in the last ``days``
+        days (the same covering index get_stats uses for nodes_seen_7d).
+        Verdicts are computed in Python from node_fingerprint, so this is
+        cached for a few minutes like the other dashboard aggregates.
+        """
+        days = max(1, min(int(days), 90))
+        now = time.time()
+        cached = _firmware_distribution_cache.get(days)
+        if (
+            cached is not None
+            and now - cached[0] <= FIRMWARE_DISTRIBUTION_CACHE_TTL_SECONDS
+        ):
+            return dict(cached[1])
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            fp_columns = ", ".join(f"nf.{c}" for c in EVIDENCE_COLUMNS)
+            cursor.execute(
+                f"""
+                SELECT ni.role, ni.hw_model, {fp_columns}
+                FROM (
+                    SELECT DISTINCT from_node_id AS node_id
+                    FROM packet_history
+                    WHERE timestamp > ? AND from_node_id IS NOT NULL
+                ) seen
+                LEFT JOIN node_info ni ON ni.node_id = seen.node_id
+                LEFT JOIN node_fingerprint nf ON nf.node_id = seen.node_id
+                """,
+                (now - days * 86400,),
+            )
+            rows = cursor.fetchall()
+        except sqlite3.OperationalError as e:
+            logger.debug(f"firmware distribution unavailable: {e}")
+            rows = []
+        finally:
+            conn.close()
+
+        verdicts = [
+            estimate(
+                FirmwareEvidence.from_row(row),
+                role=row["role"],
+                hw_model=row["hw_model"],
+                now=now,
+            )
+            for row in rows
+        ]
+        result = {
+            "days": days,
+            "total_nodes": len(verdicts),
+            "buckets": summarize_distribution(verdicts),
+        }
+        _firmware_distribution_cache[days] = (now, dict(result))
+        return result
+
+    @staticmethod
+    def get_hardware_distribution(days: int = 7, top: int = 12) -> dict[str, Any]:
+        """Hardware models of nodes heard in the last ``days`` days, most common first.
+
+        The dashboard shows this next to the firmware distribution. Models past
+        the ``top`` most common are folded into one "Other" bucket so the chart
+        stays readable; nodes that never sent a NodeInfo count as Unknown.
+        """
+        days = max(1, min(int(days), 90))
+        top = max(1, min(int(top), 500))
+        now = time.time()
+        cached = _hardware_distribution_cache.get((days, top))
+        if (
+            cached is not None
+            and now - cached[0] <= FIRMWARE_DISTRIBUTION_CACHE_TTL_SECONDS
+        ):
+            return dict(cached[1])
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT COALESCE(NULLIF(ni.hw_model, ''), 'Unknown') AS hw_model,
+                       COUNT(*) AS count
+                FROM (
+                    SELECT DISTINCT from_node_id AS node_id
+                    FROM packet_history
+                    WHERE timestamp > ? AND from_node_id IS NOT NULL
+                ) seen
+                LEFT JOIN node_info ni ON ni.node_id = seen.node_id
+                GROUP BY hw_model
+                ORDER BY count DESC, hw_model ASC
+                """,
+                (now - days * 86400,),
+            )
+            rows = [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+        known = [r for r in rows if r["hw_model"] != "Unknown"]
+        unknown = sum(r["count"] for r in rows if r["hw_model"] == "Unknown")
+        buckets: list[dict[str, Any]] = [
+            {"label": r["hw_model"], "count": r["count"], "kind": "hardware"}
+            for r in known[:top]
+        ]
+        rest = known[top:]
+        if rest:
+            buckets.append(
+                {
+                    "label": f"Other ({len(rest)} models)",
+                    "count": sum(r["count"] for r in rest),
+                    "kind": "other",
+                }
+            )
+        if unknown:
+            buckets.append({"label": "Unknown", "count": unknown, "kind": "unknown"})
+        result = {
+            "days": days,
+            "total_nodes": sum(r["count"] for r in rows),
+            "models": len(known),
+            "buckets": buckets,
+        }
+        _hardware_distribution_cache[(days, top)] = (now, dict(result))
+        return result
+
+    @staticmethod
+    def get_renumbered_map(force_refresh: bool = False) -> dict[int, dict[str, Any]]:
+        """Old node id → the id the same radio reports under since firmware 2.8.
+
+        Firmware 2.8 sets the node number to CRC32(public key). The link is
+        proven when an older id's stored public key hashes to an existing
+        node (``node_fingerprint.public_key_crc32``); as a fallback, ids that
+        announced the same hardware MAC map to the newest key-derived id
+        among them. Cached for a few minutes. Callers go through
+        :meth:`successor_of`, which keeps an id that is still active visible.
+        """
+        global _renumbered_cache
+        now = time.time()
+        if (
+            not force_refresh
+            and _renumbered_cache is not None
+            and now - _renumbered_cache[0] <= RENUMBERED_CACHE_TTL_SECONDS
+        ):
+            return _renumbered_cache[1]
+
+        result: dict[int, dict[str, Any]] = {}
+        try:
+            conn = get_db_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT nf.node_id AS old_id, ni.node_id, ni.long_name,
+                           ni.short_name, ni.first_seen
+                    FROM node_fingerprint nf
+                    JOIN node_info ni ON ni.node_id = nf.public_key_crc32
+                    WHERE nf.public_key_crc32 IS NOT NULL
+                      AND nf.public_key_crc32 != nf.node_id
+                    """
+                )
+                for row in cursor.fetchall():
+                    result[row["old_id"]] = _successor_entry(row, "public key")
+
+                cursor.execute(
+                    """
+                    SELECT ni.node_id, ni.long_name, ni.short_name, ni.first_seen,
+                           lower(ni.mac_address) AS mac,
+                           COALESCE(nf.id_from_public_key, 0) AS key_derived
+                    FROM node_info ni
+                    LEFT JOIN node_fingerprint nf ON nf.node_id = ni.node_id
+                    WHERE ni.mac_address IS NOT NULL AND ni.mac_address != ''
+                    """
+                )
+                groups: dict[str, list[Any]] = {}
+                for row in cursor.fetchall():
+                    mac = str(row["mac"] or "").strip()
+                    # Empty and all-zero MACs are placeholders, not identities.
+                    if not mac or not set(mac) - set("0:-"):
+                        continue
+                    groups.setdefault(mac, []).append(row)
+                for rows in groups.values():
+                    derived = [r for r in rows if r["key_derived"]]
+                    if not derived:
+                        continue
+                    newest = max(derived, key=lambda r: r["first_seen"] or 0)
+                    for r in rows:
+                        if r["node_id"] == newest["node_id"] or r["node_id"] in result:
+                            continue
+                        if (r["first_seen"] or 0) > (newest["first_seen"] or 0):
+                            continue
+                        result[r["node_id"]] = _successor_entry(newest, "MAC address")
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001 - missing table, mocked DB, ...
+            logger.debug(f"renumbered-node lookup unavailable: {e}")
+            return {}
+        _renumbered_cache = (now, result)
+        return result
+
+    @staticmethod
+    def successor_of(
+        node_id: int,
+        last_activity: float | None,
+        renumbered: dict[int, dict[str, Any]] | None = None,
+        grace: float = RENUMBERED_GRACE_SECONDS,
+    ) -> dict[str, Any] | None:
+        """The id *node_id* was renumbered to, unless it was active afterwards.
+
+        ``last_activity`` is the old id's newest packet (or position) time;
+        an id still heard after its successor appeared is a MAC collision or
+        a downgrade, not a renumbering, so it stays visible.
+        """
+        if renumbered is None:
+            renumbered = NodeRepository.get_renumbered_map()
+        entry = renumbered.get(node_id)
+        if entry is None:
+            return None
+        first_seen = entry.get("first_seen")
+        if last_activity and first_seen and last_activity > first_seen + grace:
+            return None
+        return entry
+
+    @staticmethod
+    def annotate_renumbered(node: dict[str, Any]) -> None:
+        """Add ``renumbered_to`` (successor entry or None) to a node-list row."""
+        node["renumbered_to"] = NodeRepository.successor_of(
+            node["node_id"], node.get("last_packet_time")
+        )
+
+    @staticmethod
+    def get_renumbering(node_id: int, last_seen: float | None) -> dict[str, Any]:
+        """Successor and predecessors of a node for the node page."""
+        renumbered = NodeRepository.get_renumbered_map()
+        successor = NodeRepository.successor_of(node_id, last_seen, renumbered)
+        old_ids = [
+            old for old, entry in renumbered.items() if entry["node_id"] == node_id
+        ]
+        predecessors: list[dict[str, Any]] = []
+        if old_ids:
+            try:
+                conn = get_db_connection()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT first_seen FROM node_info WHERE node_id = ?", (node_id,)
+                    )
+                    me = cursor.fetchone()
+                    my_first_seen = me["first_seen"] if me else None
+                    placeholders = ",".join("?" * len(old_ids))
+                    cursor.execute(
+                        f"""
+                        SELECT node_id, long_name, short_name, last_updated
+                        FROM node_info WHERE node_id IN ({placeholders})
+                        ORDER BY last_updated DESC
+                        """,
+                        old_ids,
+                    )
+                    for row in cursor.fetchall():
+                        old_id = row["node_id"]
+                        last_updated = row["last_updated"]
+                        if (
+                            my_first_seen
+                            and last_updated
+                            and last_updated > my_first_seen + RENUMBERED_GRACE_SECONDS
+                        ):
+                            continue  # still announcing itself: not our past id
+                        predecessors.append(
+                            {
+                                "node_id": old_id,
+                                "hex_id": f"!{old_id:08x}",
+                                "node_name": row["long_name"]
+                                or row["short_name"]
+                                or f"!{old_id:08x}",
+                                "last_updated": last_updated,
+                                "last_updated_str": datetime.fromtimestamp(
+                                    last_updated, UTC
+                                ).strftime("%Y-%m-%d")
+                                if last_updated
+                                else None,
+                                "via": renumbered[old_id]["via"],
+                            }
+                        )
+                finally:
+                    conn.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"predecessor lookup unavailable: {e}")
+        return {"successor": successor, "predecessors": predecessors}
+
+    @staticmethod
+    def get_same_mac_nodes(node_id: int) -> list[dict[str, Any]]:
+        """Other node numbers that announced the same hardware MAC address.
+
+        Firmware 2.8 derives the node number from the public key instead of
+        the MAC, so one radio shows up under a new id after upgrading (and
+        again whenever it re-keys). The MAC it reports in NodeInfo does not
+        change, which is what ties the identities together.
+        """
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT mac_address, first_seen FROM node_info WHERE node_id = ?",
+                (node_id,),
+            )
+            me = cursor.fetchone()
+            if not me or not me["mac_address"]:
+                return []
+            mac = str(me["mac_address"]).strip().lower()
+            # Empty and all-zero MACs are placeholders, not identities.
+            if not mac or not set(mac) - set("0:-"):
+                return []
+            cursor.execute(
+                """
+                SELECT
+                    node_id,
+                    printf('!%08x', node_id) AS hex_id,
+                    long_name,
+                    short_name,
+                    hw_model,
+                    role,
+                    first_seen,
+                    last_updated
+                FROM node_info
+                WHERE lower(mac_address) = ? AND node_id != ?
+                ORDER BY last_updated DESC
+                LIMIT 20
+                """,
+                (mac, node_id),
+            )
+            my_first_seen = me["first_seen"] or 0
+            siblings = []
+            for row in cursor.fetchall():
+                sibling = dict(row)
+                sibling["node_name"] = (
+                    sibling["long_name"] or sibling["short_name"] or sibling["hex_id"]
+                )
+                sibling["relation"] = (
+                    "newer" if (sibling["first_seen"] or 0) > my_first_seen else "older"
+                )
+                sibling["first_seen_str"] = (
+                    datetime.fromtimestamp(sibling["first_seen"], UTC).strftime(
+                        "%Y-%m-%d"
+                    )
+                    if sibling["first_seen"]
+                    else None
+                )
+                sibling["last_updated_str"] = (
+                    datetime.fromtimestamp(sibling["last_updated"], UTC).strftime(
+                        "%Y-%m-%d"
+                    )
+                    if sibling["last_updated"]
+                    else None
+                )
+                siblings.append(sibling)
+            return siblings
+        except sqlite3.OperationalError as e:
+            logger.debug(f"same-MAC lookup unavailable: {e}")
+            return []
+        finally:
+            conn.close()
 
     @staticmethod
     def get_node_details(node_id: int) -> dict[str, Any] | None:
@@ -1495,7 +1974,8 @@ class NodeRepository:
                     short_name,
                     hw_model,
                     role,
-                    primary_channel
+                    primary_channel,
+                    mac_address
                 FROM node_info
                 WHERE node_id = ?
                 """,
@@ -1520,7 +2000,12 @@ class NodeRepository:
                     "short_name": node_info_row["short_name"],
                     "hw_model": node_info_row["hw_model"],
                     "role": node_info_row["role"],
-                    "primary_channel": node_info_row.get("primary_channel"),
+                    "primary_channel": node_info_row["primary_channel"]
+                    if "primary_channel" in node_info_row.keys()
+                    else None,
+                    "mac_address": node_info_row["mac_address"]
+                    if "mac_address" in node_info_row.keys()
+                    else None,
                     "total_packets": 0,
                     "last_seen": None,
                     "first_seen": None,
@@ -1561,6 +2046,9 @@ class NodeRepository:
                 "role": node_info_row["role"] if node_info_row else None,
                 "primary_channel": node_info_row["primary_channel"]
                 if node_info_row and "primary_channel" in node_info_row.keys()
+                else None,
+                "mac_address": node_info_row["mac_address"]
+                if node_info_row and "mac_address" in node_info_row.keys()
                 else None,
                 "total_packets": node_stats_row["total_packets"],
                 "last_seen": last_seen.strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -4077,14 +4565,21 @@ class LocationRepository:
                     position = mesh_pb2.Position()
                     position.ParseFromString(row["raw_payload"])
                     decode_count += 1
+                    location_timestamp = row["timestamp"]
+                    if not _position_has_fix(position):
+                        # The newest packet has no coordinates (firmware 2.8
+                        # sends such positions): use the newest one that does.
+                        fallback = LocationRepository._newest_position_with_fix(
+                            cursor, row["node_id"], extra_conditions, extra_params
+                        )
+                        if fallback is None:
+                            skip_count += 1
+                            continue
+                        location_timestamp, position = fallback
 
                     # Extract coordinates (stored as integers, need to divide by 1e7)
-                    latitude = (
-                        position.latitude_i / 1e7 if position.latitude_i else None
-                    )
-                    longitude = (
-                        position.longitude_i / 1e7 if position.longitude_i else None
-                    )
+                    latitude = position.latitude_i / 1e7
+                    longitude = position.longitude_i / 1e7
                     altitude = position.altitude if position.altitude else None
 
                     # Extract precision and satellite information
@@ -4146,15 +4641,6 @@ class LocationRepository:
 
                             precision_meters = math.exp(log_result)
 
-                    if (
-                        latitude is None
-                        or longitude is None
-                        or latitude == 0
-                        or longitude == 0
-                    ):
-                        skip_count += 1
-                        continue
-
                     display_name = (
                         row["long_name"]
                         or row["short_name"]
@@ -4176,7 +4662,7 @@ class LocationRepository:
                             "latitude": latitude,
                             "longitude": longitude,
                             "altitude": altitude,
-                            "timestamp": row["timestamp"],
+                            "timestamp": location_timestamp,
                             "precision_bits": precision_bits,
                             "precision_meters": precision_meters,
                             "sats_in_view": sats_in_view,
@@ -4193,6 +4679,23 @@ class LocationRepository:
             timing_breakdown["new_decodes"] = decode_count
 
             conn.close()
+
+            # Radios renumbered by firmware 2.8 keep reporting under the new
+            # id; the old id's last fix is stale, so drop it from node-wide
+            # listings (explicit node_ids requests, e.g. drawing a historic
+            # traceroute, still get it).
+            if not node_ids_filter and not filters.get("include_renumbered"):
+                renumbered = NodeRepository.get_renumbered_map()
+                if renumbered:
+                    kept = []
+                    for loc in locations:
+                        if NodeRepository.successor_of(
+                            loc["node_id"], loc["timestamp"], renumbered
+                        ):
+                            skip_count += 1
+                            continue
+                        kept.append(loc)
+                    locations = kept
 
             total_time = time.time() - start_time
             timing_breakdown["total"] = total_time
@@ -4219,6 +4722,40 @@ class LocationRepository:
         except Exception as e:
             logger.error(f"Error getting node locations: {e}")
             raise
+
+    @staticmethod
+    def _newest_position_with_fix(
+        cursor: Any,
+        node_id: int,
+        extra_conditions: list[str] | None = None,
+        extra_params: list[Any] | None = None,
+        limit: int = POSITION_FALLBACK_SCAN,
+    ) -> tuple[float, Any] | None:
+        """(timestamp, Position) of the node's newest packet with coordinates."""
+        conditions = [
+            "from_node_id = ?",
+            "portnum = 3",
+            "raw_payload IS NOT NULL",
+            *(extra_conditions or []),
+        ]
+        cursor.execute(
+            f"""
+            SELECT timestamp, raw_payload FROM packet_history
+            WHERE {" AND ".join(conditions)}
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            [node_id, *(extra_params or []), limit],
+        )
+        for row in cursor.fetchall():
+            try:
+                position = mesh_pb2.Position()
+                position.ParseFromString(row["raw_payload"])
+            except Exception:  # noqa: BLE001 - skip undecodable rows
+                continue
+            if _position_has_fix(position):
+                return row["timestamp"], position
+        return None
 
     @staticmethod
     def get_node_location_history(
@@ -4321,52 +4858,25 @@ class LocationRepository:
             else:
                 node_id = int(node_id)
 
-            # Fetch the most recent POSITION_APP packet for this node
-            cursor.execute(
-                """
-                SELECT timestamp, raw_payload
-                FROM packet_history
-                WHERE from_node_id = ?
-                  AND portnum = 3            -- POSITION_APP
-                  AND raw_payload IS NOT NULL
-                ORDER BY timestamp DESC
-                LIMIT 1
-                """,
-                (node_id,),
-            )
-            row = cursor.fetchone()
-
-            if not row:
-                conn.close()
-                return None
-
-            # Decode protobuf – this is the same logic used elsewhere but for a single row
+            # Newest POSITION_APP packet that actually carries coordinates
+            # (firmware 2.8 nodes also send positions without a fix).
             try:
-                position = mesh_pb2.Position()
-                position.ParseFromString(row["raw_payload"])
-
-                latitude = position.latitude_i / 1e7 if position.latitude_i else None
-                longitude = position.longitude_i / 1e7 if position.longitude_i else None
-                altitude = position.altitude if position.altitude else None
-
-                if not latitude or not longitude or latitude == 0 or longitude == 0:
-                    conn.close()
-                    return None
-
-                result = {
-                    "latitude": latitude,
-                    "longitude": longitude,
-                    "altitude": altitude,
-                    "timestamp": row["timestamp"],
-                }
-                conn.close()
-                return result
+                found = LocationRepository._newest_position_with_fix(cursor, node_id)
             except Exception as e:
                 logger.warning(
                     f"Failed to decode position payload for node {node_id}: {e}"
                 )
-                conn.close()
+                found = None
+            conn.close()
+            if found is None:
                 return None
+            timestamp, position = found
+            return {
+                "latitude": position.latitude_i / 1e7,
+                "longitude": position.longitude_i / 1e7,
+                "altitude": position.altitude if position.altitude else None,
+                "timestamp": timestamp,
+            }
         except Exception as e:
             logger.error(f"Error getting latest location for node {node_id}: {e}")
             raise
@@ -4375,114 +4885,65 @@ class LocationRepository:
     def get_node_location_at_timestamp(
         node_id: int, target_timestamp: float
     ) -> dict[str, Any] | None:
-        """Get the most appropriate location for a node at a specific timestamp."""
+        """Get the most appropriate location for a node at a specific timestamp.
+
+        Prefers the newest fix at or before the target, else the earliest fix
+        after it; packets without coordinates are skipped.
+        """
+
+        def _age_text(seconds: float, suffix: str) -> str:
+            hours = seconds / 3600
+            if hours <= 24:
+                return f"from {hours:.1f}h {suffix}"
+            if hours <= 168:  # 1 week
+                return f"from {hours / 24:.1f}d {suffix}"
+            return f"from {hours / 168:.1f}w {suffix}"
+
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-
-            # First try to get the most recent location before or at the target timestamp
-            query_before = """
-                SELECT timestamp, raw_payload
-                FROM packet_history
-                WHERE from_node_id = ?
-                AND portnum = 3  -- POSITION_APP
-                AND timestamp <= ?
-                AND raw_payload IS NOT NULL
-                ORDER BY timestamp DESC
-                LIMIT 1
-            """
-
-            cursor.execute(query_before, (node_id, target_timestamp))
-            location_before = cursor.fetchone()
-
-            if location_before:
-                try:
-                    # Decode position from raw protobuf payload
-                    position = mesh_pb2.Position()
-                    position.ParseFromString(location_before["raw_payload"])
-
-                    # Extract coordinates (stored as integers, need to divide by 1e7)
-                    latitude = (
-                        position.latitude_i / 1e7 if position.latitude_i else None
+            try:
+                for condition, order, suffix in (
+                    ("timestamp <= ?", "DESC", "ago"),
+                    ("timestamp > ?", "ASC", "later"),
+                ):
+                    cursor.execute(
+                        f"""
+                        SELECT timestamp, raw_payload
+                        FROM packet_history
+                        WHERE from_node_id = ?
+                        AND portnum = 3  -- POSITION_APP
+                        AND {condition}
+                        AND raw_payload IS NOT NULL
+                        ORDER BY timestamp {order}
+                        LIMIT ?
+                        """,
+                        (node_id, target_timestamp, POSITION_FALLBACK_SCAN),
                     )
-                    longitude = (
-                        position.longitude_i / 1e7 if position.longitude_i else None
-                    )
-                    altitude = position.altitude if position.altitude else None
-
-                    if latitude and longitude:
-                        age_seconds = target_timestamp - location_before["timestamp"]
-                        age_hours = age_seconds / 3600
-
-                        if age_hours <= 24:
-                            age_warning = f"from {age_hours:.1f}h ago"
-                        elif age_hours <= 168:  # 1 week
-                            age_warning = f"from {age_hours / 24:.1f}d ago"
-                        else:
-                            age_warning = f"from {age_hours / 168:.1f}w ago"
-
+                    for row in cursor.fetchall():
+                        try:
+                            position = mesh_pb2.Position()
+                            position.ParseFromString(row["raw_payload"])
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to decode position from raw payload: {e}"
+                            )
+                            continue
+                        if not _position_has_fix(position):
+                            continue
                         return {
-                            "latitude": latitude,
-                            "longitude": longitude,
-                            "altitude": altitude,
-                            "timestamp": location_before["timestamp"],
-                            "age_warning": age_warning,
+                            "latitude": position.latitude_i / 1e7,
+                            "longitude": position.longitude_i / 1e7,
+                            "altitude": position.altitude
+                            if position.altitude
+                            else None,
+                            "timestamp": row["timestamp"],
+                            "age_warning": _age_text(
+                                abs(target_timestamp - row["timestamp"]), suffix
+                            ),
                         }
-                except Exception as e:
-                    logger.warning(f"Failed to decode position from raw payload: {e}")
-
-            # If no location before target, try to get the earliest location after
-            query_after = """
-                SELECT timestamp, raw_payload
-                FROM packet_history
-                WHERE from_node_id = ?
-                AND portnum = 3  -- POSITION_APP
-                AND timestamp > ?
-                AND raw_payload IS NOT NULL
-                ORDER BY timestamp ASC
-                LIMIT 1
-            """
-
-            cursor.execute(query_after, (node_id, target_timestamp))
-            location_after = cursor.fetchone()
-
-            if location_after:
-                try:
-                    # Decode position from raw protobuf payload
-                    position = mesh_pb2.Position()
-                    position.ParseFromString(location_after["raw_payload"])
-
-                    # Extract coordinates (stored as integers, need to divide by 1e7)
-                    latitude = (
-                        position.latitude_i / 1e7 if position.latitude_i else None
-                    )
-                    longitude = (
-                        position.longitude_i / 1e7 if position.longitude_i else None
-                    )
-                    altitude = position.altitude if position.altitude else None
-
-                    if latitude and longitude:
-                        age_seconds = location_after["timestamp"] - target_timestamp
-                        age_hours = age_seconds / 3600
-
-                        if age_hours <= 24:
-                            age_warning = f"from {age_hours:.1f}h later"
-                        elif age_hours <= 168:  # 1 week
-                            age_warning = f"from {age_hours / 24:.1f}d later"
-                        else:
-                            age_warning = f"from {age_hours / 168:.1f}w later"
-
-                        return {
-                            "latitude": latitude,
-                            "longitude": longitude,
-                            "altitude": altitude,
-                            "timestamp": location_after["timestamp"],
-                            "age_warning": age_warning,
-                        }
-                except Exception as e:
-                    logger.warning(f"Failed to decode position from raw payload: {e}")
-
-            conn.close()
+            finally:
+                conn.close()
             return None
 
         except Exception as e:
