@@ -480,9 +480,9 @@
                                             <td>
                                                 {% if packet.rssi %}
                                                     {% if packet.is_grouped %}
-                                                        <span class="text-info">{{ packet.rssi }}</span>
+                                                        <span class="text-info">{{ packet.rssi|format_rssi }}</span>
                                                     {% else %}
-                                                        {{ packet.rssi }} dBm
+                                                        {{ packet.rssi|format_rssi }} dBm
                                                     {% endif %}
                                                 {% else %}
                                                     -
@@ -559,7 +559,7 @@
                                             </td>
                                             <td>
                                                 {% if packet.rssi is not none %}
-                                                    {{ packet.rssi }} dBm
+                                                    {{ packet.rssi|format_rssi }} dBm
                                                 {% else %}
                                                     -
                                                 {% endif %}
@@ -624,7 +624,7 @@
                                                 {% if gw_entry %}
                                                     {% if gw_entry.hop_count == 0 %}
                                                         <td class="text-center">
-                                                            <span class="text-success fw-bold" data-bs-toggle="tooltip" title="{% if gw_entry.rssi is not none %}RSSI: {{ gw_entry.rssi }} dBm {% endif %}{% if gw_entry.snr is not none %}SNR: {{ '%.2f'|format(gw_entry.snr) }} dB{% endif %}">0</span>
+                                                            <span class="text-success fw-bold" data-bs-toggle="tooltip" title="{% if gw_entry.rssi is not none %}RSSI: {{ gw_entry.rssi|format_rssi }} dBm {% endif %}{% if gw_entry.snr is not none %}SNR: {{ gw_entry.snr|format_snr }} dB{% endif %}">0</span>
                                                         </td>
                                                     {% else %}
                                                         <td class="text-center">{{ gw_entry.hop_count }}</td>
@@ -692,7 +692,7 @@
                             <div class="row mt-1">
                                 <div class="col-6">
                                     {% if gateway.avg_rssi %}
-                                        <small><strong>RSSI:</strong> {{ gateway.avg_rssi }} dBm</small>
+                                        <small><strong>RSSI:</strong> {{ gateway.avg_rssi|format_rssi }} dBm</small>
                                         {% if gateway.is_direct %}
                                             <i class="bi bi-info-circle text-muted"
                                                data-bs-toggle="tooltip"
