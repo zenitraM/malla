@@ -51,8 +51,22 @@
         return { key: key };
     }
 
+    function bound(value) {
+        return typeof value === "number" && Number.isFinite(value) ? value : null;
+    }
+
     function compute(key, custom) {
-        if (key === "custom" && custom) return { key: "custom", sinceEpoch: custom.sinceEpoch, untilEpoch: custom.untilEpoch };
+        if (key === "custom") {
+            var since = custom ? bound(custom.sinceEpoch) : null;
+            var until = custom ? bound(custom.untilEpoch) : null;
+            if (since == null && until == null) {
+                // A bare custom key has no usable window; fall back instead of
+                // producing a NaN since that consumers silently drop.
+                key = "7d";
+            } else {
+                return { key: "custom", sinceEpoch: since, untilEpoch: until };
+            }
+        }
         if (key === "all") return { key: "all" };
         var now = Date.now() / 1000;
         return { key: key, sinceEpoch: now - SECONDS[key], untilEpoch: null };
@@ -61,7 +75,13 @@
     function resolve() {
         var fromURL = fromUrl();
         var stored = safeGet(STORAGE_KEY);
-        var key = (fromURL && fromURL.key) || (stored && valid(stored) ? stored : null) || "7d";
+        var storedKey = stored && valid(stored) ? stored : null;
+        if (storedKey === "custom" && (!fromURL || fromURL.key !== "custom")) {
+            // Storage keeps only the key, not the bounds. A bare custom key
+            // would otherwise resolve to NaN; see compute().
+            storedKey = null;
+        }
+        var key = (fromURL && fromURL.key) || storedKey || "7d";
         var custom = fromURL && fromURL.key === "custom" ? fromURL
             : (key === "custom" ? current && current.key === "custom" ? current : null : null);
         return compute(key, custom);
@@ -91,11 +111,15 @@
 
     function set(key, custom, opts) {
         if (!valid(key)) return;
+        var since = key === "custom" ? bound(custom && custom.sinceEpoch) : null;
+        var until = key === "custom" ? bound(custom && custom.untilEpoch) : null;
+        if (key === "custom" && since == null && until == null) key = "7d";
         var url = new URL(global.location);
-        if (key === "custom" && custom) {
+        if (key === "custom") {
             url.searchParams.set("range", "custom");
-            url.searchParams.set("range_since", new Date((custom.sinceEpoch || 0) * 1000).toISOString());
-            if (custom.untilEpoch) url.searchParams.set("range_until", new Date(custom.untilEpoch * 1000).toISOString());
+            if (since != null) url.searchParams.set("range_since", new Date(since * 1000).toISOString());
+            else url.searchParams.delete("range_since");
+            if (until != null) url.searchParams.set("range_until", new Date(until * 1000).toISOString());
             else url.searchParams.delete("range_until");
         } else {
             url.searchParams.set("range", key);
@@ -106,7 +130,7 @@
         safeSet(STORAGE_KEY, key);
         override = null;
         hideOverrideChip();
-        current = compute(key, key === "custom" ? custom : null);
+        current = compute(key, key === "custom" ? { sinceEpoch: since, untilEpoch: until } : null);
         syncButton();
         publish({ changed: true, via: (opts && opts.via) || "ui" });
     }
@@ -243,18 +267,29 @@
 
     function init() {
         current = resolve();
-        // Reflect the resolved range into the URL when absent, so reloads and
-        // shared links carry the same window (custom keeps its two params).
-        var params = new URLSearchParams(global.location.search);
-        if (!params.has("range") && current.key !== "7d") {
-            var url = new URL(global.location);
-            url.searchParams.set("range", current.key);
-            if (current.key === "custom") {
-                if (current.sinceEpoch) url.searchParams.set("range_since", new Date(current.sinceEpoch * 1000).toISOString());
-                if (current.untilEpoch) url.searchParams.set("range_until", new Date(current.untilEpoch * 1000).toISOString());
+        // Reflect the resolved range into the URL so reloads and shared links
+        // carry the same window (custom keeps its two params). An unusable
+        // ?range (unknown key, or custom without bounds) is removed so the URL
+        // cannot advertise a window the page is not using.
+        var url = new URL(global.location);
+        var changed = false;
+        if (!fromUrl()) {
+            ["range", "range_since", "range_until"].forEach(function (param) {
+                if (url.searchParams.has(param)) {
+                    url.searchParams.delete(param);
+                    changed = true;
+                }
+            });
+            if (current.key !== "7d") {
+                url.searchParams.set("range", current.key);
+                if (current.key === "custom") {
+                    if (current.sinceEpoch) url.searchParams.set("range_since", new Date(current.sinceEpoch * 1000).toISOString());
+                    if (current.untilEpoch) url.searchParams.set("range_until", new Date(current.untilEpoch * 1000).toISOString());
+                }
+                changed = true;
             }
-            global.history.replaceState({}, "", url);
         }
+        if (changed) global.history.replaceState({}, "", url);
         ensureButton();
         ensureOverrideChip();
         syncButton();

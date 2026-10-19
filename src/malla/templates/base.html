@@ -148,7 +148,7 @@
                 </ul>
 
                 <!-- Ingest health, timezone and dark mode -->
-                <div class="navbar-nav flex-row align-items-center gap-2 ms-lg-2 mt-2 mt-lg-0" aria-label="Status and display preferences">
+                <div role="group" class="navbar-nav flex-row align-items-center gap-2 ms-lg-2 mt-2 mt-lg-0" aria-label="Status and display preferences">
                     <span id="captureHealth" class="capture-health d-none" role="status" aria-live="polite"
                           data-bs-toggle="tooltip" data-bs-placement="bottom"
                           data-bs-title="Ingest health: age of the newest stored packet">
@@ -373,6 +373,13 @@
             const timezoneToggle = document.getElementById('timezone-toggle');
             if (timezoneToggle) {
                 new bootstrap.Tooltip(timezoneToggle);
+            }
+
+            // Initialize the capture-health chip on every page; the per-table
+            // tooltip scans do not run on the dashboard, map or chat pages.
+            const healthChip = document.getElementById('captureHealth');
+            if (healthChip) {
+                new bootstrap.Tooltip(healthChip);
             }
 
             // Footer: live node count (best effort, silent on failure)

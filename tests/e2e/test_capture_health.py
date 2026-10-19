@@ -61,3 +61,9 @@ class TestCaptureHealth:
         assert "last_packet_time_utc" in body and "ingest_lag_seconds" in body
         assert body["last_packet_time_utc"].endswith("Z")
         assert body["ingest_lag_seconds"] >= 0
+
+    def test_chip_has_tooltip_on_dashboard(self, page: Page, test_server_url: str):
+        _seeded_page(page, test_server_url, "/")
+        assert page.evaluate(
+            "!!bootstrap.Tooltip.getInstance(document.getElementById('captureHealth'))"
+        )

@@ -1480,9 +1480,11 @@ document.addEventListener('DOMContentLoaded', function () {
             if (mapped !== timelineRange) {
                 timelineRange = mapped;
                 try { localStorage.setItem('mallaTimelineRange', mapped); } catch (e) { /* private mode */ }
-                setRangeInUrl(mapped);
                 syncRangeButtons(mapped);
             }
+            // The address bar keeps the global key written by range-context
+            // (including 15m/1h/6h/custom); rewriting it to `mapped` would make
+            // reloads and shared links disagree with the navbar.
             refreshSummary();
         });
     }

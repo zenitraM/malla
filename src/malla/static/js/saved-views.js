@@ -29,7 +29,10 @@
         return node;
     }
 
+    let volatileViews = null;
+
     function loadViews() {
+        if (volatileViews) return volatileViews;
         try {
             const raw = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
             return Array.isArray(raw) ? raw : [];
@@ -42,8 +45,10 @@
         let persisted = true;
         try {
             localStorage.setItem(STORE_KEY, JSON.stringify(views));
+            volatileViews = null;
         } catch (error) {
-            /* private mode: views stay session-only */
+            /* private mode: keep the view list for this page session */
+            volatileViews = views;
             persisted = false;
         }
         instances.forEach((render) => render());
@@ -58,21 +63,24 @@
 
     function summaryChips(filters) {
         const wrap = h('span', 'sv-chips');
-        const keys = Object.keys(filters || {})
-            .filter((k) => k !== 'group_packets')
-            .slice(0, MAX_CHIPS);
-        keys.forEach((key) => {
+        const entries = Object.keys(filters || {}).filter((key) => (
+            key !== 'group_packets'
+            && filters[key] !== false
+            && filters[key] !== ''
+            && filters[key] != null
+        ));
+        entries.slice(0, MAX_CHIPS).forEach((key) => {
             wrap.appendChild(h('span', 'badge bg-light text-dark border sv-chip',
                 `${key}: ${String(filters[key]).slice(0, 18)}`));
         });
-        const total = Object.keys(filters || {}).length;
-        if (total > MAX_CHIPS) {
-            wrap.appendChild(h('span', 'badge bg-secondary sv-chip', `+${total - MAX_CHIPS}`));
+        if (entries.length > MAX_CHIPS) {
+            wrap.appendChild(h('span', 'badge bg-secondary sv-chip', `+${entries.length - MAX_CHIPS}`));
         }
-        if (filters && filters.group_packets) {
+        const grouped = Boolean(filters && filters.group_packets);
+        if (grouped) {
             wrap.appendChild(h('span', 'badge bg-info sv-chip', 'grouped'));
         }
-        if (total === 0 && !(filters && filters.group_packets)) {
+        if (entries.length === 0 && !grouped) {
             wrap.appendChild(h('span', 'badge bg-secondary sv-chip', 'no filters'));
         }
         return wrap;
@@ -136,13 +144,19 @@
                     .catch(() => {});
             }
         }
-        // Visible pickers are deliberately unnamed inputs: sync their shown
-        // text with the (possibly cleared) hidden values.
-        document.querySelectorAll('.node-picker-clear').forEach((btn) => {
-            if (btn instanceof HTMLElement) btn.click();
-        });
-        document.querySelectorAll('.node-picker-input').forEach((input) => {
-            if (input instanceof HTMLInputElement) input.value = '';
+        // Visible pickers are deliberately unnamed inputs: for fields the view
+        // does not set, clear the label and hidden value. Fields the view does
+        // set are left alone (and refreshed above) so a slow node lookup can
+        // never race the applied form state.
+        document.querySelectorAll('.node-picker-container, .gateway-picker-container').forEach((container) => {
+            const hidden = container.querySelector('input[type="hidden"][name]');
+            const field = hidden && hidden.name;
+            if (!field || field in filters) return;
+            if (hidden) hidden.value = '';
+            const visible = container.querySelector('.node-picker-input, .gateway-picker-input');
+            if (visible) visible.value = '';
+            const clear = container.querySelector('.node-picker-clear, .gateway-picker-clear');
+            if (clear) clear.style.display = 'none';
         });
         toast(`Applied view “${view.name}”`, 'success');
     }
@@ -261,9 +275,22 @@
                 event.preventDefault();
                 confirmSave();
             } else if (event.key === 'Escape') {
+                event.preventDefault();
+                // Clear before hiding: hiding the focused input fires blur,
+                // whose handler would otherwise save the abandoned name.
+                nameInput.value = '';
                 hideInput();
             }
         });
+        // Bootstrap closes the dropdown from a document capture-phase Escape
+        // handler, which blurs the input before its own keydown listener runs.
+        // Clear the pending name at window capture time so the blur handler
+        // cannot save a cancelled view.
+        window.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && document.activeElement === nameInput) {
+                nameInput.value = '';
+            }
+        }, true);
         nameInput.addEventListener('blur', () => {
             if (nameInput.value.trim()) confirmSave();
             else hideInput();
