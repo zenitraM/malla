@@ -171,3 +171,38 @@ class TestNodeRoutes:
         # Check for traceroute link
         assert "View Traceroutes" in response_text
         assert f"/traceroute?from_node={node_id}" in response_text
+
+    @pytest.mark.integration
+    def test_node_detail_renders_without_template_errors(self, client):
+        """The page must render through its filters for decimal and hex IDs."""
+        for node_id in (1128074276, "!433d0c24"):
+            response = client.get(f"/node/{node_id}")
+            assert response.status_code == 200
+
+            response_text = response.get_data(as_text=True)
+            assert "No filter named" not in response_text
+            assert "Node detail error:" not in response_text
+            assert "Test Gateway Alpha" in response_text
+
+    @pytest.mark.integration
+    def test_node_detail_rssi_snr_precision(self, client):
+        """Signal values are rendered through the shared precision filters."""
+        import re
+
+        response = client.get("/node/1128074276")
+        assert response.status_code == 200
+        response_text = response.get_data(as_text=True)
+
+        rssi_values = re.findall(r"(?<![\d.])-?\d+\.\d+ dBm", response_text)
+        assert rssi_values, "expected formatted RSSI values on the page"
+        for value in rssi_values:
+            decimals = value.removesuffix(" dBm").split(".")[1]
+            assert len(decimals) == 1, value
+        # No integer RSSI may bypass the shared filter.
+        assert not re.findall(r"(?<![\d.])-?\d+ dBm", response_text)
+
+        snr_values = re.findall(r"(?<![\d.])-?\d+\.\d+ dB(?!\w)", response_text)
+        assert snr_values, "expected formatted SNR values on the page"
+        for value in snr_values:
+            decimals = value.removesuffix(" dB").split(".")[1]
+            assert len(decimals) <= 2, value
