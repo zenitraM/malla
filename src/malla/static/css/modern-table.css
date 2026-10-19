@@ -184,6 +184,10 @@
   border-top: 1px solid var(--malla-border);
 }
 
+.modern-pagination .table-toolbar { flex: 0 1 auto; }
+.modern-pagination .table-toolbar .page-size-selector { white-space: nowrap; }
+.modern-pagination .table-toolbar .page-size-selector select { min-width: 4.5rem; }
+
 .pagination-info {
   color: var(--malla-text-muted);
   font-size: 0.85rem;
@@ -418,6 +422,8 @@
 .group-reception-tag {
   font-size: 0.65rem;
 }
+
+
 
 /* Per-reception deep link inside expanded grouped rows */
 a.group-reception-open {

@@ -2387,6 +2387,52 @@ def meta_info() -> Response:
     )
     ingest_lag = max(0.0, time.time() - last_packet_ts) if last_packet_ts else None
 
+    # Rollup freshness: every per-node aggregate the API serves comes from
+    # the capture-maintained rollups, so a missing/stale rollup must be
+    # distinguishable from a quiet mesh. Newest hourly bucket vs now; stale
+    # once the last completed hour is more than two hours unrefreshed.
+    rollup_freshness: dict[str, Any] = {
+        "newest_hour_epoch": None,
+        "age_seconds": None,
+        "stale": None,
+    }
+    try:
+        rollup_conn = get_db_connection()
+        try:
+            rollup_row = rollup_conn.execute(
+                "SELECT MAX(hour_epoch) FROM node_hour_rollup"
+            ).fetchone()
+        finally:
+            rollup_conn.close()
+    except sqlite3.OperationalError:
+        rollup_row = None
+    if rollup_row and rollup_row[0] is not None:
+        # hour_epoch is a hour INDEX (epoch // 3600), not seconds: the fold
+        # writes ``ts // 3600`` buckets and only covers completed hours.
+        newest_hour = int(rollup_row[0])
+        newest_ts = newest_hour * 3600
+        age = max(0.0, time.time() - newest_ts)
+        # Staleness is rollup-vs-data, not rollup-vs-wall-clock: a quiet mesh
+        # keeps its rollups current in data terms, and comparing against now
+        # would flag every idle-but-healthy capture. The fold covers completed
+        # hours only, so one hour of lag behind the newest packet is expected.
+        newest_packet_hour = int(last_packet_ts // 3600) if last_packet_ts else None
+        now_hour = int(time.time() // 3600)
+        # Only hours that have already completed can be expected in the fold;
+        # future-dated rows (clock skew) must not make the rollup look behind.
+        expected_hour = (
+            min(newest_packet_hour, now_hour - 1)
+            if newest_packet_hour is not None
+            else None
+        )
+        rollup_freshness = {
+            "newest_hour_epoch": newest_ts,
+            "age_seconds": round(age, 1),
+            "stale": bool(
+                expected_hour is not None and newest_hour < expected_hour - 1
+            ),
+        }
+
     database_file = str(cfg.database_file)
     try:
         db_size = os.path.getsize(database_file)
@@ -2411,6 +2457,7 @@ def meta_info() -> Response:
         "data_retention_hours": int(cfg.data_retention_hours or 0),
         "last_packet_time_utc": _iso(last_packet_ts) if last_packet_ts else None,
         "ingest_lag_seconds": round(ingest_lag, 1) if ingest_lag is not None else None,
+        "rollup_freshness": rollup_freshness,
     }
     return _ok(data)
 
@@ -3382,8 +3429,9 @@ def _build_openapi() -> dict[str, Any]:
                     "tags": ["meta"],
                     "summary": "Instance metadata",
                     "description": "App name/version, node count, database "
-                    "size, server time and ingest health (age of the newest "
-                    "packet) for footers/healthchecks.",
+                    "size, server time, ingest health (age of the newest "
+                    "packet) and rollup freshness (age of the newest hourly "
+                    "aggregate bucket) for footers/healthchecks.",
                     "parameters": [],
                     "responses": {
                         "200": _json_response("Instance metadata.", {"type": "object"}),

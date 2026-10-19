@@ -1136,6 +1136,312 @@ class TestApiV1LocationsHistoricalWindow:
         assert all(row["node_id"] == 1128074276 for row in data)
 
 
+class TestApiV1FilterCoverage:
+    """Every documented ``/api/v1/packets`` filter, the ``/api/v1/traceroutes``
+    endpoint/gateway params and the ``/api/v1/gateways/{id}`` success path.
+
+    The v1 review found none of these covered, which is how a truthiness bug
+    (``min_rssi=0`` silently meaning "unbounded") could hide; the assertions
+    below are pinned to the shared fixture's known values.
+    """
+
+    @pytest.mark.integration
+    def test_from_and_to_node_filters(self, client):
+        base = client.get("/api/v1/packets?page_size=200").get_json()["data"]
+        from_id = base[0]["from_node_id"]
+        body = client.get(
+            f"/api/v1/packets?from_node={from_id}&page_size=200"
+        ).get_json()
+        assert body["data"]
+        assert all(p["from_node_id"] == from_id for p in body["data"])
+        assert body["meta"]["query"]["from_node"] == f"!{from_id:08x}"
+
+        to_id = next(
+            p["to_node_id"] for p in base if p["to_node_id"] not in (None, 4294967295)
+        )
+        body = client.get(f"/api/v1/packets?to_node={to_id}&page_size=200").get_json()
+        assert body["data"]
+        assert all(p["to_node_id"] == to_id for p in body["data"])
+
+    @pytest.mark.integration
+    def test_gateway_and_primary_channel_filters(self, client):
+        body = client.get(
+            "/api/v1/packets?gateway_id=%21433d0c24&page_size=200"
+        ).get_json()
+        assert body["data"], "fixture gateway !433d0c24 heard packets"
+        assert all(p["gateway_id"] == "!433d0c24" for p in body["data"])
+        assert body["meta"]["query"]["gateway_id"] == "!433d0c24"
+
+        body = client.get(
+            "/api/v1/packets?primary_channel=LongFast&page_size=200"
+        ).get_json()
+        assert body["data"]
+        assert all(p["channel_id"] == "LongFast" for p in body["data"])
+
+    @pytest.mark.integration
+    def test_rssi_bounds_are_inclusive_and_zero_is_a_bound(self, client):
+        # The regression this pins: min_rssi=0 used to be dropped by a
+        # truthiness test, silently returning the unfiltered page.
+        body = client.get("/api/v1/packets?min_rssi=0&page_size=200").get_json()
+        assert body["data"] == []
+        assert body["meta"]["pagination"]["total"] == 0
+
+        body = client.get("/api/v1/packets?min_rssi=-100&page_size=200").get_json()
+        assert body["data"]
+        assert all(p["rssi"] >= -100 for p in body["data"])
+
+        body = client.get("/api/v1/packets?max_rssi=-100&page_size=200").get_json()
+        assert body["data"]
+        assert all(p["rssi"] <= -100 for p in body["data"])
+
+    @pytest.mark.integration
+    def test_hop_count_filter(self, client):
+        rows = client.get("/api/v1/packets?page_size=200").get_json()["data"]
+        hop = next(p["hop_count"] for p in rows if p["hop_count"])
+        body = client.get(f"/api/v1/packets?hop_count={hop}&page_size=200").get_json()
+        assert body["data"]
+        assert all(p["hop_count"] == hop for p in body["data"])
+
+    @pytest.mark.integration
+    def test_exclusions_and_exclude_self(self, client):
+        base = client.get("/api/v1/packets?page_size=200").get_json()["data"]
+        from_id = base[0]["from_node_id"]
+
+        body = client.get(
+            f"/api/v1/packets?exclude_from={from_id}&page_size=200"
+        ).get_json()
+        assert all(p["from_node_id"] != from_id for p in body["data"])
+
+        to_id = next(
+            p["to_node_id"] for p in base if p["to_node_id"] not in (None, 4294967295)
+        )
+        body = client.get(
+            f"/api/v1/packets?exclude_to={to_id}&page_size=200"
+        ).get_json()
+        assert all(p["to_node_id"] != to_id for p in body["data"])
+
+        # exclude_self means "the gateway's own packets": only meaningful
+        # with a gateway filter, and drops that node as sender.
+        body = client.get(
+            "/api/v1/packets?gateway_id=%21433d0c24&exclude_self=true&page_size=200"
+        ).get_json()
+        assert all(p["from_node_id"] != 1128074276 for p in body["data"])
+        assert body["meta"]["query"]["exclude_self"] is True
+
+    @pytest.mark.integration
+    def test_time_window_bounds(self, client):
+        rows = client.get("/api/v1/packets?page_size=200&sort=timestamp").get_json()[
+            "data"
+        ]
+        mid = rows[len(rows) // 2]["timestamp"]
+        body = client.get(f"/api/v1/packets?since={mid}&page_size=200").get_json()
+        assert body["data"]
+        assert all(p["timestamp"] >= mid for p in body["data"])
+
+        body = client.get(f"/api/v1/packets?until={mid}&page_size=200").get_json()
+        assert body["data"]
+        assert all(p["timestamp"] <= mid for p in body["data"])
+
+        empty = client.get(
+            "/api/v1/packets?since=2099-01-01T00:00:00Z&page_size=10"
+        ).get_json()
+        assert empty["data"] == []
+
+    @pytest.mark.integration
+    def test_q_searches_text_fields(self, client):
+        body = client.get("/api/v1/packets?q=TEXT_MESSAGE&page_size=200").get_json()
+        assert body["data"]
+        assert all(
+            any(
+                token is not None and "TEXT_MESSAGE" in str(token)
+                for token in (
+                    p["portnum_name"],
+                    p["gateway_id"],
+                    p["channel_id"],
+                )
+            )
+            for p in body["data"]
+        )
+
+    @pytest.mark.integration
+    def test_traceroute_endpoint_and_gateway_filters(self, client):
+        rows = client.get("/api/v1/traceroutes?page_size=50").get_json()["data"]
+        assert rows, "fixture contains traceroutes"
+        from_id = next(
+            r["from_node_id"] for r in rows if r.get("from_node_id") is not None
+        )
+        body = client.get(f"/api/v1/traceroutes?from={from_id}&page_size=50").get_json()
+        assert body["data"]
+        assert all(r["from_node_id"] == from_id for r in body["data"])
+
+        body = client.get(
+            "/api/v1/traceroutes?gateway=%2111110000&page_size=50"
+        ).get_json()
+        assert body["data"]
+        assert all(r["gateway_id"] == "!11110000" for r in body["data"])
+
+    @pytest.mark.integration
+    def test_gateway_detail_success_path(self, client):
+        response = _get(client, "/api/v1/gateways/%21433d0c24")
+        assert response.status_code == 200
+        body = response.get_json()
+        _assert_envelope(body)
+        assert body["data"]["gateway_id"] == "!433d0c24"
+
+
+class TestApiV1DetailReceptionFilters:
+    """The grouped badge counts only rows inside the page's filtered query;
+    the expansion (GET /api/v1/packets/{id}) must honour the same bounds or
+    the count and the list disagree on screen."""
+
+    @pytest.mark.integration
+    def test_window_filter_narrows_receptions(self, client):
+        rows = client.get("/api/v1/packets?page_size=200&sort=timestamp").get_json()[
+            "data"
+        ]
+        groups: dict[object, list[dict]] = {}
+        for row in rows:
+            mesh = row.get("mesh_packet_id")
+            if mesh:
+                groups.setdefault(mesh, []).append(row)
+
+        def _ts(row):
+            return datetime.fromisoformat(
+                row["timestamp"].replace("Z", "+00:00")
+            ).timestamp()
+
+        def _pair_gap(group):
+            times = sorted(_ts(r) for r in group)
+            return times[-1] - times[0]
+
+        pair = max(
+            (group for group in groups.values() if len(group) == 2), key=_pair_gap
+        )
+        older, newer = sorted(pair, key=_ts)
+        rep_id = newer["id"]
+
+        detail = client.get(f"/api/v1/packets/{rep_id}").get_json()["data"]
+        full = detail["other_receptions"]
+        assert len(full) == 1, "fixture mesh pairs have exactly one other reception"
+
+        # A window opening past the older reception by more than the pair
+        # spacing drops exactly that row.
+        since = _ts(older) + max(0.5, _pair_gap(pair) / 2)
+        filtered = client.get(f"/api/v1/packets/{rep_id}?since={since}").get_json()[
+            "data"
+        ]
+        assert filtered["other_receptions"] == []
+
+        kept = client.get(f"/api/v1/packets/{rep_id}?since={_ts(older)}").get_json()[
+            "data"
+        ]
+        assert len(kept["other_receptions"]) == 1
+
+    @pytest.mark.integration
+    def test_gateway_filter_narrows_receptions(self, client):
+        rows = client.get("/api/v1/packets?page_size=200").get_json()["data"]
+        groups: dict[int, list[dict]] = {}
+        for row in rows:
+            mesh = row.get("mesh_packet_id")
+            if mesh:
+                groups.setdefault(mesh, []).append(row)
+        pair = next(
+            group
+            for group in groups.values()
+            if len(group) == 2 and group[0]["gateway_id"] != group[1]["gateway_id"]
+        )
+        rep = pair[1]
+
+        detail = client.get(
+            f"/api/v1/packets/{rep['id']}?gateway_id={pair[0]['gateway_id']}"
+        ).get_json()["data"]
+        kept = detail["other_receptions"]
+        assert [r["gateway_id"] for r in kept] == [pair[0]["gateway_id"]]
+
+        other = client.get(
+            f"/api/v1/packets/{rep['id']}?gateway_id={rep['gateway_id']}"
+        ).get_json()["data"]
+        # The representative's own gateway hears only itself of this pair.
+        assert other["other_receptions"] == []
+
+    @pytest.mark.integration
+    def test_reception_window_validation(self, client):
+        response = client.get("/api/v1/packets/1?since=garbage")
+        assert response.status_code == 400
+        assert _error_body(response)["code"] == "invalid_parameter"
+
+
+class TestApiV1MetaRollupFreshness:
+    """``meta`` must make a stale/missing rollup distinguishable from a
+    quiet mesh: every per-node aggregate is capture-maintained."""
+
+    @pytest.mark.integration
+    def test_freshness_block_shape(self, client):
+        body = _get(client, "/api/v1/meta").get_json()
+        freshness = body["data"]["rollup_freshness"]
+        assert set(freshness) == {"newest_hour_epoch", "age_seconds", "stale"}
+        newest = freshness["newest_hour_epoch"]
+        if newest is None:
+            # Absent rollups must look absent, not ancient.
+            assert freshness["age_seconds"] is None
+            assert freshness["stale"] is None
+        else:
+            # The fixture folds the seeded hours: epoch-seconds semantics, a
+            # sane age, and an explicit boolean - never a 1970 epoch or a
+            # ~56-year "age" from an hour index leaking through.
+            assert newest > 1_600_000_000
+            assert 0 <= freshness["age_seconds"] < 6 * 3600
+            assert isinstance(freshness["stale"], bool)
+
+    @staticmethod
+    def _quiet_mesh(app, *, rollup_lag_hours=0):
+        """Age the fixture into a coherent quiet mesh ending ``target`` hours
+        ago, with the rollup cursor at (packets - ``rollup_lag_hours``)."""
+        import sqlite3
+        import time
+
+        target_hour = int(time.time() // 3600) - 8
+        conn = sqlite3.connect(app.config["DATABASE_FILE"])
+        try:
+            max_pkt = conn.execute(
+                "SELECT MAX(timestamp) FROM packet_history"
+            ).fetchone()[0]
+            max_hour = conn.execute(
+                "SELECT MAX(hour_epoch) FROM node_hour_rollup"
+            ).fetchone()[0]
+            conn.execute(
+                "UPDATE packet_history SET timestamp = timestamp + ?",
+                (target_hour * 3600 + 1800 - max_pkt,),
+            )
+            conn.execute(
+                "UPDATE node_hour_rollup SET hour_epoch = hour_epoch + ?",
+                (target_hour - max_hour - rollup_lag_hours,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @pytest.mark.integration
+    def test_quiet_mesh_with_current_rollups_is_not_stale(self, client, app):
+        """Wall-clock age is not staleness: an idle mesh whose rollups match
+        its newest packet must not read stale (the old rule flagged it)."""
+        self._quiet_mesh(app)
+
+        body = _get(client, "/api/v1/meta").get_json()
+        freshness = body["data"]["rollup_freshness"]
+        assert freshness["newest_hour_epoch"] is not None
+        assert freshness["age_seconds"] > 4 * 3600
+        assert freshness["stale"] is False
+
+    @pytest.mark.integration
+    def test_rollup_lagging_packets_reads_stale(self, client, app):
+        """A rollup that stops advancing while packets keep arriving is stale."""
+        self._quiet_mesh(app, rollup_lag_hours=4)
+
+        body = _get(client, "/api/v1/meta").get_json()
+        assert body["data"]["rollup_freshness"]["stale"] is True
+
+
 class TestPacketDetailReceptionFilters:
     """The detail endpoint must interpret the same filters as the list."""
 

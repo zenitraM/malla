@@ -18,12 +18,13 @@ test-cov: ## Run tests with coverage
 	uv run pytest --cov=src/malla --cov-report=html --cov-report=term
 
 lint: ## Run linting tools
-	uv run ruff check src tests
+	uv run ruff format --check src tests scripts
+	uv run ruff check src tests scripts
 	uv run basedpyright src
 
 format: ## Format code
-	uv run ruff format src tests
-	uv run ruff check --fix src tests
+	uv run ruff format src tests scripts
+	uv run ruff check --fix src tests scripts
 
 clean: ## Clean build artifacts
 	rm -rf build/

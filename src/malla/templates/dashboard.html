@@ -66,7 +66,7 @@
     {% set gateway_diversity = (gateway_count / 10 * 100)|int if gateway_count <= 10 else 100 %}
 
     <!-- KPI stat tiles -->
-    <div class="row g-3 mb-4" id="kpi-row" aria-label="Key metrics">
+    <div class="row g-3 mb-4" id="kpi-row" role="group" aria-label="Key metrics">
         <div class="col-6 col-md-4 col-xl-2">
             <div class="stat-tile h-100">
                 <span class="stat-icon" aria-hidden="true"><i class="bi bi-router"></i></span>
@@ -186,27 +186,27 @@
                 </div>
                 <div class="card-body d-flex flex-column">
                     <div class="mb-3">
-                        <div class="d-flex justify-content-between"><span>Network coverage</span><span class="text-secondary-emphasis small">{{ activity_pct }}%</span></div>
-                        <div class="progress" role="progressbar" aria-label="Network coverage" aria-valuenow="{{ activity_pct }}" aria-valuemin="0" aria-valuemax="100">
-                            <div class="progress-bar {{ coverage_class }}" style="width: {{ activity_pct }}%;"></div>
+                        <div class="d-flex justify-content-between"><span>Network coverage</span><span class="text-secondary-emphasis small" id="healthCoverageVal">{{ activity_pct }}%</span></div>
+                        <div class="progress" role="progressbar" aria-label="Network coverage" aria-valuenow="{{ activity_pct }}" aria-valuemin="0" aria-valuemax="100" id="healthCoverageBar">
+                            <div class="progress-bar {{ coverage_class }}" style="width: {{ activity_pct }}%;" id="healthCoverageFill"></div>
                         </div>
-                        <small class="text-secondary-emphasis">{{ stats.active_nodes_24h }} of {{ stats.nodes_seen_7d }} nodes seen this week active in 24h</small>
+                        <small class="text-secondary-emphasis" id="healthCoverageNote">{{ stats.active_nodes_24h }} of {{ stats.nodes_seen_7d }} nodes seen this week active in 24h</small>
                     </div>
 
                     <div class="mb-3">
-                        <div class="d-flex justify-content-between"><span>Message success</span><span class="text-secondary-emphasis small">{{ stats.success_rate }}%</span></div>
-                        <div class="progress" role="progressbar" aria-label="Message success rate" aria-valuenow="{{ stats.success_rate }}" aria-valuemin="0" aria-valuemax="100">
-                            <div class="progress-bar {{ success_bar_class }}" style="width: {{ stats.success_rate }}%;"></div>
+                        <div class="d-flex justify-content-between"><span>Message success</span><span class="text-secondary-emphasis small" id="healthSuccessVal">{{ stats.success_rate }}%</span></div>
+                        <div class="progress" role="progressbar" aria-label="Message success rate" aria-valuenow="{{ stats.success_rate }}" aria-valuemin="0" aria-valuemax="100" id="healthSuccessBar">
+                            <div class="progress-bar {{ success_bar_class }}" style="width: {{ stats.success_rate }}%;" id="healthSuccessFill"></div>
                         </div>
                         <small class="text-secondary-emphasis">Packet processing reliability</small>
                     </div>
 
                     <div class="mb-3">
-                        <div class="d-flex justify-content-between"><span>Gateway diversity</span><span class="text-secondary-emphasis small">{{ gateway_diversity }}%</span></div>
-                        <div class="progress" role="progressbar" aria-label="Gateway diversity" aria-valuenow="{{ gateway_diversity }}" aria-valuemin="0" aria-valuemax="100">
-                            <div class="progress-bar bg-primary" style="width: {{ gateway_diversity }}%;"></div>
+                        <div class="d-flex justify-content-between"><span>Gateway diversity</span><span class="text-secondary-emphasis small" id="healthDiversityVal">{{ gateway_diversity }}%</span></div>
+                        <div class="progress" role="progressbar" aria-label="Gateway diversity" aria-valuenow="{{ gateway_diversity }}" aria-valuemin="0" aria-valuemax="100" id="healthDiversityBar">
+                            <div class="progress-bar bg-primary" style="width: {{ gateway_diversity }}%;" id="healthDiversityFill"></div>
                         </div>
-                        <small class="text-secondary-emphasis">{{ gateway_count }} data source{{ 's' if gateway_count != 1 }} — more sources, better reliability</small>
+                        <small class="text-secondary-emphasis" id="healthDiversityNote">{{ gateway_count }} data source{{ 's' if gateway_count != 1 }} — more sources, better reliability</small>
                     </div>
 
                     <div class="row text-center mt-auto pt-3">
@@ -383,6 +383,12 @@
                     <div id="recentNodesLoading">
                         {% for i in range(4) %}<div class="skeleton skeleton-row"></div>{% endfor %}
                     </div>
+                    <div id="recentNodesEmpty" class="empty-state py-4" style="display:none;">
+                        <div class="empty-state-title">No recent nodes</div>
+                    </div>
+                    <div id="recentNodesError" class="text-center py-4 text-muted" style="display:none;">
+                        Could not load recent nodes.
+                    </div>
                     <div style="display: none;" id="recentNodesContainer">
                         <div class="table-responsive">
                         <table class="table table-sm recent-table align-middle mb-0" id="recentNodesTable">
@@ -406,6 +412,12 @@
                 <div class="card-body pt-2">
                     <div id="recentPacketsLoading">
                         {% for i in range(4) %}<div class="skeleton skeleton-row"></div>{% endfor %}
+                    </div>
+                    <div id="recentPacketsEmpty" class="empty-state py-4" style="display:none;">
+                        <div class="empty-state-title">No recent packets</div>
+                    </div>
+                    <div id="recentPacketsError" class="text-center py-4 text-muted" style="display:none;">
+                        Could not load recent packets.
                     </div>
                     <div style="display: none;" id="recentPacketsContainer">
                         <div class="table-responsive">
@@ -1187,7 +1199,16 @@ async function loadRecentNodes({ silent = true } = {}) {
         const rows = await window.MallaAPI.get(
             `${V1}/nodes?page=1&page_size=8&sort=last_seen&order=desc`, { silent });
         hideById('recentNodesLoading');
+        const empty = document.getElementById('recentNodesEmpty');
+        const errBox = document.getElementById('recentNodesError');
+        if (errBox) errBox.style.display = 'none';
         const container = document.getElementById('recentNodesContainer');
+        if (!rows || rows.length === 0) {
+            if (container) container.style.display = 'none';
+            if (empty) empty.style.display = '';
+            return;
+        }
+        if (empty) empty.style.display = 'none';
         if (container) container.style.display = 'block';
 
         tbody.replaceChildren();
@@ -1206,6 +1227,12 @@ async function loadRecentNodes({ silent = true } = {}) {
         if (window.reinitializeTooltips) window.reinitializeTooltips();
     } catch (error) {
         hideById('recentNodesLoading');
+        const container = document.getElementById('recentNodesContainer');
+        const empty = document.getElementById('recentNodesEmpty');
+        const errBox = document.getElementById('recentNodesError');
+        if (container) container.style.display = 'none';
+        if (empty) empty.style.display = 'none';
+        if (errBox) errBox.style.display = '';
         if (!silent) console.error('Recent nodes load failed:', error);
     }
 }
@@ -1217,7 +1244,16 @@ async function loadRecentPackets({ silent = true } = {}) {
         const rows = await window.MallaAPI.get(
             `${V1}/packets?page=1&page_size=8`, { silent });
         hideById('recentPacketsLoading');
+        const empty = document.getElementById('recentPacketsEmpty');
+        const errBox = document.getElementById('recentPacketsError');
+        if (errBox) errBox.style.display = 'none';
         const container = document.getElementById('recentPacketsContainer');
+        if (!rows || rows.length === 0) {
+            if (container) container.style.display = 'none';
+            if (empty) empty.style.display = '';
+            return;
+        }
+        if (empty) empty.style.display = 'none';
         if (container) container.style.display = 'block';
 
         tbody.replaceChildren();
@@ -1249,6 +1285,12 @@ async function loadRecentPackets({ silent = true } = {}) {
         if (window.reinitializeTooltips) window.reinitializeTooltips();
     } catch (error) {
         hideById('recentPacketsLoading');
+        const container = document.getElementById('recentPacketsContainer');
+        const empty = document.getElementById('recentPacketsEmpty');
+        const errBox = document.getElementById('recentPacketsError');
+        if (container) container.style.display = 'none';
+        if (empty) empty.style.display = 'none';
+        if (errBox) errBox.style.display = '';
         if (!silent) console.error('Recent packets load failed:', error);
     }
 }
@@ -1320,7 +1362,10 @@ async function loadGatewayCount({ silent = true } = {}) {
     try {
         const { meta } = await window.MallaAPI.getDetailed(`${V1}/gateways?page=1&page_size=1`, { silent });
         const total = meta && meta.pagination ? meta.pagination.total : null;
-        if (total !== null) setKpiText('kpi-gateways', Number(total).toLocaleString());
+        if (total !== null) {
+            setKpiText('kpi-gateways', Number(total).toLocaleString());
+            applyHealthCard({ gatewayCount: Number(total) });
+        }
     } catch (error) { /* footer-style metric: silent */ }
 }
 
@@ -1334,8 +1379,56 @@ function setKpiText(id, value) {
     if (el) el.textContent = value;
 }
 
+function setHealthBar(prefix, pct, cls) {
+    const val = document.getElementById(`${prefix}Val`);
+    const bar = document.getElementById(`${prefix}Bar`);
+    const fill = document.getElementById(`${prefix}Fill`);
+    const p = Math.max(0, Math.min(100, Math.round(pct)));
+    if (val) val.textContent = `${p}%`;
+    if (bar) bar.setAttribute('aria-valuenow', String(p));
+    if (fill) {
+        fill.style.width = `${p}%`;
+        fill.className = `progress-bar ${cls}`;
+    }
+}
+
+// The health card is server-rendered; refresh it alongside the KPI tiles or
+// the same metric appears twice with different values after the first
+// auto-refresh (coverage/success from the summary, diversity from the
+// gateway count the dashboard already fetches).
+function applyHealthCard({ totals, gatewayCount }) {
+    if (totals) {
+        const seen = totals.nodes_seen_7d ?? 0;
+        const coverage = seen > 0
+            ? ((totals.active_nodes_24h || 0) / seen) * 100
+            : 0;
+        setHealthBar('healthCoverage', coverage,
+            coverage >= 70 ? 'bg-success' : coverage >= 40 ? 'bg-warning' : 'bg-danger');
+        const note = document.getElementById('healthCoverageNote');
+        if (note && totals.nodes_seen_7d !== undefined) {
+            note.textContent = `${(totals.active_nodes_24h || 0).toLocaleString()} of `
+                + `${Number(seen).toLocaleString()} nodes seen this week active in 24h`;
+        }
+        if (totals.success_rate !== undefined) {
+            const sr = totals.success_rate;
+            setHealthBar('healthSuccess', sr,
+                sr >= 95 ? 'bg-success' : sr >= 85 ? 'bg-warning' : 'bg-danger');
+        }
+    }
+    if (gatewayCount !== undefined && gatewayCount !== null) {
+        const diversity = gatewayCount <= 10 ? Math.round((gatewayCount / 10) * 100) : 100;
+        setHealthBar('healthDiversity', diversity, 'bg-primary');
+        const note = document.getElementById('healthDiversityNote');
+        if (note) {
+            note.textContent = `${Number(gatewayCount).toLocaleString()} data source`
+                + `${gatewayCount === 1 ? '' : 's'} — more sources, better reliability`;
+        }
+    }
+}
+
 function applySummaryKpis(summary) {
     const t = summary.totals || {};
+    applyHealthCard({ totals: t });
     setKpiText('kpi-total-nodes', t.total_nodes?.toLocaleString());
     setKpiText('kpi-active-nodes', t.active_nodes_24h?.toLocaleString());
     setKpiText('kpi-total-messages', t.total_packets?.toLocaleString());
@@ -1480,8 +1573,10 @@ document.addEventListener('DOMContentLoaded', function () {
             if (mapped !== timelineRange) {
                 timelineRange = mapped;
                 try { localStorage.setItem('mallaTimelineRange', mapped); } catch (e) { /* private mode */ }
-                setRangeInUrl(mapped);
                 syncRangeButtons(mapped);
+                // No setRangeInUrl here: the address bar keeps the global key
+                // that caused this change; writing the mapped value would
+                // clobber it (reload/share would silently yield the mapping).
             }
             refreshSummary();
         });

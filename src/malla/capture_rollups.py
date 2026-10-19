@@ -132,10 +132,14 @@ def _cursor_value(conn: sqlite3.Connection, name: str) -> int:
 
 
 def _set_cursor(conn: sqlite3.Connection, name: str, packet_id: int) -> None:
+    # Monotonic: with two runners (capture maintenance + the web-side backup
+    # refresher) a lagging process must never rewind a cursor the other
+    # already advanced; the fold is idempotent, but re-folding is waste.
     conn.execute(
         f"INSERT INTO {CURSOR_TABLE} (name, last_packet_id, updated_at) VALUES (?, ?, ?)"
         " ON CONFLICT(name) DO UPDATE SET"
-        " last_packet_id = excluded.last_packet_id, updated_at = excluded.updated_at",
+        " last_packet_id = MAX(last_packet_id, excluded.last_packet_id),"
+        " updated_at = excluded.updated_at",
         (name, int(packet_id), time.time()),
     )
 
@@ -153,7 +157,12 @@ def _hour_pending_from(
     until: float,
 ) -> bool:
     if start is None:
-        return False  # no packets at all
+        # Empty rollup != no packets: derive from data so the refresher keeps
+        # probing (the fold skips the still-open hour and catches up later).
+        first = _first_timestamp(conn)
+        if first is None:
+            return False
+        start = int(first // 3600)
     last = int(until // 3600) - 1  # newest *completed* hour
     if start > last:
         return False
@@ -162,6 +171,25 @@ def _hour_pending_from(
         (start * 3600, (last + 1) * 3600),
     ).fetchone()
     return row is not None
+
+
+LINK_DAYS_CURSOR = "link_days_until"
+
+
+def _link_day_resume(conn: sqlite3.Connection) -> str | None:
+    """Day (ISO) the link/path fold must resume from.
+
+    Preference: the persisted day cursor (advances past empty days);
+    fallback: the day after the newest folded row; else first packet day.
+    """
+    marked = _cursor_value(conn, LINK_DAYS_CURSOR)
+    if marked:
+        return _day_floor(marked)
+    newest = conn.execute("SELECT MAX(day) FROM link_day_rollup").fetchone()
+    if newest and newest[0]:
+        return _day_next(str(newest[0]))
+    first = _first_timestamp(conn)
+    return _day_floor(first) if first is not None else None
 
 
 def _day_floor(epoch: float) -> str:
@@ -189,44 +217,24 @@ def has_pending_work(conn: sqlite3.Connection, *, until: float | None = None) ->
     if _hour_pending_from(conn, start_hour, now):
         return True
 
-    newest_day = conn.execute("SELECT MAX(day) FROM link_day_rollup").fetchone()
-    start_day: str | None = None
-    if newest_day and newest_day[0]:
-        start_day = _day_next(str(newest_day[0]))
-    if _days_pending(conn, start_day, now):
-        return True
+    link_day = _link_day_resume(conn)
+    if link_day and link_day < _day_floor(now):
+        day_start = (
+            datetime.strptime(link_day, "%Y-%m-%d")  # noqa: DTZ002
+            .replace(tzinfo=UTC)
+            .timestamp()
+        )
+        row = conn.execute(
+            "SELECT 1 FROM packet_history WHERE timestamp >= ? AND timestamp < ?"
+            " AND portnum_name = 'TRACEROUTE_APP' AND raw_payload IS NOT NULL LIMIT 1",
+            (day_start, now),
+        ).fetchone()
+        if row:
+            return True
 
     return _max_packet_id(conn) > max(
         _cursor_value(conn, name) for name in _LATEST_TABLES
     )
-
-
-def _days_pending(
-    conn: sqlite3.Connection, start_day: str | None, until: float
-) -> bool:
-    if start_day is None:
-        first = _first_timestamp(conn)
-        if first is None:
-            return False
-        start_day = _day_floor(first)
-    today = _day_floor(until)  # days strictly before today are completed
-    if start_day >= today:
-        return False
-    start_epoch = (
-        datetime.strptime(today, "%Y-%m-%d")  # noqa: DTZ002 - fixed format
-        .replace(tzinfo=UTC)
-        .timestamp()
-    )
-    row = conn.execute(
-        "SELECT 1 FROM packet_history WHERE timestamp >= ? AND timestamp < ? LIMIT 1",
-        (
-            datetime.strptime(start_day, "%Y-%m-%d")  # noqa: DTZ002
-            .replace(tzinfo=UTC)
-            .timestamp(),
-            start_epoch,
-        ),
-    ).fetchone()
-    return row is not None
 
 
 # ---------------------------------------------------------------------------
@@ -287,14 +295,9 @@ def _fold_link_days(
     from malla.utils.signal_quality import is_plausible_traceroute_snr
     from malla.utils.traceroute_utils import parse_traceroute_payload
 
-    newest = conn.execute("SELECT MAX(day) FROM link_day_rollup").fetchone()
-    if newest and newest[0]:
-        start_day = _day_next(str(newest[0]))
-    else:
-        first = _first_timestamp(conn)
-        if first is None:
-            return 0
-        start_day = _day_floor(first)
+    start_day = _link_day_resume(conn)
+    if start_day is None:
+        return 0
     today = _day_floor(until)
     if start_day >= today:
         return 0
@@ -455,11 +458,19 @@ def _fold_link_days(
                     stat["last_route"] or None,
                 ),
             )
+        day = _day_next(day)
+        # Advance past every processed day, accepted hops or not: the next
+        # run must not re-scan days that simply had no traceroutes. Written
+        # before the commit so the cursor lands atomically with the rows.
+        _set_cursor(
+            conn,
+            LINK_DAYS_CURSOR,
+            int(datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=UTC).timestamp()),
+        )
         conn.commit()
         folded += len(links) + len(paths)
         if deadline is not None and time.monotonic() >= deadline:
             break
-        day = _day_next(day)
     return folded
 
 

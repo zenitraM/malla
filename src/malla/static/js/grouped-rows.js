@@ -18,6 +18,68 @@
     /** mesh_packet_id -> Promise<reception[]>; cleared on failure so it can retry. */
     const detailCache = new Map();
 
+    // Parity with the grouped badge: the N-gateways count comes from the
+    // page's filtered grouped query, so the expansion must ask with the same
+    // window and membership or the two disagree on screen. Mirrors the
+    // table query builders: global range first, explicit form bounds win,
+    // "all" clears the window; gateway/portnum from the form filters.
+    function expansionQuery() {
+        const params = new URLSearchParams();
+        const range = window.MallaRange && window.MallaRange.get ? window.MallaRange.get() : null;
+        // Uncapped 'all' carries no sinceEpoch; a retention-capped 'all' does,
+        // and that bound must survive.
+        if (range && range.sinceEpoch) {
+            params.set('since', new Date(range.sinceEpoch * 1000).toISOString());
+        }
+        if (range && range.untilEpoch) {
+            params.set('until', new Date(range.untilEpoch * 1000).toISOString());
+        }
+        // The table's own filter state is authoritative when the page has a
+        // table; urlManager covers pages that only carry the global range.
+        const tableFilters =
+            (window.table && window.table.state && window.table.state.filters) || null;
+        const urlFilters =
+            window.urlManager && typeof window.urlManager.getCurrentFilters === 'function'
+                ? window.urlManager.getCurrentFilters()
+                : null;
+        const filters = Object.assign({}, urlFilters, tableFilters);
+        // datetime-local strings need ISO conversion, mirroring the table
+        // builder; explicit page times override the global range.
+        if (filters.start_time) {
+            const d = new Date(filters.start_time);
+            if (!Number.isNaN(d.getTime())) params.set('since', d.toISOString());
+        }
+        if (filters.end_time) {
+            const d = new Date(filters.end_time);
+            if (!Number.isNaN(d.getTime())) params.set('until', d.toISOString());
+        }
+        [
+            'gateway_id',
+            'portnum',
+            'min_rssi',
+            'max_rssi',
+            'hop_count',
+            'primary_channel',
+            'from_node',
+            'to_node',
+            'exclude_from',
+            'exclude_to',
+        ].forEach((key) => {
+            const value = filters[key];
+            if (value !== undefined && value !== null && value !== '') {
+                params.set(key, String(value));
+            }
+        });
+        if (
+            filters.exclude_self === true ||
+            filters.exclude_self === '1' ||
+            filters.exclude_self === 'true'
+        ) {
+            params.set('exclude_self', 'true');
+        }
+        return params.toString() ? `?${params.toString()}` : '';
+    }
+
     function getJSON(path) {
         if (window.MallaAPI && typeof window.MallaAPI.get === 'function') {
             // silent: the failure UI below is the surfaced error path.
@@ -31,53 +93,6 @@
                 return response.json();
             }
         ).then((payload) => (payload && payload.data !== undefined ? payload.data : payload));
-    }
-
-    /**
-     * The page's active query, as the table built it. The grouped badge counts
-     * only rows matching these filters, so the expansion must ask with the same
-     * window/membership or the two disagree on screen.
-     */
-    function expansionQuery() {
-        const params = new URLSearchParams();
-        const range = window.MallaRange && window.MallaRange.get
-            ? window.MallaRange.get()
-            : null;
-        if (range && range.sinceEpoch) {
-            params.set('since', new Date(range.sinceEpoch * 1000).toISOString());
-        }
-        if (range && range.untilEpoch) {
-            params.set('until', new Date(range.untilEpoch * 1000).toISOString());
-        }
-        if (range && range.key === 'all') {
-            params.delete('since');
-            params.delete('until');
-        }
-
-        const filters = (window.table && window.table.state && window.table.state.filters) || {};
-        // Explicit form bounds win over the global range, matching the table.
-        if (filters.start_time) {
-            const start = new Date(filters.start_time);
-            if (!Number.isNaN(start.getTime())) params.set('since', start.toISOString());
-        }
-        if (filters.end_time) {
-            const end = new Date(filters.end_time);
-            if (!Number.isNaN(end.getTime())) params.set('until', end.toISOString());
-        }
-        ['from_node', 'to_node', 'exclude_from', 'exclude_to', 'gateway_id'].forEach((key) => {
-            if (filters[key]) params.set(key, filters[key]);
-        });
-        if (filters.portnum) params.set('portnum', filters.portnum);
-        if (filters.primary_channel) params.set('primary_channel', filters.primary_channel);
-        ['min_rssi', 'max_rssi', 'hop_count'].forEach((key) => {
-            if (filters[key] !== undefined && filters[key] !== null && filters[key] !== '') {
-                params.set(key, filters[key]);
-            }
-        });
-        if (filters.exclude_self === true || filters.exclude_self === '1' || filters.exclude_self === 'true') {
-            params.set('exclude_self', 'true');
-        }
-        return params;
     }
 
     /** '!433d0c24' -> 1128074276, for /node/ links. */
@@ -369,9 +384,7 @@
         if (!row) return;
 
         const packetId = button.dataset.packetId;
-        const query = expansionQuery();
-        const queryString = query.toString();
-        const cacheKey = `${button.dataset.meshPacketId || String(packetId)}|${queryString}`;
+        const cacheKey = button.dataset.meshPacketId || String(packetId);
         const expansionRow = el('tr', { className: 'group-receptions-row' });
         const cell = el('td', { colspan: tableColspan(row) });
         expansionRow.appendChild(cell);
@@ -383,9 +396,10 @@
         button.dataset.loading = '1';
 
         try {
-            const detailPath = `/api/v1/packets/${encodeURIComponent(packetId)}`
-                + (queryString ? `?${queryString}` : '');
-            const receptions = await loadReceptions(cacheKey, detailPath);
+            const receptions = await loadReceptions(
+                cacheKey,
+                `/api/v1/packets/${encodeURIComponent(packetId)}${expansionQuery()}`
+            );
             if (button.getAttribute('aria-expanded') !== 'true') return; // collapsed meanwhile
             renderReceptions(cell, receptions, sortStates.get(cell));
         } catch (error) {
