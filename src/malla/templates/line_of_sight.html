@@ -366,27 +366,59 @@ document.addEventListener('DOMContentLoaded', async function() {
 // Set node picker values from URL params
 async function setNodePickerValues(fromNodeId, toNodeId) {
     try {
-        const fromNode = await window.NodeCache.getNode(parseInt(fromNodeId));
-        const toNode = await window.NodeCache.getNode(parseInt(toNodeId));
+        let fromNode = await window.NodeCache.getNode(parseInt(fromNodeId));
+        let toNode = await window.NodeCache.getNode(parseInt(toNodeId));
 
-        if (fromNode && toNode) {
-            // Set from node
+        // Fallback: check LocationCache if NodeCache did not resolve
+        if (!fromNode && window.LocationCache) {
+            const loc = await window.LocationCache.getLocation(parseInt(fromNodeId));
+            if (loc) {
+                fromNode = {
+                    node_id: loc.node_id,
+                    long_name: loc.long_name || loc.display_name,
+                    short_name: loc.short_name,
+                    hex_id: loc.node_id_hex || loc.hex_id
+                };
+            }
+        }
+        if (!toNode && window.LocationCache) {
+            const loc = await window.LocationCache.getLocation(parseInt(toNodeId));
+            if (loc) {
+                toNode = {
+                    node_id: loc.node_id,
+                    long_name: loc.long_name || loc.display_name,
+                    short_name: loc.short_name,
+                    hex_id: loc.node_id_hex || loc.hex_id
+                };
+            }
+        }
+
+        if (fromNode) {
             document.getElementById('fromNode_value').value = fromNode.node_id;
             document.getElementById('fromNode').value = fromNode.long_name || fromNode.short_name || fromNode.hex_id;
             fromNodePicker.clearButton.style.display = 'block';
+        }
 
-            // Set to node
+        if (toNode) {
             document.getElementById('toNode_value').value = toNode.node_id;
             document.getElementById('toNode').value = toNode.long_name || toNode.short_name || toNode.hex_id;
             toNodePicker.clearButton.style.display = 'block';
+        }
 
+        if (fromNode && toNode) {
             // Enable button and perform analysis
             checkAnalyzeButton();
             await updateDistanceHint();
             setTimeout(() => performAnalysis(), 100);
+        } else {
+            const missing = [];
+            if (!fromNode) missing.push(`Node ID ${fromNodeId}`);
+            if (!toNode) missing.push(`Node ID ${toNodeId}`);
+            showError(`Could not find information for ${missing.join(' and ')}`);
         }
     } catch (error) {
         console.error('Error setting node picker values:', error);
+        showError('Failed to load selected nodes: ' + error.message);
     }
 }
 

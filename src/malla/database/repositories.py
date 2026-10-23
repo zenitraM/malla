@@ -1255,6 +1255,7 @@ class NodeRepository:
                     "ni.long_name LIKE ?",
                     "ni.short_name LIKE ?",
                     "ni.hw_model LIKE ?",
+                    "CAST(ni.node_id AS TEXT) LIKE ?",
                     "printf('!%08x', ni.node_id) LIKE ?",
                 ]
                 search_param = f"%{search}%"
