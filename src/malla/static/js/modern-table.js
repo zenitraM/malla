@@ -61,19 +61,21 @@ class ModernTable {
 
     setupContainer() {
         this.container.classList.add(`table-density-${this.density}`);
-        const anyControls = this.options.enableSearch
-            || this.options.enableDensity
-            || this.options.enableColumnVisibility;
+        const anyToolbarControls = this.options.enableDensity
+            || this.options.enableColumnVisibility
+            || this.options.enablePagination;
         this.container.replaceChildren(
             el('div', { className: 'modern-table-container' },
-                anyControls ? this.buildControlsBar() : null,
+                this.options.enableSearch ? this.buildControlsBar() : null,
                 el('div', { className: 'table-wrapper' },
                     el('table', { className: 'modern-table' },
                         el('thead'),
                         el('tbody', { id: `${this.container.id}-tbody` })
                     )
                 ),
-                this.options.enablePagination ? this.buildPaginationShell() : null
+                (this.options.enablePagination || anyToolbarControls)
+                    ? this.buildPaginationShell()
+                    : null
             )
         );
 
@@ -82,6 +84,27 @@ class ModernTable {
     }
 
     buildControlsBar() {
+        if (!this.options.enableSearch) return null;
+        return el('div', { className: 'table-search-bar' },
+            el('div', { className: 'row g-2 align-items-center' },
+                el('div', { className: 'col-md-6' },
+                    el('div', { className: 'input-group input-group-sm' },
+                        el('span', { className: 'input-group-text' }, icon('bi bi-search')),
+                        el('input', {
+                            type: 'text',
+                            className: 'form-control',
+                            placeholder: this.options.searchPlaceholder || 'Search...',
+                            'aria-label': 'Search table',
+                            id: `${this.container.id}-search`
+                        })
+                    )
+                )
+            )
+        );
+    }
+
+    /** Table-scoped controls: row density, column visibility, page size. */
+    buildTableToolbar() {
         const select = el('select', {
             id: `${this.container.id}-pagesize`,
             className: 'form-select form-select-sm',
@@ -96,7 +119,7 @@ class ModernTable {
             }, String(size)));
         });
 
-        const toolbarRight = el('div', { className: 'table-toolbar justify-content-end' },
+        return el('div', { className: 'table-toolbar' },
             this.options.enableDensity ? this.buildDensityToggle() : null,
             this.options.enableColumnVisibility ? this.buildColumnVisibility() : null,
             this.options.enablePagination
@@ -106,28 +129,6 @@ class ModernTable {
                     select
                 )
                 : null
-        );
-
-        const searchGroup = this.options.enableSearch
-            ? el('div', { className: 'col-md-6' },
-                el('div', { className: 'input-group input-group-sm' },
-                    el('span', { className: 'input-group-text' }, icon('bi bi-search')),
-                    el('input', {
-                        type: 'text',
-                        className: 'form-control',
-                        placeholder: this.options.searchPlaceholder || 'Search...',
-                        'aria-label': 'Search table',
-                        id: `${this.container.id}-search`
-                    })
-                )
-            )
-            : null;
-
-        return el('div', { className: 'table-search-bar' },
-            el('div', { className: 'row g-2 align-items-center' },
-                searchGroup,
-                el('div', { className: searchGroup ? 'col-md-6' : 'col-12' }, toolbarRight)
-            )
         );
     }
 
@@ -177,7 +178,7 @@ class ModernTable {
                 'data-column-key': key
             });
             checkbox.addEventListener('change', () => {
-                this.toggleColumn(key, checkbox.checked);
+                this.toggleColumn(key, checkbox.checked, checkbox);
             });
 
             menu.appendChild(el('label', { className: 'form-check dropdown-item-text' },
@@ -212,12 +213,16 @@ class ModernTable {
         );
     }
 
-    toggleColumn(key, visible) {
+    toggleColumn(key, visible, checkbox = null) {
         if (visible) {
             this.hiddenColumns.delete(key);
         } else {
-            // Never hide every column.
-            if (this.getVisibleColumns().length <= 1) return;
+            // Never hide every column: reflect the refused state back on the
+            // box, else the UI shows unchecked-but-visible until reload.
+            if (this.getVisibleColumns().length <= 1) {
+                if (checkbox) checkbox.checked = true;
+                return;
+            }
             this.hiddenColumns.add(key);
         }
         try {
@@ -231,17 +236,25 @@ class ModernTable {
     }
 
     buildPaginationShell() {
+        const anyToolbarControls = this.options.enableDensity
+            || this.options.enableColumnVisibility
+            || this.options.enablePagination;
         return el('div', { className: 'modern-pagination' },
-            el('div', { className: 'pagination-info' },
-                'Showing ',
-                el('span', { id: `${this.container.id}-start` }, '0'),
-                ' to ',
-                el('span', { id: `${this.container.id}-end` }, '0'),
-                ' of ',
-                el('span', { id: `${this.container.id}-total` }, '0'),
-                ' entries'
-            ),
-            el('div', { className: 'pagination-controls', id: `${this.container.id}-pagination` })
+            anyToolbarControls ? this.buildTableToolbar() : null,
+            this.options.enablePagination
+                ? el('div', { className: 'pagination-info' },
+                    'Showing ',
+                    el('span', { id: `${this.container.id}-start` }, '0'),
+                    ' to ',
+                    el('span', { id: `${this.container.id}-end` }, '0'),
+                    ' of ',
+                    el('span', { id: `${this.container.id}-total` }, '0'),
+                    ' entries'
+                )
+                : null,
+            this.options.enablePagination
+                ? el('div', { className: 'pagination-controls', id: `${this.container.id}-pagination` })
+                : null
         );
     }
 

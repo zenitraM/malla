@@ -28,6 +28,7 @@
     };
     var SECONDS = { "15m": 900, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000 };
     var STORAGE_KEY = "malla.range";
+    var retentionHours = 0; // 0 = unlimited / unknown (set from /api/v1 meta)
 
     var listeners = [];
     var override = null; // {sinceEpoch, untilEpoch} or null
@@ -56,20 +57,24 @@
     }
 
     function compute(key, custom) {
-        if (key === "custom") {
-            var since = custom ? bound(custom.sinceEpoch) : null;
-            var until = custom ? bound(custom.untilEpoch) : null;
-            if (since == null && until == null) {
-                // A bare custom key has no usable window; fall back instead of
-                // producing a NaN since that consumers silently drop.
-                key = "7d";
-            } else {
-                return { key: "custom", sinceEpoch: since, untilEpoch: until };
-            }
-        }
-        if (key === "all") return { key: "all" };
+
         var now = Date.now() / 1000;
-        return { key: key, sinceEpoch: now - SECONDS[key], untilEpoch: null };
+        if (key === "custom" && (!custom || (!custom.sinceEpoch && !custom.untilEpoch))) {
+            // A bare custom (stored without bounds) has no window: degrade to
+            // the default instead of NaN sinceEpoch (consumers drop the
+            // filter entirely on falsy since).
+            key = "7d";
+        }
+        if (key === "custom" && custom) {
+            var since = custom.sinceEpoch;
+            if (retentionHours && since) since = Math.max(since, now - retentionHours * 3600);
+            return { key: "custom", sinceEpoch: since, untilEpoch: custom.untilEpoch };
+        }
+        if (key === "all") {
+            if (retentionHours) return { key: "all", sinceEpoch: now - retentionHours * 3600, capped: true };
+            return { key: "all" };
+        }
+        return { key: key, sinceEpoch: Date.now() / 1000 - SECONDS[key], untilEpoch: null };
     }
 
     function resolve() {
@@ -77,9 +82,7 @@
         var stored = safeGet(STORAGE_KEY);
         var storedKey = stored && valid(stored) ? stored : null;
         if (storedKey === "custom" && (!fromURL || fromURL.key !== "custom")) {
-            // Storage keeps only the key, not the bounds. A bare custom key
-            // would otherwise resolve to NaN; see compute().
-            storedKey = null;
+            storedKey = null; // bare custom has no bounds; see compute()
         }
         var key = (fromURL && fromURL.key) || storedKey || "7d";
         var custom = fromURL && fromURL.key === "custom" ? fromURL
@@ -295,7 +298,51 @@
         syncButton();
     }
 
+    function setRetentionHours(h) {
+        h = Number(h) || 0;
+        if (h <= 0 || h === retentionHours) return;
+        var before = current ? current.sinceEpoch : null;
+        retentionHours = h;
+        if (current) {
+            current = compute(
+                current.key,
+                current.key === "custom"
+                    ? { sinceEpoch: current.sinceEpoch, untilEpoch: current.untilEpoch }
+                    : null
+            );
+        }
+        var after = current ? current.sinceEpoch : null;
+        var btn = document.getElementById("globalRangeButton");
+        if (btn) btn.dataset.retention = String(h);
+        // Presets cannot change from a retention clamp; only re-publish when
+        // the effective window moved (custom/all), else every page refetches.
+        if (before !== after) publish({ changed: true, via: "retention" });
+    }
+
     global.MallaRange = {
+        setRetentionHours: setRetentionHours,
+        mapToHours: function (range, choices) {
+            const r = get();
+            if (r.key === "all") {
+                // Retention-capped "all" is a bounded window; uncapped means
+                // "everything", which only "No Limit" can express.
+                if (!r.sinceEpoch) return null;
+                const allHours = Math.ceil((Date.now() / 1000 - r.sinceEpoch) / 3600);
+                const sortedAll = (choices || []).slice().sort((a, b) => a - b);
+                for (const c of sortedAll) if (c >= allHours) return c;
+                return null;
+            }
+            let hours = null;
+            if (r.key === "custom" && r.sinceEpoch) {
+                hours = Math.max(1, Math.ceil((Date.now() / 1000 - r.sinceEpoch) / 3600));
+            } else {
+                hours = SECONDS[r.key] / 3600;
+            }
+            if (r.key === "15m") hours = 1;
+            const sorted = (choices || []).slice().sort((a, b) => a - b);
+            for (const c of sorted) if (c >= hours) return c;
+            return sorted.length ? sorted[sorted.length - 1] : hours;
+        },
         PRESETS: PRESETS.slice(),
         get: get,
         set: set,
@@ -307,6 +354,12 @@
         onRangeChange: onRangeChange,
         init: init,
         label: function (key) { return LABELS[key] || key; },
+        describe: function () {
+            const r = get();
+            if (r.key === "custom") return "Custom range";
+            if (r.key === "all") return r.capped ? "All time (last " + retentionHours + "h)" : "All time";
+            return LABELS[r.key] || r.key;
+        },
     };
 
     document.addEventListener("DOMContentLoaded", init);

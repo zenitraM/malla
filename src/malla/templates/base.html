@@ -20,6 +20,23 @@
         })();
     </script>
     <meta name="theme-color" content="#0d1218">
+    <script>
+      (function () {
+        var apply = function () {
+          var nav = document.querySelector(".app-navbar");
+          if (!nav) return;
+          var h = Math.ceil(nav.getBoundingClientRect().height) || 56;
+          document.documentElement.style.setProperty("--malla-nav-h", h + "px");
+          document.documentElement.style.scrollPaddingTop = "calc(" + h + "px + 0.5rem)";
+        };
+        document.addEventListener("DOMContentLoaded", function () {
+          apply();
+          var nav = document.querySelector(".app-navbar");
+          if (nav && window.ResizeObserver) new ResizeObserver(apply).observe(nav);
+          window.addEventListener("resize", apply);
+        });
+      })();
+    </script>
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
@@ -375,8 +392,7 @@
                 new bootstrap.Tooltip(timezoneToggle);
             }
 
-            // Initialize the capture-health chip on every page; the per-table
-            // tooltip scans do not run on the dashboard, map or chat pages.
+            // Capture-health chip: tooltip explains the age on every page
             const healthChip = document.getElementById('captureHealth');
             if (healthChip) {
                 new bootstrap.Tooltip(healthChip);
@@ -391,6 +407,9 @@
                             ? meta.node_count
                             : null;
                         footerCount.textContent = count !== null ? Number(count).toLocaleString() : '—';
+                        if (window.MallaRange && meta && meta.data_retention_hours) {
+                            window.MallaRange.setRetentionHours(meta.data_retention_hours);
+                        }
                     })
                     .catch(() => { footerCount.textContent = '—'; });
             }
@@ -406,11 +425,22 @@
                 const mins = lag / 60;
                 const text = mins < 60 ? `${Math.max(1, Math.round(mins))}m` : `${Math.round(mins / 60)}h`;
                 document.getElementById('captureHealthText').textContent = `▲ ${text}`;
-                const state = mins < 5 ? 'ok' : mins < 30 ? 'warn' : 'stale';
+                const rollup = meta && meta.rollup_freshness;
+                let state = mins < 5 ? 'ok' : mins < 30 ? 'warn' : 'stale';
+                // A stale rollup is a serving defect even when ingest is live:
+                // every per-node aggregate the pages show comes from it.
+                if (rollup && rollup.stale) state = 'stale';
                 health.dataset.state = state;
                 if (window.bootstrap && bootstrap.Tooltip.getInstance(health)) {
                     const tip = bootstrap.Tooltip.getInstance(health);
-                    tip.setContent({ '.tooltip-inner': `Ingest ${state} — newest packet ${Math.round(mins)} min ago` });
+                    let detail = `Ingest ${state} — newest packet ${Math.round(mins)} min ago`;
+                    if (rollup && rollup.age_seconds != null) {
+                        const rollupAge = rollup.age_seconds < 3600
+                            ? `${Math.max(1, Math.round(rollup.age_seconds / 60))} min`
+                            : `${Math.round(rollup.age_seconds / 3600)} h`;
+                        detail += `; rollups ${rollup.stale ? 'stale' : 'fresh'} (newest bucket ${rollupAge} ago)`;
+                    }
+                    tip.setContent({ '.tooltip-inner': detail });
                 }
             }
             function refreshHealth() {

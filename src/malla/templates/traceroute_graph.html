@@ -151,7 +151,7 @@
 
 .graph-container {
     position: fixed;
-    top: 56px; /* Height of navbar */
+    top: var(--malla-nav-h, 56px);
     left: 0;
     right: 0;
     bottom: 0;
@@ -225,7 +225,7 @@
 @media (max-width: 768px) {
     .graph-container {
         flex-direction: column;
-        top: 56px;
+        top: var(--malla-nav-h, 56px);
     }
 
     .graph-main {
@@ -373,8 +373,40 @@ function initializeInterface() {
         }
     });
 
+    // Global range drives the graph window (nearest available hours).
+    function applyGlobalRangeToGraph(initial) {
+        if (!window.MallaRange || !window.MallaRange.get) return;
+        const hours = window.MallaRange.mapToHours
+            ? window.MallaRange.mapToHours(window.MallaRange.get(), [1, 6, 24, 72, 168])
+            : null;
+        if (hours == null) {
+            // Uncapped 'all': the graph keeps its window; mark the override
+            // so the control explains the divergence instead of silently
+            // ignoring the selection.
+            if (window.MallaRange.setOverrideVisible) window.MallaRange.setOverrideVisible(true);
+            return;
+        }
+        const target = String(hours);
+        if ($('#hours').val() !== target) {
+            $('#hours').val(target);
+            if (!initial) loadGraph();
+        } else if (!initial && typeof loadGraph === 'function') {
+            loadGraph();
+        }
+    }
+    if (window.MallaRange) {
+        window.MallaRange.onRangeChange(function (range, meta) {
+            if (meta && meta.via === 'override') return;
+            applyGlobalRangeToGraph(false);
+        });
+    }
+
     // Load primary channels into filter select
     loadPrimaryChannels();
+
+    // Honour a persisted/global range on load (after handlers are bound);
+    // the deferred initial loadGraph picks the synced value up.
+    applyGlobalRangeToGraph(true);
 }
 
 function loadGraph() {

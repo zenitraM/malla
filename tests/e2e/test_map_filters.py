@@ -41,22 +41,19 @@ class TestMapFilters:
 
     @pytest.mark.e2e
     def test_age_filter_options_available(self, page: Page, test_server_url):
-        """Test that all age filter options are available."""
+        """The global range is the map's only age control; the chip mirrors it."""
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
         page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
-        # Check that age filter exists
-        age_filter = page.locator("#maxAge")
-        expect(age_filter).to_be_visible()
+        chip = page.locator("#mapWindowChip")
+        expect(chip).to_be_visible()
 
-        # Check that all expected options are present
-        expected_options = ["", "1", "6", "24", "72", "168"]
-
-        for option_value in expected_options:
-            option = age_filter.locator(f"option[value='{option_value}']")
-            expect(option).to_be_attached()
+        for key in ("1h", "24h", "7d", "all"):
+            page.evaluate(f"() => window.MallaRange.set('{key}')")
+            page.wait_for_timeout(200)
+            expect(chip).to_have_attribute("data-window-key", key)
 
     @pytest.mark.e2e
     def test_client_side_role_filtering(self, page: Page, test_server_url):
@@ -106,15 +103,12 @@ class TestMapFilters:
         # Clear previous requests
         requests.clear()
 
-        # Apply age filter (1 hour - should filter out most nodes)
-        age_filter = page.locator("#maxAge")
-        age_filter.select_option("1")
-
-        apply_button = page.locator("#locationFilterForm button[type='submit']")
-        apply_button.click()
+        # Apply age filter (1 hour - should filter out most nodes); the
+        # window lives in the shared range, no per-page control anymore.
+        page.evaluate("() => window.MallaRange.set('1h')")
 
         # Wait for filtering to complete
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(1200)
 
         # Check that no new API requests were made to /api/locations
         location_requests = [req for req in requests if "/api/locations" in req]
@@ -140,8 +134,7 @@ class TestMapFilters:
         initial_link_count = page.locator("#statsLinks").text_content()
 
         # Apply filters
-        age_filter = page.locator("#maxAge")
-        age_filter.select_option("1")
+        page.evaluate("() => window.MallaRange.set('1h')")
 
         role_filter = page.locator("#roleFilter")
         role_filter.select_option("CLIENT")
@@ -151,7 +144,7 @@ class TestMapFilters:
         page.wait_for_timeout(2000)
 
         # Reset filters
-        age_filter.select_option("")
+        page.evaluate("() => window.MallaRange.set('all')")
         role_filter.select_option("")
         apply_button.click()
         page.wait_for_timeout(2000)
@@ -201,22 +194,18 @@ class TestMapFilters:
         page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
         page.wait_for_timeout(3000)  # Wait for markers to load
 
-        # Count initial markers
-        initial_markers = page.locator(".node-marker-container").count()
+        # Count initial visible nodes
+        initial_count = int(page.locator("#nodeCount").text_content() or 0)
 
-        # Apply restrictive age filter
-        age_filter = page.locator("#maxAge")
-        age_filter.select_option("1")  # 1 hour
+        # Apply restrictive age window (1 hour) through the global range
+        page.evaluate("() => window.MallaRange.set('1h')")
+        page.wait_for_timeout(1200)
 
-        apply_button = page.locator("#locationFilterForm button[type='submit']")
-        apply_button.click()
-        page.wait_for_timeout(3000)  # Wait for map to update
+        # Filtering is client-side; the visible node count reflects it
+        filtered_count = int(page.locator("#nodeCount").text_content() or 0)
 
-        # Count filtered markers
-        filtered_markers = page.locator(".node-marker-container").count()
-
-        # Should have fewer or equal markers
-        assert filtered_markers <= initial_markers
+        # Should have fewer or equal visible nodes
+        assert filtered_count <= initial_count
 
     @pytest.mark.e2e
     def test_search_respects_active_filters(self, page: Page, test_server_url):
@@ -280,62 +269,55 @@ class TestMapFilters:
         page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
 
         # Get references to form elements
-        age_filter = page.locator("#maxAge")
         role_filter = page.locator("#roleFilter")
         apply_button = page.locator("#locationFilterForm button[type='submit']")
 
         combinations = [
-            ("24", "CLIENT"),
-            ("168", "ROUTER"),
-            ("6", "REPEATER"),
-            ("72", "UNKNOWN"),
+            ("24h", "CLIENT"),
+            ("7d", "ROUTER"),
+            ("6h", "REPEATER"),
+            ("72h", "UNKNOWN"),
         ]
 
-        for age_value, role_value in combinations:
-            # Apply combination
-            age_filter.select_option(age_value)
+        for range_key, role_value in combinations:
+            # Apply combination: window from the shared range, role locally
+            page.evaluate(f"() => window.MallaRange.set('{range_key}')")
             role_filter.select_option(role_value)
             apply_button.click()
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(1200)
 
             # Verify no errors
             node_count = page.locator("#nodeCount").text_content()
             assert node_count is not None, (
-                f"Filter combination {age_value}h + {role_value} should work"
+                f"Filter combination {range_key} + {role_value} should work"
             )
 
             link_count = page.locator("#statsLinks").text_content()
             assert link_count is not None, (
-                f"Link count should be available for {age_value}h + {role_value}"
+                f"Link count should be available for {range_key} + {role_value}"
             )
 
         # Reset filters
-        age_filter.select_option("")
+        page.evaluate("() => window.MallaRange.set('all')")
         role_filter.select_option("")
         apply_button.click()
         page.wait_for_timeout(2000)
 
     @pytest.mark.e2e
     def test_default_max_age_is_24_hours(self, page: Page, test_server_url):
-        """Test that the default max age is set to 24 hours."""
+        """The window chip reflects the shared range default (7d) with no local override."""
         page.goto(f"{test_server_url}/map")
 
         # Wait for loading to complete
         page.wait_for_selector("#mapLoading", state="hidden", timeout=DEFAULT_TIMEOUT)
+        page.wait_for_timeout(400)
 
-        # Check that age filter exists
-        age_filter = page.locator("#maxAge")
-        expect(age_filter).to_be_visible()
-
-        # Check that the default value is 24 hours
-        selected_value = age_filter.input_value()
-        assert selected_value == "24", (
-            f"Default max age should be 24 hours, but got {selected_value}"
+        chip = page.locator("#mapWindowChip")
+        expect(chip).to_be_visible()
+        # The shared range boots at 7d
+        assert chip.get_attribute("data-window-key") == "7d", (
+            f"Unexpected default window: {chip.get_attribute('data-window-key')}"
         )
-
-        # Also verify the selected option
-        selected_option = age_filter.locator("option[selected]")
-        expect(selected_option).to_have_attribute("value", "24")
 
     @pytest.mark.e2e
     def test_default_filter_configuration_applied(self, page: Page, test_server_url):
@@ -348,41 +330,24 @@ class TestMapFilters:
         # Wait a bit more for JavaScript to initialize the form fields
         page.wait_for_timeout(1000)
 
-        # Check that maxAge has the default value of 24 hours
-        age_filter = page.locator("#maxAge")
-        expect(age_filter).to_be_visible()
-        selected_value = age_filter.input_value()
-        assert selected_value == "24", (
-            f"Default max age should be 24 hours, but got {selected_value}"
-        )
+        # The window comes from the shared range; no per-page date inputs.
+        chip = page.locator("#mapWindowChip")
+        expect(chip).to_be_visible()
+        window_key = chip.get_attribute("data-window-key")
+        assert window_key, "window chip must carry the active range key"
 
-        # Check that the start date input is populated based on the default maxAge
-        start_date_input = page.locator("#startDateTime")
-        start_value = start_date_input.input_value()
-        assert start_value != "", (
-            "Start date should be populated based on default maxAge"
-        )
-
-        # Check that the end date input is empty (maxAge only sets start date)
-        end_date_input = page.locator("#endDateTime")
-        end_value = end_date_input.input_value()
-        assert end_value == "", "End date should be empty when maxAge is set"
-
-        # Verify that the start date is approximately 24 hours ago
+        # The client-side window start is ~range-hours ago (7d default)
         hours_ago = page.evaluate("""
             () => {
-                const startValue = document.getElementById('startDateTime').value;
-                const startDate = new Date(startValue);
-                const now = new Date();
-                const timeDiffMs = now.getTime() - startDate.getTime();
-                return timeDiffMs / (1000 * 60 * 60);
+                const r = window.MallaRange.get();
+                if (!r.sinceEpoch) return 0;
+                return (Date.now() / 1000 - r.sinceEpoch) / 3600;
             }
         """)
-
-        # Allow for small variations due to rounding
-        assert 23.5 <= hours_ago <= 24.5, (
-            f"Start date should be approximately 24 hours ago, but got {hours_ago} hours"
-        )
+        if window_key == "7d":
+            assert 167 <= hours_ago <= 169, (
+                f"Window start should be ~168h ago, got {hours_ago}"
+            )
 
         # Check that minContacts has the default value of 1
         min_contacts_input = page.locator("#minContacts")

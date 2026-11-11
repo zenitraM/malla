@@ -1129,14 +1129,13 @@ class PacketRepository:
             )
             group_rows = cursor.fetchall()
 
-            envelope_total: int | None = None
             if offset == 0 and group_rows:
-                # Exact total only alongside the first page: the aggregate over
-                # the same grouped set, one more indexed pass, cached with it.
+                # Exact total only alongside the first page: one more indexed
+                # pass over the same grouped set.
                 cursor.execute(
                     f"""
-                    SELECT COUNT(*), SUM(reception_count) FROM (
-                        SELECT mesh_packet_id, COUNT(*) AS reception_count
+                    SELECT COUNT(*) FROM (
+                        SELECT mesh_packet_id
                         FROM packet_history
                         {where_clause}
                         GROUP BY mesh_packet_id
@@ -1144,9 +1143,7 @@ class PacketRepository:
                     """,
                     params,
                 )
-                total_row = cursor.fetchone()
-                total_count = int(total_row[0] or 0)
-                envelope_total = total_count
+                total_count = int(cursor.fetchone()[0] or 0)
             else:
                 cursor.execute(
                     "SELECT COUNT(DISTINCT mesh_packet_id) "
@@ -1199,16 +1196,12 @@ class PacketRepository:
                         row["gateway_id"]
                     )
 
+                repr_by_mesh: dict[Any, int] = {
+                    row["mesh_packet_id"]: int(row["representative_id"])
+                    for row in group_rows
+                }
                 for mesh_id in mesh_ids:  # preserve the exact page order
-                    representative = by_id.get(
-                        int(repr_ids[0])
-                        if False
-                        else next(
-                            r["representative_id"]
-                            for r in group_rows
-                            if r["mesh_packet_id"] == mesh_id
-                        )
-                    )
+                    representative = by_id.get(repr_by_mesh.get(mesh_id))
                     if representative is None:  # pragma: no cover - consistent snapshot
                         continue
 
@@ -1252,8 +1245,6 @@ class PacketRepository:
                 "has_more": total_count > (offset + limit),
                 "is_grouped": True,
             }
-            if envelope_total is not None:
-                result["ungrouped_total"] = envelope_total
             import copy as _copy
 
             _result_cache_put(
