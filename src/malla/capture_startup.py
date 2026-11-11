@@ -95,26 +95,26 @@ def _configure_bulk_ddl_connection(conn: sqlite3.Connection) -> None:
     held), so the serving-oriented trade-offs in :func:`configure_connection`
     can be relaxed for the duration:
 
-    - ``temp_store=MEMORY`` is already set, but the sorter's ceiling is the
-      page cache: a much larger ``cache_size`` keeps more of the 7 GB table
-      resident and cuts the full-table scans index builds perform.
-    - ``journal_mode=MEMORY`` for the rollback journal: WAL is for concurrency
-      with readers, and during the phase there is exactly one writer. A crash
-      mid-build loses nothing that matters — the runner marks the migration
-      failed and the next start rebuilds.
-    - ``synchronous=OFF`` for the same reason: durable-ness of a rebuildable
-      index is not worth fsync-per-page during a multi-minute batch.
-    - ``PRAGMA cache_spill=false`` keeps the sorter in memory until it truly
-      must spill, avoiding premature temp-file churn.
+    - The page cache keeps the SERVING budget: index builds over a
+      multi-gigabyte table let SQLite's sorter and the rollback journal
+      grow with the data, and on a small-RAM host (8 GB total, no swap) an
+      oversized cache plus an in-memory journal is an OOM kill that
+      restarts the whole build. Only the per-page durability cost goes.
+    - ``synchronous=OFF``: durable-ness of a rebuildable index is not worth
+      fsync-per-page during a multi-minute batch. A crash mid-build loses
+      nothing that matters — the runner marks the migration failed and the
+      next start rebuilds.
+    - The journal stays in its default mode and the sorter spills to
+      ``SQLITE_TMPDIR``/``/tmp`` when needed: disk-backed spill on a
+      small-RAM host is minutes slower, not fatal, while an in-memory
+      journal on a 7.9 M-row build was the OOM in production.
 
     Everything is set on this throwaway connection only; serving connections
     keep their WAL/NORMAL configuration untouched.
     """
-    configure_connection(conn, cache_kib=262144)  # 256 MiB page cache
+    configure_connection(conn)  # same cache budget as serving
     cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=MEMORY")
     cursor.execute("PRAGMA synchronous=OFF")
-    cursor.execute("PRAGMA cache_spill=false")
 
 
 def run_phase(
