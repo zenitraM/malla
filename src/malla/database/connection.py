@@ -3,6 +3,7 @@
 import logging
 import os
 import sqlite3
+import time
 from typing import Any
 
 from malla.config import get_config
@@ -148,6 +149,48 @@ def required_tables_missing(db_path: str | None = None) -> list[str] | None:
     finally:
         conn.close()
     return [table for table in REQUIRED_TABLES if table not in present]
+
+
+#: Whether the indexes queries pin with ``INDEXED BY`` exist, with the time
+#: it was last checked. The capture daemon's BLOCKING migration builds these
+#: over millions of rows — minutes of window during which every pinned query
+#: would raise ``no such index``. Callers use the probe to run the same query
+#: unpinned instead (correct results, worse plan), or to hide a panel, rather
+#: than erroring. TTL'd because the catalog is consulted per request otherwise
+#: and the state only flips when the migration finishes.
+_PINNED_INDEX_CACHE_TTL_SECONDS = 30.0
+_pinned_index_state: dict[str, tuple[float, bool]] = {}
+
+
+def pinned_index_available(name: str) -> bool:
+    """Whether index *name* exists, cached briefly.
+
+    Unknown results (missing file, locked catalog) count as unavailable: the
+    fallback query path is always safe, the pinned one is not.
+    """
+    now = time.time()
+    cached = _pinned_index_state.get(name)
+    if cached and now - cached[0] < _PINNED_INDEX_CACHE_TTL_SECONDS:
+        return cached[1]
+    try:
+        conn = sqlite3.connect(_resolve_db_path(), timeout=5.0)
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?",
+                (name,),
+            ).fetchone()
+        finally:
+            conn.close()
+        available = row is not None
+    except sqlite3.Error:
+        available = False
+    _pinned_index_state[name] = (now, available)
+    return available
+
+
+def reset_pinned_index_cache() -> None:
+    """Drop the availability cache (tests, and callers that just built an index)."""
+    _pinned_index_state.clear()
 
 
 def init_database() -> None:

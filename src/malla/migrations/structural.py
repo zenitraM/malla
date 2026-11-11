@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 
 from .. import activity_rollup
 from .base import Migration, Phase, Watermark
@@ -338,12 +339,34 @@ def _core_indexes_pending(conn: sqlite3.Connection, _wm: Watermark) -> bool:
 
 
 def _apply_core_indexes(conn: sqlite3.Connection, _wm: Watermark) -> Watermark:
+    """Build every missing index, logging each one as it completes.
+
+    On a multi-million-row ``packet_history`` each index is a full table scan
+    that can take minutes, and the whole BLOCKING phase can easily run past
+    half an hour. Per-index "3/9 done" progress lines are the difference
+    between an operator who waits and one who restarts the daemon mid-build
+    (which restarts the entire batch). Timing lives in the log line, not just
+    the migration result, because the migration completes only once.
+    """
     present_tables = tables(conn)
     present_indexes = indexes(conn)
-    for index, table, sql in INDEX_SPECS:
-        if table not in present_tables or index in present_indexes:
-            continue
+    todo = [
+        (index, sql)
+        for index, table, sql in INDEX_SPECS
+        if table in present_tables and index not in present_indexes
+    ]
+    total = len(todo)
+    for done, (index, sql) in enumerate(todo, start=1):
+        started = time.monotonic()
+        logger.info("Building index %d/%d: %s", done, total, index)
         conn.execute(sql)
+        logger.info(
+            "Built index %d/%d: %s in %.1fs",
+            done,
+            total,
+            index,
+            time.monotonic() - started,
+        )
         present_indexes.add(index)
     if "packet_history" in present_tables:
         for name in (*LEGACY_INDEX_NAMES, *OBSOLETE_INDEX_NAMES):

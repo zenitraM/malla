@@ -16,6 +16,24 @@ from ..utils.signal_quality import rssi_valid_sql, snr_valid_sql
 logger = logging.getLogger(__name__)
 
 
+def _signal_index_hint() -> str:
+    """``INDEXED BY`` for the signal index, or nothing while it is missing.
+
+    The BLOCKING migration builds ``idx_packet_history_signal_time`` over the
+    full packet_history on first boot; until then the pinned query raises
+    ``no such index``. Running unpinned is correct but scans more rows, so
+    this is a degradation window, not a behavior change once built. The probe
+    is cached, so steady-state adds no per-request catalog reads.
+    """
+    from ..database.connection import pinned_index_available
+
+    return (
+        "INDEXED BY idx_packet_history_signal_time"
+        if pinned_index_available("idx_packet_history_signal_time")
+        else ""
+    )
+
+
 # NOTE: Lightweight, in-process cache so that repeated calls in a short period
 # do not hit the database multiple times. This is intentionally simple to keep
 # dependencies minimal; for a multi-process deployment a proper cache (e.g.
@@ -275,6 +293,7 @@ class AnalyticsService:
 
         conn = get_db_connection()
         cursor = conn.cursor()
+        signal_hint = _signal_index_hint()
 
         # Get signal statistics using SQL aggregation. Every branch restricts
         # itself to plausible values: without the guard a single garbage row
@@ -302,7 +321,7 @@ class AnalyticsService:
                 -- otherwise pile a fake spike at 0 in the histogram panel.
                 AVG(CASE WHEN {snr_valid_sql()} AND {rssi_valid_sql()}
                     THEN snr END) as rf_avg_snr
-            FROM packet_history INDEXED BY idx_packet_history_signal_time
+            FROM packet_history {signal_hint}
             WHERE {where_clause}
         """,
             params,
@@ -330,7 +349,7 @@ class AnalyticsService:
             f"""
             SELECT MIN(MAX(CAST((rssi + 150) / 5 AS INTEGER), ?), ?) AS bin,
                    COUNT(*) AS count
-            FROM packet_history INDEXED BY idx_packet_history_signal_time
+            FROM packet_history {signal_hint}
             WHERE {where_clause} AND {rssi_valid_sql()}
             GROUP BY bin
             """,
@@ -343,7 +362,7 @@ class AnalyticsService:
         cursor.execute(
             f"""
             SELECT CAST((snr + 30.0) / 2 AS INTEGER) AS bin, COUNT(*) AS count
-            FROM packet_history INDEXED BY idx_packet_history_signal_time
+            FROM packet_history {signal_hint}
             WHERE {where_clause} AND {snr_valid_sql()} AND {rssi_valid_sql()}
             GROUP BY bin
             """,

@@ -24,9 +24,21 @@ from ..utils.signal_quality import (
     rssi_valid_sql,
     snr_valid_sql,
 )
-from .connection import get_db_connection
+from .connection import get_db_connection, pinned_index_available
 
 logger = logging.getLogger(__name__)
+
+
+def _pinned_index_hint(name: str) -> str:
+    """``INDEXED BY <name>``, or the empty string while the index is missing.
+
+    The BLOCKING migration builds the packet_history indexes over millions of
+    rows; queries that pin them with ``INDEXED BY`` would raise ``no such
+    index`` during that window. Dropping the pin keeps the page serving with
+    a worse (planner-chosen) plan instead. Cached probe, no steady-state cost.
+    """
+    return f"INDEXED BY {name}" if pinned_index_available(name) else ""
+
 
 # Telemetry metrics charted on the node detail page. Each entry maps a
 # TELEMETRY_APP protobuf sub-message + field to display metadata. Chart grouping
@@ -2294,13 +2306,17 @@ class NodeRepository:
                 )
 
             # Get received gateways information (gateways that have received packets from this node)
+            # The INDEXED BY pin degrades to an unpinned plan while the
+            # BLOCKING migration is still building the index (see
+            # pinned_index_available): correct results, slower plan, no error.
+            from_time_hint = _pinned_index_hint("idx_packet_history_from_time_desc")
             gateways_query = f"""
             WITH top_gateways AS (
                 SELECT
                     p.gateway_id,
                     SUM(CASE WHEN p.hop_start = p.hop_limit THEN 1 ELSE 0 END) as direct_packet_count,
                     COUNT(*) as packet_count
-                FROM packet_history p INDEXED BY idx_packet_history_from_time_desc
+                FROM packet_history p {from_time_hint}
                 WHERE p.from_node_id = ?
                   AND p.gateway_id IS NOT NULL
                 GROUP BY p.gateway_id
@@ -2325,7 +2341,7 @@ class NodeRepository:
                     THEN CAST(p.snr AS FLOAT) ELSE NULL END) as direct_snr,
                 MAX(tg.direct_packet_count) as direct_packet_count
             FROM top_gateways tg
-            JOIN packet_history p INDEXED BY idx_packet_history_from_time_desc
+            JOIN packet_history p {from_time_hint}
               ON p.gateway_id = tg.gateway_id
             WHERE p.from_node_id = ?
             GROUP BY p.gateway_id
@@ -2795,6 +2811,15 @@ class NodeRepository:
                 )
             ]
 
+            # Same degradation contract as the node-detail gateway query: the
+            # pins resolve to "" while their indexes are still being built.
+            lastbyte_hint = _pinned_index_hint(
+                "idx_packet_history_direct_gateway_lastbyte"
+            )
+            suffix_hint = _pinned_index_hint(
+                "idx_packet_history_direct_from_gateway_suffix"
+            )
+
             candidates_query_part1 = f"""
             WITH requested_pairs(gateway_node_id, gateway_hex, last_byte, last_byte_hex) AS (
                 VALUES {requested_pair_placeholders}
@@ -2804,7 +2829,7 @@ class NodeRepository:
                 requested_pairs.gateway_node_id as gateway_id,
                 requested_pairs.last_byte as last_byte
             FROM requested_pairs
-            JOIN packet_history p INDEXED BY idx_packet_history_direct_gateway_lastbyte
+            JOIN packet_history p {lastbyte_hint}
                 ON p.gateway_id = requested_pairs.gateway_hex
                 AND (p.from_node_id & 0xFF) = requested_pairs.last_byte
             WHERE p.from_node_id IS NOT NULL
@@ -2822,7 +2847,7 @@ class NodeRepository:
                 requested_pairs.gateway_node_id as from_node_id,
                 requested_pairs.last_byte as last_byte
             FROM requested_pairs
-            JOIN packet_history p INDEXED BY idx_packet_history_direct_from_gateway_suffix
+            JOIN packet_history p {suffix_hint}
                 ON p.from_node_id = requested_pairs.gateway_node_id
                 AND lower(substr(p.gateway_id, -2)) = requested_pairs.last_byte_hex
             WHERE p.gateway_id IS NOT NULL

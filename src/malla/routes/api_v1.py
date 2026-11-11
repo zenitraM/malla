@@ -2433,6 +2433,14 @@ def meta_info() -> Response:
             ),
         }
 
+    # Degraded schema: the capture's BLOCKING migration is still building the
+    # packet_history indexes. Pages that would pin a missing index run their
+    # fallback plans (slower, correct); the UI reads this flag to explain
+    # slow/unavailable analytics instead of showing raw errors.
+    from ..database.connection import pinned_index_available
+
+    schema_degraded = not pinned_index_available("idx_packet_history_signal_time")
+
     database_file = str(cfg.database_file)
     try:
         db_size = os.path.getsize(database_file)
@@ -2458,6 +2466,7 @@ def meta_info() -> Response:
         "last_packet_time_utc": _iso(last_packet_ts) if last_packet_ts else None,
         "ingest_lag_seconds": round(ingest_lag, 1) if ingest_lag is not None else None,
         "rollup_freshness": rollup_freshness,
+        "schema_degraded": schema_degraded,
     }
     return _ok(data)
 
