@@ -577,7 +577,7 @@ def get_packet_details(
 
 def decode_packet_payload(packet: dict[str, Any]) -> dict[str, Any] | None:
     """Attempt to decode packet payload based on portnum using the new dynamic discovery system."""
-    if not packet["raw_payload"]:
+    if not packet.get("raw_payload"):
         return None
 
     try:

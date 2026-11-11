@@ -25,6 +25,7 @@
 :root,
 [data-bs-theme=light] {
   /* Neutral ramp (slate) */
+  --malla-table-striped: rgba(148, 163, 184, 0.07);
   --malla-gray-50: #f8fafc;
   --malla-gray-100: #f1f5f9;
   --malla-gray-200: #e2e8f0;
@@ -121,6 +122,7 @@
   --malla-space-7: 3rem;
 
   /* Radii */
+  --malla-nav-h: 3.5rem; /* refined at runtime to the real navbar height */
   --malla-radius-sm: 0.375rem;
   --malla-radius: 0.5rem;
   --malla-radius-lg: 0.75rem;
@@ -131,6 +133,7 @@
 /* Dark scheme */
 [data-bs-theme=dark] {
   --malla-gray-50: #171e27;
+  --malla-table-striped: rgba(148, 163, 184, 0.05);
   --malla-gray-100: #1c242f;
   --malla-gray-200: #232d3a;
   --malla-gray-300: #2e3a49;
@@ -693,10 +696,10 @@ code, kbd, pre, samp {
   --bs-btn-border-color: var(--malla-info);
   --bs-btn-hover-bg: var(--malla-info);
   --bs-btn-hover-border-color: var(--malla-info);
-  --bs-btn-hover-color: #ffffff;
+  --bs-btn-hover-color: var(--malla-on-primary);
   --bs-btn-active-bg: var(--malla-info);
   --bs-btn-active-border-color: var(--malla-info);
-  --bs-btn-active-color: #ffffff;
+  --bs-btn-active-color: var(--malla-on-primary);
 }
 
 .btn-outline-success {
@@ -726,10 +729,10 @@ code, kbd, pre, samp {
   --bs-btn-border-color: var(--malla-danger);
   --bs-btn-hover-bg: var(--malla-danger);
   --bs-btn-hover-border-color: var(--malla-danger);
-  --bs-btn-hover-color: #ffffff;
+  --bs-btn-hover-color: var(--malla-on-primary);
   --bs-btn-active-bg: var(--malla-danger);
   --bs-btn-active-border-color: var(--malla-danger);
-  --bs-btn-active-color: #ffffff;
+  --bs-btn-active-color: var(--malla-on-primary);
 }
 
 /* Outline toggle set (range switchers, view toggles) */
@@ -760,7 +763,7 @@ code, kbd, pre, samp {
     box-shadow var(--malla-speed) var(--malla-ease);
 }
 
-.form-control::placeholder { color: var(--malla-text-faint); }
+.form-control::placeholder { color: var(--bs-secondary-color); }
 
 .form-control:focus,
 .form-select:focus {
@@ -1065,7 +1068,7 @@ code, kbd, pre, samp {
 /* Presence (online / recent / offline) */
 .presence-online { color: var(--malla-success); }
 .presence-recent { color: var(--malla-warning); }
-.presence-offline { color: var(--malla-text-faint); }
+.presence-offline { color: var(--malla-text-muted); }
 
 /* Node detail hero */
 .node-hero {

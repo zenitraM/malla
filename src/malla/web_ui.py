@@ -147,7 +147,13 @@ def start_dashboard_warmer(flask_app: Any, interval_s: int = 45) -> None:
                 logger.debug("Dashboard warmer cycle failed: %s", exc)
             _time.sleep(interval_s)
 
-    guard_key = str(getattr(flask_app, "config", {}).get("DATABASE_FILE", ""))
+    # Key by process: with preload_app the master builds the app and the
+    # guard would otherwise be inherited, leaving workers warmer-less
+    # (threads do not survive fork).
+    guard_key = (
+        str(getattr(flask_app, "config", {}).get("DATABASE_FILE", ""))
+        + f":{os.getpid()}"
+    )
     with _SUMMARY_WARMER_LOCK:
         if guard_key in _SUMMARY_WARMER_STARTED:
             return
@@ -260,6 +266,7 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
     # compatibility with the existing code base. Over time we should migrate
     # direct usages to the nested ``APP_CONFIG`` object instead.
     app.config["SECRET_KEY"] = cfg.secret_key
+    app.config["_CREATOR_PID"] = os.getpid()
     app.config["DATABASE_FILE"] = cfg.database_file
 
     # Ensure helper modules relying on env-var fallback pick up the correct DB
@@ -444,7 +451,7 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
     # AnalyticsService lazy-rollup precedent) plus a persistent low-priority
     # refresher. The capture daemon refreshes too; overlap is safe because
     # every rollup write is idempotent on its natural keys. NOTE: this
-    # intentionally deviates from design §0's "web does a single bounded
+    # intentionally deviates from the original "web does a single bounded
     # chunk only" - the standing sign-off is a persistent thread here as well.
     if capture_rollups.refresh_enabled():
         db_path = str(app.config.get("DATABASE_FILE") or cfg.database_file)
