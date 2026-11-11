@@ -26,11 +26,35 @@ def _node_info_present(conn: sqlite3.Connection) -> bool:
     return "node_info" in tables(conn)
 
 
+_FIXABLE_PRIMARY_CHANNEL_SQL = """
+    AND EXISTS (
+        SELECT 1
+        FROM packet_history ph
+        WHERE ph.from_node_id = ni.node_id
+          AND ph.portnum_name = 'NODEINFO_APP'
+          AND ph.channel_id IS NOT NULL AND ph.channel_id != ''
+    )
+"""
+
+
 def _pending_primary_channel(conn: sqlite3.Connection, _wm: Watermark) -> bool:
     if not _node_info_present(conn):
         return False
+    # Look only at nodes the apply step can actually fix. Some rows can never
+    # match (NODEINFO without a channel_id, or no NODEINFO at all - e.g.
+    # attacker-fabricated node_info rows from the public broker); counting
+    # them here would make this migration re-scan node_info on every boot
+    # forever. The outer table gets an explicit alias so the fragment below
+    # cannot be shadowed by an inner FROM, and the OR is parenthesized so the
+    # EXISTS conjunction cannot bind to just one branch.
     row = conn.execute(
-        "SELECT COUNT(*) FROM node_info WHERE primary_channel IS NULL OR primary_channel = ''"
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM node_info ni
+            WHERE (ni.primary_channel IS NULL OR ni.primary_channel = '')
+    """
+        + _FIXABLE_PRIMARY_CHANNEL_SQL
+        + "\n        )"
     ).fetchone()
     return bool(row and row[0])
 
@@ -40,25 +64,19 @@ def _apply_primary_channel(conn: sqlite3.Connection, _wm: Watermark) -> Watermar
     before = conn.total_changes
     conn.execute(
         """
-        UPDATE node_info
+        UPDATE node_info AS ni
         SET primary_channel = (
             SELECT ph.channel_id
             FROM packet_history ph
-            WHERE ph.from_node_id = node_info.node_id
+            WHERE ph.from_node_id = ni.node_id
               AND ph.portnum_name = 'NODEINFO_APP'
               AND ph.channel_id IS NOT NULL AND ph.channel_id != ''
             ORDER BY ph.timestamp DESC
             LIMIT 1
         )
-        WHERE (primary_channel IS NULL OR primary_channel = '')
-          AND EXISTS (
-            SELECT 1
-            FROM packet_history ph
-            WHERE ph.from_node_id = node_info.node_id
-              AND ph.portnum_name = 'NODEINFO_APP'
-              AND ph.channel_id IS NOT NULL AND ph.channel_id != ''
-          )
+        WHERE (ni.primary_channel IS NULL OR ni.primary_channel = '')
     """
+        + _FIXABLE_PRIMARY_CHANNEL_SQL
     )
     changed = conn.total_changes - before
     if changed:

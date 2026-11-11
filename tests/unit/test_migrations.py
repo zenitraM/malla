@@ -396,3 +396,84 @@ def test_cli_dry_run_forget_does_not_create_meta(tmp_path, capsys):
     finally:
         conn.close()
     assert "malla_meta" not in tables
+
+
+def _primary_channel_db(path) -> sqlite3.Connection:
+    """A database shaped like production: node_info + packet_history."""
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """
+        CREATE TABLE node_info (
+            node_id INTEGER PRIMARY KEY,
+            hex_id TEXT,
+            long_name TEXT,
+            primary_channel TEXT
+        )
+    """
+    )
+    conn.execute(
+        """
+        CREATE TABLE packet_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_node_id INTEGER,
+            portnum_name TEXT,
+            channel_id TEXT,
+            timestamp REAL
+        )
+    """
+    )
+    # Node fixable from its newest NODEINFO packet.
+    conn.execute(
+        "INSERT INTO node_info (node_id, hex_id, long_name) VALUES (1, '!01', 'fixable')"
+    )
+    conn.execute(
+        "INSERT INTO packet_history (from_node_id, portnum_name, channel_id, timestamp)"
+        " VALUES (1, 'NODEINFO_APP', 'LongFast', 100)"
+    )
+    # Node with NODEINFO packets but never a channel_id: unfixable residue.
+    conn.execute(
+        "INSERT INTO node_info (node_id, hex_id, long_name) VALUES (2, '!02', 'ghost')"
+    )
+    conn.execute(
+        "INSERT INTO packet_history (from_node_id, portnum_name, channel_id, timestamp)"
+        " VALUES (2, 'NODEINFO_APP', NULL, 100)"
+    )
+    # Node with no NODEINFO packets at all: unfixable residue.
+    conn.execute(
+        "INSERT INTO node_info (node_id, hex_id, long_name) VALUES (3, '!03', 'silent')"
+    )
+    conn.commit()
+    return conn
+
+
+def test_primary_channel_backfill_is_not_self_pending(tmp_path):
+    """A node that can never be fixed must not keep the migration pending.
+
+    The apply step only fills nodes that have a NODEINFO packet carrying a
+    channel_id; the pending check must use the same condition or the migration
+    re-scans node_info x packet_history on every boot forever.
+    """
+    from malla.migrations.derived import PRIMARY_CHANNEL_BACKFILL
+
+    path = tmp_path / "pc.db"
+    conn = _primary_channel_db(path)
+    try:
+        assert PRIMARY_CHANNEL_BACKFILL.pending(conn, None)
+
+        watermark = PRIMARY_CHANNEL_BACKFILL.apply(conn, None)
+        conn.commit()
+        assert watermark is None
+
+        fixed = conn.execute(
+            "SELECT primary_channel FROM node_info WHERE node_id = 1"
+        ).fetchone()[0]
+        assert fixed == "LongFast"
+
+        # The residue rows are untouched - and no longer keep it pending.
+        residue = conn.execute(
+            "SELECT COUNT(*) FROM node_info WHERE primary_channel IS NULL"
+        ).fetchone()[0]
+        assert residue == 2
+        assert not PRIMARY_CHANNEL_BACKFILL.pending(conn, None)
+    finally:
+        conn.close()
