@@ -208,14 +208,14 @@ Each migration is tagged with the phase in which it may run:
 | `blocking` | write-locking DDL (index builds) | after connecting; incoming packets queue in memory and are replayed when the migration finishes, so none are lost |
 | `derived` | data work over stored rows (backfills, bounded `ANALYZE`) | in the background while packets are ingested |
 
-The web UI never runs the write-locking (`blocking`) phase on a populated
-database — it re-checks the cheap `schema` phase on every boot, so a fresh
-database is bootstrapped (tables, then indexes, since there are no rows yet)
-and later releases' tables appear without waiting for the capture daemon.
-**Still start `malla-capture` at least once (or run `malla-migrate`) before
-expecting the web UI to serve data**: index builds on a populated database are
-the daemon's job, and against a large uninitialized database the web UI logs a
-clear error at startup while the heavy phases run.
+The web UI never runs the schema/blocking phases on a populated database; on
+boot it runs only the cheap DERIVED planner-stats bootstrap (creating
+`malla_meta`/`sqlite_stat1` on a fresh DB), checks which required tables are
+present, and serves an actionable 503 with bootstrap instructions while any
+are missing. **Start `malla-capture` once (or run `malla-migrate`) before
+expecting the web UI to serve data**: schema, indexes and the derived rollups
+are created there, and against a partially-migrated database the web UI's
+preflight reports exactly what is absent.
 
 Migrations can be inspected or applied without starting MQTT:
 

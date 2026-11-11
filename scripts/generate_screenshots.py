@@ -33,8 +33,8 @@ from __future__ import annotations
 
 import argparse
 import http.client
-import os
 import logging
+import os
 import shutil
 import socket
 import sqlite3
@@ -44,8 +44,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from meshtastic import mesh_pb2
-from meshtastic import portnums_pb2
+from meshtastic import mesh_pb2, portnums_pb2
 from meshtastic.protobuf import mqtt_pb2
 from playwright.sync_api import sync_playwright
 
@@ -144,6 +143,7 @@ def _assemble_gif(frames_dir: Path, gif_dest: Path) -> bool:
         loop=0,
     )
     return gif_dest.exists()
+
 
 # The list of (route, output filename) to capture – order matters for README.
 # JPEG is used for smaller, README-friendly assets.
@@ -532,7 +532,9 @@ def _seed_demo_traceroute_receptions(db_path: Path) -> str | None:
 
         main = dict(row)
         mesh_packet_id = main["mesh_packet_id"]
-        channel_index = main["channel_index"] if main["channel_index"] is not None else 0
+        channel_index = (
+            main["channel_index"] if main["channel_index"] is not None else 0
+        )
 
         # Hearing gateways: fixture nodes with names so the graph shows
         # labels. Each reception carries its own route variant (same mesh
@@ -546,10 +548,34 @@ def _seed_demo_traceroute_receptions(db_path: Path) -> str | None:
         #   D – heard early:  source -> 0x11111111 -> 0x44444444 (gateway here)
         # (gateway_id, snr, rssi, route_nodes, snr_towards)
         reception_specs = [
-            ("!deadbeef", -9.4, -88, [0x11111111, 0x33333333, 0x44444444], [-6.0, -9.0, -12.0, -15.0]),  # TNGC
-            ("!dddddddd", -12.7, -97, [0x11111111, 0x33333333, 0x44444444], [-6.0, -9.0, -12.0, -15.0]),  # TEND
-            ("!77777777", -7.9, -81, [0x11111111, 0x33333333], [-5.0, -8.0, -11.0]),  # TMNH
-            ("!88888888", -15.3, -105, [0x11111111, 0x33333333], [-5.0, -8.0, -11.0]),  # TBNI
+            (
+                "!deadbeef",
+                -9.4,
+                -88,
+                [0x11111111, 0x33333333, 0x44444444],
+                [-6.0, -9.0, -12.0, -15.0],
+            ),  # TNGC
+            (
+                "!dddddddd",
+                -12.7,
+                -97,
+                [0x11111111, 0x33333333, 0x44444444],
+                [-6.0, -9.0, -12.0, -15.0],
+            ),  # TEND
+            (
+                "!77777777",
+                -7.9,
+                -81,
+                [0x11111111, 0x33333333],
+                [-5.0, -8.0, -11.0],
+            ),  # TMNH
+            (
+                "!88888888",
+                -15.3,
+                -105,
+                [0x11111111, 0x33333333],
+                [-5.0, -8.0, -11.0],
+            ),  # TBNI
             ("!bbbbbbbb", -10.8, -92, [0x11111111, 0x33333333], [-5.0, -8.0]),  # TENL
             ("!abdddde4", -11.6, -100, [0x11111111, 0x44444444], [-7.0, -10.0]),  # TNBR
         ]
@@ -760,7 +786,9 @@ def _capture_screenshots(
                             }""",
                             timeout=20000,
                         )
-                        _LOG.info("Dashboard: Charts, table, and loading state are ready")
+                        _LOG.info(
+                            "Dashboard: Charts, table, and loading state are ready"
+                        )
 
                         # Give Chart.js animations time to finish drawing every panel.
                         page.wait_for_timeout(6000)
@@ -1353,9 +1381,7 @@ def _capture_screenshots(
                             "#combined-traceroute-graph svg .node-group",
                             timeout=15000,
                         )
-                        page.wait_for_selector(
-                            "#reception-groups .rec", timeout=15000
-                        )
+                        page.wait_for_selector("#reception-groups .rec", timeout=15000)
                         page.wait_for_timeout(800)
                         # From here on the branch owns the README entry – the
                         # generic tail must not write a JPEG under the GIF
@@ -1407,7 +1433,11 @@ def _capture_screenshots(
                         frames_dir = out_dir / "packet_graph_frames"
                         frames_dir.mkdir(parents=True, exist_ok=True)
 
-                        def _frame(name: str) -> None:
+                        def _frame(
+                            name: str,
+                            frames_dir: Path = frames_dir,
+                            frame_kwargs: dict = frame_kwargs,
+                        ) -> None:
                             page.screenshot(path=str(frames_dir / name), **frame_kwargs)
 
                         def _click_node(
@@ -1528,9 +1558,7 @@ def _capture_screenshots(
                         gif_dest = out_dir / filename
                         if _assemble_gif(frames_dir, gif_dest):
                             images.append(gif_dest)
-                            _LOG.info(
-                                "Captured packet graph GIF → %s", gif_dest.name
-                            )
+                            _LOG.info("Captured packet graph GIF → %s", gif_dest.name)
                         else:
                             _LOG.warning("Failed to assemble packet graph GIF")
                         captured_here = True

@@ -302,7 +302,7 @@ class AnalyticsService:
                 -- otherwise pile a fake spike at 0 in the histogram panel.
                 AVG(CASE WHEN {snr_valid_sql()} AND {rssi_valid_sql()}
                     THEN snr END) as rf_avg_snr
-            FROM packet_history
+            FROM packet_history INDEXED BY idx_packet_history_signal_time
             WHERE {where_clause}
         """,
             params,
@@ -330,7 +330,7 @@ class AnalyticsService:
             f"""
             SELECT MIN(MAX(CAST((rssi + 150) / 5 AS INTEGER), ?), ?) AS bin,
                    COUNT(*) AS count
-            FROM packet_history
+            FROM packet_history INDEXED BY idx_packet_history_signal_time
             WHERE {where_clause} AND {rssi_valid_sql()}
             GROUP BY bin
             """,
@@ -343,7 +343,7 @@ class AnalyticsService:
         cursor.execute(
             f"""
             SELECT CAST((snr + 30.0) / 2 AS INTEGER) AS bin, COUNT(*) AS count
-            FROM packet_history
+            FROM packet_history INDEXED BY idx_packet_history_signal_time
             WHERE {where_clause} AND {snr_valid_sql()} AND {rssi_valid_sql()}
             GROUP BY bin
             """,
