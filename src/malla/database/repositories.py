@@ -317,6 +317,30 @@ class DashboardRepository:
             cursor.execute("SELECT COUNT(*) as total_nodes FROM node_info")
             total_nodes = cursor.fetchone()["total_nodes"]
 
+            # Active nodes over 24h from the capture-maintained quarter-hour
+            # rollup: 96 tiny (bucket, node_id) rows per node instead of a
+            # TEMP B-TREE DISTINCT over ~500k packet_history rows. The rollup
+            # is pruned in lockstep with packet deletion, so the two sources
+            # agree inside the retention window; when the rollup is empty
+            # (fresh database, or a capture that has not yet backfilled) fall
+            # back to the direct query so the panel is never stuck at 0.
+            rollup_floor = int((now - 24 * 3600) // 900) * 900
+            active_nodes_24h = cursor.execute(
+                "SELECT COUNT(DISTINCT node_id) FROM activity_node_quarter"
+                " WHERE bucket >= ?",
+                (rollup_floor,),
+            ).fetchone()[0]
+            if not active_nodes_24h:
+                cursor.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT from_node_id) as active_nodes_24h
+                    FROM packet_history
+                    WHERE timestamp > ? AND from_node_id IS NOT NULL{gateway_filter}
+                    """,
+                    [twenty_four_hours_ago] + gateway_params,
+                )
+                active_nodes_24h = cursor.fetchone()["active_nodes_24h"] or 0
+
             # Single optimized query for all packet statistics
             params = [one_hour_ago, twenty_four_hours_ago] + gateway_params
 
@@ -324,7 +348,6 @@ class DashboardRepository:
                 f"""
                 SELECT
                     COUNT(*) as total_packets,
-                    COUNT(DISTINCT CASE WHEN from_node_id IS NOT NULL THEN from_node_id END) as active_nodes_24h,
                     COUNT(CASE WHEN timestamp > ? THEN 1 END) as recent_packets,
                     AVG(CASE WHEN {rssi_valid_sql()} THEN rssi END) as avg_rssi,
                     AVG(CASE WHEN {snr_valid_sql()} THEN snr END) as avg_snr,
@@ -388,7 +411,7 @@ class DashboardRepository:
 
             stats = {
                 "total_nodes": total_nodes,
-                "active_nodes_24h": stats_row["active_nodes_24h"] or 0,
+                "active_nodes_24h": active_nodes_24h,
                 "nodes_seen_7d": nodes_seen_7d,
                 "total_packets": total_packets_all_time or 0,
                 "recent_packets": stats_row["recent_packets"] or 0,
