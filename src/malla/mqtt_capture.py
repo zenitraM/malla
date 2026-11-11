@@ -793,6 +793,12 @@ def cleanup_old_data() -> None:
 
     with db_lock:
         conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
+        # The DELETE over a multi-GB table competes with ingest and both
+        # rollup refreshers; without an explicit busy_timeout the cleanup's
+        # first BEGIN IMMEDIATE during a refresh chunk fails instantly instead
+        # of waiting its turn (the 30 s connect timeout does not cover
+        # statements issued later on the connection).
+        conn.execute("PRAGMA busy_timeout=30000")
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
