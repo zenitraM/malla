@@ -85,6 +85,7 @@ def _flush_process_wide_caches() -> None:
         try:
             repositories = importlib.import_module(f"{pkg}.database.repositories")
             repositories._dashboard_stats_cache.clear()
+            repositories._RESULT_CACHE.clear()
         except Exception:  # noqa: BLE001 - flush is best-effort
             pass
         try:

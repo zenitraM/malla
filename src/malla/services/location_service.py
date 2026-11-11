@@ -314,6 +314,7 @@ class LocationService:
                 "sats_in_view": location.get("sats_in_view"),
                 "precision_bits": location.get("precision_bits"),
                 "precision_meters": location.get("precision_meters"),
+                "gateway_id": location.get("gateway_id"),
                 # Network analysis data
                 "packet_count": network_node.get("packet_count", 0),
                 "avg_snr": network_node.get("avg_snr"),

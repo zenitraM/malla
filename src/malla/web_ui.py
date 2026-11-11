@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from flask import Flask, jsonify, render_template_string, request
 from werkzeug.exceptions import InternalServerError
@@ -110,6 +111,48 @@ def _spawn_planner_stats_bootstrap(db_path: str) -> None:
             return
         _PLANNER_STATS_STARTED.add(db_path)
     threading.Thread(target=_run, name="planner-stats-bootstrap", daemon=True).start()
+
+
+# Dashboard warmer: one attempt per process. Fires the aggregate summary once
+# at boot and refreshes it inside the analytics TTL window, so the first
+# visitor gets a warm dashboard instead of the multi-second cold aggregate.
+# Same contract as every background worker here: idempotent work, daemon
+# thread, never raises into request serving.
+_SUMMARY_WARMER_STARTED: set[str] = set()
+_SUMMARY_WARMER_LOCK = threading.Lock()
+
+
+def start_dashboard_warmer(flask_app: Any, interval_s: int = 45) -> None:
+    """Pre-warm and keep-warm the dashboard summary aggregate (daemon thread).
+
+    Runs inside *flask_app*'s context so ``get_db_connection`` resolves the
+    same database the app serves. Idempotent work, daemon thread, never
+    raises into request serving.
+    """
+
+    def _warm_once(inner_app: Any) -> None:
+        from .services.analytics_service import AnalyticsService
+
+        with inner_app.app_context():
+            AnalyticsService.get_analytics_data()
+            AnalyticsService.get_activity_timeline("24h", 0)
+
+    def _loop() -> None:
+        import time as _time
+
+        while True:
+            try:
+                _warm_once(flask_app)
+            except Exception as exc:  # noqa: BLE001 - background, best effort
+                logger.debug("Dashboard warmer cycle failed: %s", exc)
+            _time.sleep(interval_s)
+
+    guard_key = str(getattr(flask_app, "config", {}).get("DATABASE_FILE", ""))
+    with _SUMMARY_WARMER_LOCK:
+        if guard_key in _SUMMARY_WARMER_STARTED:
+            return
+        _SUMMARY_WARMER_STARTED.add(guard_key)
+    threading.Thread(target=_loop, name="dashboard-warmer", daemon=True).start()
 
 
 class TrustedProxyClientIPMiddleware:
@@ -410,6 +453,12 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
         except Exception as exc:  # noqa: BLE001 - never block startup
             logger.warning("Rollup boot refresh failed: %s", exc)
         capture_rollups.ensure_refresh_thread(db_path)
+
+    # Keep the dashboard aggregates warm (see start_dashboard_warmer).
+    try:
+        start_dashboard_warmer(app)
+    except Exception as exc:  # noqa: BLE001 - never block startup
+        logger.warning("Dashboard warmer failed to start: %s", exc)
 
     # Start periodic cache cleanup for node names
     logger.info("Starting node name cache cleanup background thread")

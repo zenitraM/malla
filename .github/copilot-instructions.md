@@ -44,16 +44,16 @@ Run the applications:
 **Complete validation workflow (MANDATORY before finishing):**
 1. Format code: `make format` (auto-fixes formatting issues)
 2. Lint code: `make lint` (must pass completely)
-3. Run comprehensive CI checks: `make check` (ALL tests must pass - 580 tests including 65 unit, 318 integration, 197 e2e)
+3. Run comprehensive CI checks: `make check` (ALL tests must pass: 85 unit + 370 integration; e2e per suite below)
 4. Manual validation: Start web UI `uv run malla-web` and verify basic functionality
 5. Only commit changes after ALL validation passes
 
 **Critical validation points:**
 - Web UI starts and serves HTTP 200 on port 5008
 - API endpoints return valid JSON responses
-- Database gets created automatically
-- **ALL unit tests pass (65 tests)**
-- **ALL integration tests pass (318 tests)**
+- Database schema: web boot preflight checks and guides setup; the capture daemon (or `malla-migrate`) owns DDL — see the invariant below
+- **ALL unit tests pass (85 tests)**
+- **ALL integration tests pass (370 tests)**
 - E2E tests may fail in sandboxed environments due to missing browser dependencies (expected)
 - ANY test regression indicates broken functionality that MUST be fixed
 
@@ -147,6 +147,17 @@ docker-compose up --build -d
 - **E2E tests**: Full browser automation tests (included in 3min full suite)
 - Run specific categories: `uv run python run_tests.py [unit|integration|all] -v`
 
+## Data-layer invariants (follow these everywhere)
+
+Recurring patterns the codebase relies on; new backend work MUST reuse them instead of inventing parallel mechanisms:
+
+- **Migrations**: single registry (`src/malla/migrations/`), phases SCHEMA → BLOCKING → DERIVED. Structural migrations are re-checked every run (add-and-forget safe); data work is DERIVED: idempotent, `pending()`-checked, safe alongside ingest. Markers are written AFTER the work, in the same transaction.
+- **Derived aggregates (rollups)**: maintained by set-based refreshes that resume from the data itself (MAX bucket / packet-id high-water) — never per-row hooks or watermark backlogs. All writes `INSERT OR IGNORE`/upsert on natural keys ⇒ re-running any range is a no-op. Capture refreshes on its 60s slot; web warms budgeted at boot.
+- **Retention**: prune derived tables in the SAME transaction that deletes packets (lockstep), keeping the boundary bucket/period.
+- **Expensive read paths**: TTL in-memory caches keyed by (bucket, db path, exact args). Background warmers may pre-populate them; background workers are daemon threads that never raise into request serving.
+- **Heavy SQL**: covering indexes are declared in the registry and referenced with `INDEXED BY` where the planner needs pinning; the web boot verifies their presence and warns (capture/malla-migrate owns creation).
+- **Web vs capture**: capture owns writes and DDL; web never holds the migration lock. Web-only boots serve verify-only + actionable 503 guidance on uninitialized databases.
+
 ## Troubleshooting
 
 **Import errors**: Run `uv sync` to ensure dependencies are installed
@@ -168,9 +179,9 @@ docker-compose up --build -d
 **CRITICAL: Never commit code that breaks existing tests. Test failures indicate broken functionality that must be debugged and fixed. The test suite exists to prevent regressions - respect it.**
 
 **Test counts for validation:**
-- Unit tests: 65 tests (must all pass)
-- Integration tests: 318 tests (must all pass) 
-- E2E tests: 197 tests (expected to fail in sandboxed environments due to missing browser dependencies)
-- Total passing tests: 580 tests required for successful validation
+- Unit tests: 262 collected (must all pass)
+- Integration tests: 421 collected (must all pass)
+- E2E tests: 230 in the default pass (more behind markers; a subset requires browser binaries; run `uv run playwright install` once)
+- Total: 683 unit+integration collected (680 pass, 3 skipped); e2e requires browsers
 
 The codebase is well-structured with comprehensive testing. Always validate changes by running the full test suite and manually testing core functionality.
