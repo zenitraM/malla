@@ -124,11 +124,31 @@ def _max_packet_id(conn: sqlite3.Connection) -> int:
     return int(row[0]) if row and row[0] is not None else 0
 
 
+LINK_DAYS_CURSOR = "link_days_until"
+
+
 def _cursor_value(conn: sqlite3.Connection, name: str) -> int:
+    """Persisted cursor value, seeding fresh cursors at the data floor.
+
+    Two cursor families share this table with different units: the
+    latest-state and link-day cursors store packet ids and day epochs
+    respectively (see _link_day_resume / _set_cursor call sites). A missing
+    latest-state cursor means "first backfill": start at the lowest surviving
+    packet id, because retention prunes old rows while AUTOINCREMENT never
+    reuses their ids — a default of 0 would scan the entire pruned id gap
+    before touching one real row (on prod: 143 M empty ids). Day cursors
+    handle their own fallback in _link_day_resume, so they never hit this
+    branch with an unset value.
+    """
     row = conn.execute(
         f"SELECT last_packet_id FROM {CURSOR_TABLE} WHERE name = ?", (name,)
     ).fetchone()
-    return int(row[0]) if row else 0
+    if row:
+        return int(row[0])
+    if name == LINK_DAYS_CURSOR:
+        return 0
+    floor = conn.execute("SELECT MIN(id) FROM packet_history").fetchone()[0]
+    return int(floor) - 1 if floor is not None else 0
 
 
 def _set_cursor(conn: sqlite3.Connection, name: str, packet_id: int) -> None:
@@ -171,9 +191,6 @@ def _hour_pending_from(
         (start * 3600, (last + 1) * 3600),
     ).fetchone()
     return row is not None
-
-
-LINK_DAYS_CURSOR = "link_days_until"
 
 
 def _link_day_resume(conn: sqlite3.Connection) -> str | None:

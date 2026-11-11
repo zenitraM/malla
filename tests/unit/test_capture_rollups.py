@@ -369,3 +369,55 @@ class TestRollupContentsMatchRecomputation:
         live_hour = int(now // 3600)
         expected = {row for row in expected if row[0] < live_hour}
         assert stored == expected
+
+
+class TestCursorFloorSeeding:
+    def test_fresh_cursor_skips_the_pruned_id_gap(self, rolled_db):
+        """A brand-new latest-state cursor starts at MIN(id), not 0.
+
+        Retention prunes old rows but AUTOINCREMENT never reuses their ids,
+        so a database that has been running for a while has a large empty id
+        stretch below the surviving data. Seeding the first backfill at 0
+        would scan all of it (prod observed: 143 M empty ids) before merging
+        a single row.
+        """
+        now = time.time()
+        conn = sqlite3.connect(rolled_db)
+        # Simulate the pruned gap: rows only far above id 0.
+        conn.execute(
+            "INSERT INTO packet_history (id, timestamp, topic, from_node_id,"
+            " portnum, portnum_name) VALUES (?, ?, 'msh/t', 100, 3, 'POSITION_APP')",
+            (50_000_000, now - 60),
+        )
+        conn.commit()
+        conn.close()
+
+        capture_rollups.refresh(sqlite3.connect(rolled_db))
+
+        conn = sqlite3.connect(rolled_db)
+        cursor = conn.execute(
+            "SELECT last_packet_id FROM _rollup_cursor"
+            " WHERE name = 'node_latest_position'"
+        ).fetchone()[0]
+        assert cursor >= 50_000_000
+
+    def test_existing_cursor_is_never_rewound(self, rolled_db):
+        """The floor seed applies only when no cursor row exists."""
+        conn = sqlite3.connect(rolled_db)
+        conn.execute(
+            "INSERT INTO _rollup_cursor (name, last_packet_id, updated_at)"
+            " VALUES ('node_latest_position', 12345, 0)"
+        )
+        conn.commit()
+        assert capture_rollups._cursor_value(conn, "node_latest_position") == 12345
+
+    def test_empty_database_seeds_at_zero(self, rolled_db):
+        conn = sqlite3.connect(rolled_db)
+        assert capture_rollups._cursor_value(conn, "node_latest_position") == 0
+
+    def test_link_days_cursor_keeps_epoch_semantics(self, rolled_db):
+        """The link-day cursor stores day epochs; the id-floor must not touch it."""
+        conn = sqlite3.connect(rolled_db)
+        assert (
+            capture_rollups._cursor_value(conn, capture_rollups.LINK_DAYS_CURSOR) == 0
+        )
