@@ -15,7 +15,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
 
 from flask import Flask, jsonify, render_template_string, request
 from werkzeug.exceptions import InternalServerError

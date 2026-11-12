@@ -103,19 +103,36 @@ def get_db_connection() -> sqlite3.Connection:
     """
     db_path = _resolve_db_path()
 
-    try:
-        conn = sqlite3.connect(
-            db_path, timeout=30.0
-        )  # 30 second timeout for busy database
-        conn.row_factory = sqlite3.Row  # Enable column access by name
+    # A freshly created connection reads the shared WAL-index (-shm) on its
+    # first pragma. Under checkpoint pressure that read can transiently report
+    # "database disk image is malformed" even though the database is fine (a
+    # fork-inherited stale mapping is the same symptom). The failure surfaces
+    # on the very first statements, before any caller state exists, so one
+    # fresh retry is always safe: a new connection maps the current -shm.
+    last_error: Exception | None = None
+    for _attempt in (1, 2):
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = sqlite3.connect(
+                db_path, timeout=30.0
+            )  # 30 second timeout for busy database
+            conn.row_factory = sqlite3.Row  # Enable column access by name
 
-        # Configure SQLite for better concurrency and large-database performance
-        _apply_connection_pragmas(conn.cursor())
+            # Configure SQLite for better concurrency and large-database performance
+            _apply_connection_pragmas(conn.cursor())
 
-        return conn
-    except Exception as e:
-        logger.error(f"Failed to connect to database: {e}")
-        raise
+            return conn
+        except sqlite3.DatabaseError as exc:
+            last_error = exc
+            logger.warning(
+                "Connection attempt %d failed on first pragma: %s", _attempt, exc
+            )
+            if conn is not None:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Failed to connect to database: {e}")
+            raise
+    raise last_error  # type: ignore[misc]
 
 
 #: Tables the web UI's read paths hard-depend on. The capture daemon (or

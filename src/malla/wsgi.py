@@ -7,7 +7,6 @@ that starts Gunicorn with appropriate configuration for production deployment.
 """
 
 import logging
-import os
 import sys
 
 from .config import get_config
@@ -32,8 +31,14 @@ def _build_gunicorn_config(cfg):
         "threads": cfg.gunicorn_threads,
         "worker_class": worker_class,
         "worker_connections": 1000,
-        "max_requests": 1000,
-        "max_requests_jitter": 50,
+        # Recycle workers every few minutes: a forked worker inherits the
+        # master's mmap of the SQLite WAL-index (-shm). If a checkpoint or a
+        # DB repair replaces those files while the worker lives, its stale
+        # mapping serves "database disk image is malformed" until the process
+        # dies. Periodic recycling bounds how long any stale mapping can
+        # hurt; jitter avoids all workers recycling at the same instant.
+        "max_requests": 200,
+        "max_requests_jitter": 100,
         "timeout": 30,
         "keepalive": 2,
         "preload_app": True,
