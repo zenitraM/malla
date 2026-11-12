@@ -31,17 +31,23 @@ def _build_gunicorn_config(cfg):
         "threads": cfg.gunicorn_threads,
         "worker_class": worker_class,
         "worker_connections": 1000,
-        # Recycle workers every few minutes: a forked worker inherits the
-        # master's mmap of the SQLite WAL-index (-shm). If a checkpoint or a
-        # DB repair replaces those files while the worker lives, its stale
-        # mapping serves "database disk image is malformed" until the process
-        # dies. Periodic recycling bounds how long any stale mapping can
-        # hurt; jitter avoids all workers recycling at the same instant.
+        # Recycle workers every few minutes: bounds how long a worker can run
+        # with any stale SQLite WAL-index state; jitter avoids all workers
+        # recycling at the same instant.
         "max_requests": 200,
         "max_requests_jitter": 100,
         "timeout": 30,
         "keepalive": 2,
-        "preload_app": True,
+        # preload_app=False is REQUIRED with SQLite WAL. With preloading the
+        # master imports the app (create_app opens the database for
+        # migrations/planner checks), so every forked worker inherits the
+        # master's -shm file descriptor and its mmap. That is the exact
+        # "carrying an open database connection across fork()" pattern the
+        # SQLite docs call out (howtocorrupt.html §2.7): after any checkpoint
+        # the stale inherited mapping serves 'database disk image is
+        # malformed' from every worker at once. Building the app inside each
+        # worker gives each one its own mapping.
+        "preload_app": False,
         "access_log_format": '%({REMOTE_ADDR}e)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s',
         "accesslog": "-",
         "errorlog": "-",
