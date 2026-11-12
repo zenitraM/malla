@@ -202,12 +202,15 @@ def pending(conn: sqlite3.Connection, *, until: float | None = None) -> bool:
     # Holes at or below the high-water mark. Throttled: the full scan costs
     # seconds on a multi-gigabyte packet table, and mid-history holes only
     # appear after external intervention (a table rebuild or manual prune).
-    # The tail check above keeps steady-state correctness every cycle.
+    # The tail check above keeps steady-state correctness every cycle. A
+    # caller that passes *until* explicitly (backfills, migrations, tests)
+    # asks about a specific point in time, so the throttle does not apply.
     global _next_hole_check
     now = time.time()
-    if now < _next_hole_check:
+    if until is None and now < _next_hole_check:
         return False
-    _next_hole_check = now + _HOLE_CHECK_INTERVAL_S
+    if until is None:
+        _next_hole_check = now + _HOLE_CHECK_INTERVAL_S
 
     # Correlated NOT EXISTS: stops at the first packet whose bucket is
     # missing (PK lookup on the rollup), so an actual hole is found fast.
