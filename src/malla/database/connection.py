@@ -30,8 +30,16 @@ _ANALYSIS_LIMIT = 1000  # cap ANALYZE work per index (see PRAGMA analysis_limit)
 def _apply_connection_pragmas(cursor: sqlite3.Cursor) -> None:
     """Apply the shared SQLite tuning pragmas to *cursor*'s connection."""
 
-    # Enable WAL mode for better concurrent read/write performance
-    cursor.execute("PRAGMA journal_mode=WAL")
+    # WAL is persistent database state: it is set once at initialization
+    # (capture's init_database / the migration runner / the first web boot)
+    # and stays set for the life of the database. Re-issuing it on *every*
+    # connection forces a read of the WAL-index (shm) while the capture
+    # daemon may be mid-checkpoint; under checkpoint pressure that read can
+    # observe a transiently inconsistent index and the connection fails with
+    # "database disk image is malformed" even though the database is fine
+    # (long-lived writer connections never hit this). Asking for the mode
+    # when it is already WAL is also pure overhead on the hot path.
+    # synchronous=NORMAL is per-connection and cheap; keep it here.
 
     # Set synchronous to NORMAL for better performance while maintaining safety
     cursor.execute("PRAGMA synchronous=NORMAL")
@@ -48,6 +56,16 @@ def _apply_connection_pragmas(cursor: sqlite3.Cursor) -> None:
 
     # Keep any ANALYZE / PRAGMA optimize triggered on this connection bounded.
     cursor.execute(f"PRAGMA analysis_limit={_ANALYSIS_LIMIT}")
+
+
+def ensure_wal_mode(db_path: str) -> None:
+    """Enable WAL mode once, at process startup, on a dedicated connection."""
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _resolve_db_path() -> str:
@@ -208,6 +226,10 @@ def init_database() -> None:
     logger.info(f"Initializing database connection to: {db_path}")
 
     try:
+        # WAL is persistent database state; set it once here rather than on
+        # every request connection (see _apply_connection_pragmas).
+        ensure_wal_mode(db_path)
+
         # Test the connection
         conn = get_db_connection()
 
