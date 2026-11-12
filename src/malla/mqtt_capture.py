@@ -793,6 +793,12 @@ def cleanup_old_data() -> None:
 
     with db_lock:
         conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
+        # The DELETE over a multi-GB table competes with ingest and both
+        # rollup refreshers; without an explicit busy_timeout the cleanup's
+        # first BEGIN IMMEDIATE during a refresh chunk fails instantly instead
+        # of waiting its turn (the 30 s connect timeout does not cover
+        # statements issued later on the connection).
+        conn.execute("PRAGMA busy_timeout=30000")
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
@@ -1502,6 +1508,22 @@ def main() -> None:
                     logging.debug("Built %s activity bucket rows", built)
             except Exception as exc:  # noqa: BLE001 - never break the loop
                 logging.warning("Activity bucket refresh failed: %s", exc)
+
+            # A long WAL forces long checkpoints, and a long checkpoint is the
+            # window in which a fresh reader in the web workers can observe a
+            # transiently inconsistent WAL-index ("malformed" false positive).
+            # Checkpointing every minute keeps each pass short. PASSIVE never
+            # blocks writers; readers that race it simply see the pre-checkpoint
+            # frame layout and retry their shm read on the next connection.
+            try:
+                with db_lock:
+                    ckpt_conn = sqlite3.connect(DATABASE_FILE, timeout=5.0)
+                    try:
+                        ckpt_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                    finally:
+                        ckpt_conn.close()
+            except sqlite3.Error as exc:
+                logging.debug("WAL checkpoint skipped: %s", exc)
 
             # Retry DERIVED migrations that failed at boot (a killed ANALYZE, a
             # busy database): the pending checks are cheap, and without this

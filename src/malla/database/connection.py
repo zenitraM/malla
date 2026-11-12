@@ -3,6 +3,7 @@
 import logging
 import os
 import sqlite3
+import time
 from typing import Any
 
 from malla.config import get_config
@@ -29,8 +30,16 @@ _ANALYSIS_LIMIT = 1000  # cap ANALYZE work per index (see PRAGMA analysis_limit)
 def _apply_connection_pragmas(cursor: sqlite3.Cursor) -> None:
     """Apply the shared SQLite tuning pragmas to *cursor*'s connection."""
 
-    # Enable WAL mode for better concurrent read/write performance
-    cursor.execute("PRAGMA journal_mode=WAL")
+    # WAL is persistent database state: it is set once at initialization
+    # (capture's init_database / the migration runner / the first web boot)
+    # and stays set for the life of the database. Re-issuing it on *every*
+    # connection forces a read of the WAL-index (shm) while the capture
+    # daemon may be mid-checkpoint; under checkpoint pressure that read can
+    # observe a transiently inconsistent index and the connection fails with
+    # "database disk image is malformed" even though the database is fine
+    # (long-lived writer connections never hit this). Asking for the mode
+    # when it is already WAL is also pure overhead on the hot path.
+    # synchronous=NORMAL is per-connection and cheap; keep it here.
 
     # Set synchronous to NORMAL for better performance while maintaining safety
     cursor.execute("PRAGMA synchronous=NORMAL")
@@ -47,6 +56,16 @@ def _apply_connection_pragmas(cursor: sqlite3.Cursor) -> None:
 
     # Keep any ANALYZE / PRAGMA optimize triggered on this connection bounded.
     cursor.execute(f"PRAGMA analysis_limit={_ANALYSIS_LIMIT}")
+
+
+def ensure_wal_mode(db_path: str) -> None:
+    """Enable WAL mode once, at process startup, on a dedicated connection."""
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _resolve_db_path() -> str:
@@ -84,19 +103,36 @@ def get_db_connection() -> sqlite3.Connection:
     """
     db_path = _resolve_db_path()
 
-    try:
-        conn = sqlite3.connect(
-            db_path, timeout=30.0
-        )  # 30 second timeout for busy database
-        conn.row_factory = sqlite3.Row  # Enable column access by name
+    # A freshly created connection reads the shared WAL-index (-shm) on its
+    # first pragma. Under checkpoint pressure that read can transiently report
+    # "database disk image is malformed" even though the database is fine (a
+    # fork-inherited stale mapping is the same symptom). The failure surfaces
+    # on the very first statements, before any caller state exists, so one
+    # fresh retry is always safe: a new connection maps the current -shm.
+    last_error: Exception | None = None
+    for _attempt in (1, 2):
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = sqlite3.connect(
+                db_path, timeout=30.0
+            )  # 30 second timeout for busy database
+            conn.row_factory = sqlite3.Row  # Enable column access by name
 
-        # Configure SQLite for better concurrency and large-database performance
-        _apply_connection_pragmas(conn.cursor())
+            # Configure SQLite for better concurrency and large-database performance
+            _apply_connection_pragmas(conn.cursor())
 
-        return conn
-    except Exception as e:
-        logger.error(f"Failed to connect to database: {e}")
-        raise
+            return conn
+        except sqlite3.DatabaseError as exc:
+            last_error = exc
+            logger.warning(
+                "Connection attempt %d failed on first pragma: %s", _attempt, exc
+            )
+            if conn is not None:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Failed to connect to database: {e}")
+            raise
+    raise last_error  # type: ignore[misc]
 
 
 #: Tables the web UI's read paths hard-depend on. The capture daemon (or
@@ -150,6 +186,48 @@ def required_tables_missing(db_path: str | None = None) -> list[str] | None:
     return [table for table in REQUIRED_TABLES if table not in present]
 
 
+#: Whether the indexes queries pin with ``INDEXED BY`` exist, with the time
+#: it was last checked. The capture daemon's BLOCKING migration builds these
+#: over millions of rows — minutes of window during which every pinned query
+#: would raise ``no such index``. Callers use the probe to run the same query
+#: unpinned instead (correct results, worse plan), or to hide a panel, rather
+#: than erroring. TTL'd because the catalog is consulted per request otherwise
+#: and the state only flips when the migration finishes.
+_PINNED_INDEX_CACHE_TTL_SECONDS = 30.0
+_pinned_index_state: dict[str, tuple[float, bool]] = {}
+
+
+def pinned_index_available(name: str) -> bool:
+    """Whether index *name* exists, cached briefly.
+
+    Unknown results (missing file, locked catalog) count as unavailable: the
+    fallback query path is always safe, the pinned one is not.
+    """
+    now = time.time()
+    cached = _pinned_index_state.get(name)
+    if cached and now - cached[0] < _PINNED_INDEX_CACHE_TTL_SECONDS:
+        return cached[1]
+    try:
+        conn = sqlite3.connect(_resolve_db_path(), timeout=5.0)
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?",
+                (name,),
+            ).fetchone()
+        finally:
+            conn.close()
+        available = row is not None
+    except sqlite3.Error:
+        available = False
+    _pinned_index_state[name] = (now, available)
+    return available
+
+
+def reset_pinned_index_cache() -> None:
+    """Drop the availability cache (tests, and callers that just built an index)."""
+    _pinned_index_state.clear()
+
+
 def init_database() -> None:
     """Verify the database is reachable and already migrated.
 
@@ -165,6 +243,10 @@ def init_database() -> None:
     logger.info(f"Initializing database connection to: {db_path}")
 
     try:
+        # WAL is persistent database state; set it once here rather than on
+        # every request connection (see _apply_connection_pragmas).
+        ensure_wal_mode(db_path)
+
         # Test the connection
         conn = get_db_connection()
 

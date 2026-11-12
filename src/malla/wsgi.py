@@ -7,7 +7,6 @@ that starts Gunicorn with appropriate configuration for production deployment.
 """
 
 import logging
-import os
 import sys
 
 from .config import get_config
@@ -32,11 +31,23 @@ def _build_gunicorn_config(cfg):
         "threads": cfg.gunicorn_threads,
         "worker_class": worker_class,
         "worker_connections": 1000,
-        "max_requests": 1000,
-        "max_requests_jitter": 50,
+        # Recycle workers every few minutes: bounds how long a worker can run
+        # with any stale SQLite WAL-index state; jitter avoids all workers
+        # recycling at the same instant.
+        "max_requests": 200,
+        "max_requests_jitter": 100,
         "timeout": 30,
         "keepalive": 2,
-        "preload_app": True,
+        # preload_app=False is REQUIRED with SQLite WAL. With preloading the
+        # master imports the app (create_app opens the database for
+        # migrations/planner checks), so every forked worker inherits the
+        # master's -shm file descriptor and its mmap. That is the exact
+        # "carrying an open database connection across fork()" pattern the
+        # SQLite docs call out (howtocorrupt.html §2.7): after any checkpoint
+        # the stale inherited mapping serves 'database disk image is
+        # malformed' from every worker at once. Building the app inside each
+        # worker gives each one its own mapping.
+        "preload_app": False,
         "access_log_format": '%({REMOTE_ADDR}e)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s',
         "accesslog": "-",
         "errorlog": "-",
@@ -72,37 +83,7 @@ def get_application():
 # WSGI application callable for servers - use a callable that defers execution
 def application(*args, **kwargs):
     """WSGI application entry point."""
-    app = get_application()
-    _rearm_workers(app)
-    return app(*args, **kwargs)
-
-
-_CREATION_PID = None
-
-
-def _rearm_workers(app):
-    """After a preload fork, the workers inherited the master's warmer guard.
-
-    Threads do not survive fork: re-arm the per-process background helpers
-    once per worker pid (the guards in web_ui are pid-keyed and dedupe).
-    """
-    global _CREATION_PID
-    pid = os.getpid()
-    creator = app.config.get("_CREATOR_PID") if hasattr(app, "config") else None
-    if creator is None:
-        return
-    if pid == creator:
-        return
-    marker = f"_worker_threads_pid_{pid}"
-    if getattr(app, marker, False):
-        return
-    setattr(app, marker, True)
-    try:
-        from .web_ui import start_dashboard_warmer
-
-        start_dashboard_warmer(app)
-    except Exception as exc:  # noqa: BLE001 - best effort per worker
-        logger.warning("Worker background threads failed to start: %s", exc)
+    return get_application()(*args, **kwargs)
 
 
 def main():
@@ -129,23 +110,6 @@ def main():
         print()
 
         gunicorn_config = _build_gunicorn_config(cfg)
-
-        def _post_fork(server, worker):  # pragma: no cover - worker process
-            app_obj = getattr(worker, "wsgi", None)
-            if app_obj is None:
-                app_obj = getattr(worker, "app", None)
-            if app_obj is not None and hasattr(app_obj, "application"):
-                app_obj = app_obj.application
-            if app_obj is None:
-                return
-            try:
-                from .web_ui import start_dashboard_warmer
-
-                start_dashboard_warmer(app_obj)
-            except Exception as exc:  # noqa: BLE001 - best effort
-                logger.warning("Worker background threads failed: %s", exc)
-
-        gunicorn_config["post_fork"] = _post_fork
 
         # Create Gunicorn application
         class MallaWSGIApplication(WSGIApplication):

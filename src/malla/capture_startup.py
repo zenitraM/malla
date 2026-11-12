@@ -29,6 +29,7 @@ from contextlib import nullcontext
 
 from . import activity_rollup
 from .migrations import MIGRATIONS, MigrationResult, Phase, Status, run_migrations
+from .migrations.structural import missing_indexes
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,35 @@ def _log_results(results: list[MigrationResult]) -> None:
             logger.debug("Migration %s: %s", result.name, result.detail)
 
 
+def _configure_bulk_ddl_connection(conn: sqlite3.Connection) -> None:
+    """Tuning for the BLOCKING phase's index builds, on top of the defaults.
+
+    The phase runs alone (MQTT loop paused, ingest buffered, advisory lock
+    held), so the serving-oriented trade-offs in :func:`configure_connection`
+    can be relaxed for the duration:
+
+    - The page cache keeps the SERVING budget: index builds over a
+      multi-gigabyte table let SQLite's sorter and the rollback journal
+      grow with the data, and on a small-RAM host (8 GB total, no swap) an
+      oversized cache plus an in-memory journal is an OOM kill that
+      restarts the whole build. Only the per-page durability cost goes.
+    - ``synchronous=OFF``: durable-ness of a rebuildable index is not worth
+      fsync-per-page during a multi-minute batch. A crash mid-build loses
+      nothing that matters — the runner marks the migration failed and the
+      next start rebuilds.
+    - The journal stays in its default mode and the sorter spills to
+      ``SQLITE_TMPDIR``/``/tmp`` when needed: disk-backed spill on a
+      small-RAM host is minutes slower, not fatal, while an in-memory
+      journal on a 7.9 M-row build was the OOM in production.
+
+    Everything is set on this throwaway connection only; serving connections
+    keep their WAL/NORMAL configuration untouched.
+    """
+    configure_connection(conn)  # same cache budget as serving
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA synchronous=OFF")
+
+
 def run_phase(
     db_path: str,
     phase: Phase,
@@ -105,7 +135,12 @@ def run_phase(
     with guard:
         conn = sqlite3.connect(db_path, timeout=30.0)
         try:
-            configure_connection(conn)
+            if phase is Phase.BLOCKING:
+                # Index builds over the full history: relax the serving
+                # trade-offs for this alone-on-the-database connection.
+                _configure_bulk_ddl_connection(conn)
+            else:
+                configure_connection(conn)
             results = run_migrations(
                 conn,
                 MIGRATIONS,
@@ -132,6 +167,25 @@ def run_write_locking_migrations(
     db_path: str, *, lock: threading.Lock | None = None
 ) -> list[MigrationResult]:
     """Apply the BLOCKING migrations: DDL that cannot run while packets are written."""
+    # Announce the expensive phase with its actual workload: the runner only
+    # logs per *migration*, and core_indexes (all packet_history indexes) is
+    # one migration that can run for many minutes in silence. Saying "N
+    # indexes to build" up front is what tells an operator "working, wait"
+    # instead of "hung, restart".
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30)
+    try:
+        pending = missing_indexes(conn)
+    finally:
+        conn.close()
+    if pending:
+        logger.info(
+            "BLOCKING migrations pending: %d index(es) to build over existing "
+            "history (packet_history: %s%s); this can take tens of minutes on "
+            "a large database — packets are buffered meanwhile",
+            len(pending),
+            ", ".join(pending[:3]),
+            " …" if len(pending) > 3 else "",
+        )
     return run_phase(db_path, Phase.BLOCKING, lock=lock)
 
 

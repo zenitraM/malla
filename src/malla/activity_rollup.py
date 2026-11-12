@@ -175,25 +175,59 @@ def pending(conn: sqlite3.Connection, *, until: float | None = None) -> bool:
     """Whether completed packets are still missing from the store.
 
     Data-aware on purpose: a quiet mesh produces no new packets, so the store is
-    complete even though the clock has moved on, and the capture's per-minute
-    check stays a single indexed existence query.
+    complete even though the clock has moved on.
+
+    Gap shapes covered:
+
+    - **Tail** (every call): completed packets newer than the newest stored
+      bucket — the steady-state shape; one indexed existence query.
+    - **Holes at or below the high-water mark** (throttled, see
+      ``_HOLE_CHECK_INTERVAL_S``): a packet bucket with no stored rollup row.
+      Covers a rebuilt/pruned table (whole prefix gone, as after restoring
+      from corruption) and partial holes in the middle. ``refresh`` resumes
+      at ``MAX(bucket)``, so without this check such holes would never fill.
     """
     end = bucket_start(until if until is not None else time.time())
+
+    # Tail gap: anything completed after the newest stored bucket.
     newest = latest_bucket(conn)
-    if newest is not None:
-        start = newest + BUCKET_SECONDS
-    else:
-        first = _first_packet_timestamp(conn)
-        if first is None:
-            return False
-        start = bucket_start(first)
-    if start >= end:
+    if newest is not None and newest + BUCKET_SECONDS < end:
+        row = conn.execute(
+            "SELECT 1 FROM packet_history WHERE timestamp >= ? AND timestamp < ? LIMIT 1",
+            (newest + BUCKET_SECONDS, end),
+        ).fetchone()
+        if row is not None:
+            return True
+
+    # Holes at or below the high-water mark. Throttled: the full scan costs
+    # seconds on a multi-gigabyte packet table, and mid-history holes only
+    # appear after external intervention (a table rebuild or manual prune).
+    # The tail check above keeps steady-state correctness every cycle. A
+    # caller that passes *until* explicitly (backfills, migrations, tests)
+    # asks about a specific point in time, so the throttle does not apply.
+    global _next_hole_check
+    now = time.time()
+    if until is None and now < _next_hole_check:
         return False
+    if until is None:
+        _next_hole_check = now + _HOLE_CHECK_INTERVAL_S
+
+    # Correlated NOT EXISTS: stops at the first packet whose bucket is
+    # missing (PK lookup on the rollup), so an actual hole is found fast.
+    # NOTE: no EXISTS/EXCEPT mixing — "EXISTS (subq) EXCEPT SELECT ..."
+    # parses as "(EXISTS (subq)) EXCEPT ..." and silently always matches.
     row = conn.execute(
-        "SELECT 1 FROM packet_history WHERE timestamp >= ? AND timestamp < ? LIMIT 1",
-        (start, end),
-    ).fetchone()
-    return row is not None
+        f"SELECT EXISTS (SELECT 1 FROM packet_history ph WHERE ph.timestamp < ?"
+        f" AND NOT EXISTS (SELECT 1 FROM {NODE_TABLE} q WHERE q.bucket = CAST(ph.timestamp / {BUCKET_SECONDS} AS INT) * {BUCKET_SECONDS}))",
+        (end,),
+    ).fetchone()[0]
+    return bool(row)
+
+
+# Full hole scans on a large database cost seconds; holes appear only after
+# external intervention, so hourly is plenty.
+_HOLE_CHECK_INTERVAL_S = 3600
+_next_hole_check = 0.0
 
 
 #: Largest span a single refresh transaction covers, in buckets: 96 x 15 min
@@ -251,14 +285,27 @@ def refresh_chunk(conn: sqlite3.Connection, start: int, end: int) -> int:
 def resume_bucket(conn: sqlite3.Connection) -> int | None:
     """Bucket a fresh refresh would start from, or ``None`` if there is nothing.
 
-    ``None`` means no packets at all; otherwise the caller resumes after the
-    newest bucket already stored, or at the first packet's bucket on a cold one.
+    ``None`` means no packets at all. Otherwise the resume point is:
+
+    - the first packet's bucket when the store is empty (cold backfill);
+    - the oldest missing bucket when holes exist below the high-water mark
+      (rebuilt/pruned table, or partial holes) — refolding the filled range
+      is a no-op thanks to ``INSERT OR IGNORE``;
+    - otherwise just after the newest stored bucket (steady state).
     """
     newest = latest_bucket(conn)
-    if newest is not None:
-        return newest + BUCKET_SECONDS
     first = _first_packet_timestamp(conn)
-    return None if first is None else bucket_start(first)
+    first_bucket = None if first is None else bucket_start(first)
+    if newest is None:
+        return first_bucket
+    resume = newest + BUCKET_SECONDS
+    oldest_missing = conn.execute(
+        f"SELECT MIN(b) FROM (SELECT CAST(timestamp / {BUCKET_SECONDS} AS INT) * {BUCKET_SECONDS} AS b FROM packet_history WHERE timestamp < ? EXCEPT SELECT bucket FROM {NODE_TABLE})",
+        (bucket_start(time.time()) + BUCKET_SECONDS,),
+    ).fetchone()[0]
+    if oldest_missing is not None:
+        return min(resume, oldest_missing)
+    return resume
 
 
 def refresh(
