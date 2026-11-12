@@ -49,8 +49,6 @@ def test_nodes_data_caps_above_max(client):
 @pytest.mark.integration
 @pytest.mark.api
 def test_packets_negative_page_does_not_error(client):
-    resp = client.get(
-        "/api/packets", query_string={"limit": 10, "page": -5}
-    )
+    resp = client.get("/api/packets", query_string={"limit": 10, "page": -5})
     assert resp.status_code == 200
     assert resp.get_json()["page"] >= 1

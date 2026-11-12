@@ -34,7 +34,13 @@
         .metric-value {
             font-size: 2rem;
             font-weight: bold;
-            color: #0d6efd;
+            color: var(--bs-primary);
+        }
+        [data-bs-theme=dark] .metric-value {
+            color: #6ea8fe;
+        }
+        [data-bs-theme=dark] .metric-label {
+            color: var(--bs-secondary-color);
         }
         .metric-label {
             color: #6c757d;

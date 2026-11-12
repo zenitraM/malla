@@ -125,9 +125,7 @@ def seed_query_planner_stats_async(db_path: str | None = None) -> bool:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Background ANALYZE seeding failed: %s", exc)
 
-    thread = threading.Thread(
-        target=_worker, name="malla-analyze-seed", daemon=True
-    )
+    thread = threading.Thread(target=_worker, name="malla-analyze-seed", daemon=True)
     with _stats_seed_lock:
         # Re-check under the lock in case a concurrent caller started one.
         if _stats_seed_thread is not None and _stats_seed_thread.is_alive():

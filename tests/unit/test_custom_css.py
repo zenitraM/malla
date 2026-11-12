@@ -31,7 +31,7 @@ def test_customization_from_yaml(tmp_path, monkeypatch):
     yaml_file = tmp_path / "config.yaml"
     yaml_file.write_text(
         'custom_css: ".navbar { background: #123456; }"\n'
-        "custom_html_head: '<meta name=\"x\" content=\"y\">'\n"
+        'custom_html_head: \'<meta name="x" content="y">\'\n'
     )
 
     cfg = load_config(config_path=yaml_file)

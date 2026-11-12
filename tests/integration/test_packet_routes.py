@@ -76,8 +76,7 @@ class TestPacketRoutes:
         # …every path keeps the mesh packet id it was correlated under…
         assert graph["paths"]
         assert all(
-            path["mesh_packet_id"] == row["mesh_packet_id"]
-            for path in graph["paths"]
+            path["mesh_packet_id"] == row["mesh_packet_id"] for path in graph["paths"]
         )
 
         # …and located nodes are exposed for hop-distance badges.

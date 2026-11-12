@@ -496,13 +496,19 @@ h1, .h1 {
 
 /* Ensure text contrast for warning badges in dark mode */
 [data-bs-theme=dark] .badge.bg-warning {
-  color: var(--bs-dark) !important;
-  background-color: rgb(189, 142, 0) !important;
+  color: #212529 !important;
+  background-color: #ffda6a !important;
 }
 
 [data-bs-theme=dark] .badge.bg-info {
-  color: var(--bs-dark) !important;
-  background-color: rgb(0, 145, 174) !important;
+  color: #212529 !important;
+  background-color: #6edff6 !important;
+}
+
+
+[data-bs-theme=dark] .table-secondary {
+  --bs-table-bg: #343a40 !important;
+  --bs-table-color: var(--bs-body-color) !important;
 }
 
 /* Table layout overrides for dark mode */
@@ -899,4 +905,38 @@ h1, .h1 {
 
 [data-bs-theme=dark] .nav-link.active {
   color: rgba(255, 255, 255, 1) !important;
+}
+
+/* Dark mode contrast fixes for packet/protobuf decode surfaces.
+   These hardcode light backgrounds in templates (packet_detail.html) and
+   inherit light body text in dark mode, producing unreadable text. */
+[data-bs-theme=dark] .reception-primary,
+[data-bs-theme=dark] .main-reception {
+  background-color: rgba(25, 135, 84, 0.15) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-bs-theme=dark] .reception-primary .text-muted,
+[data-bs-theme=dark] .main-reception .text-muted {
+  color: var(--bs-secondary-color) !important;
+}
+
+[data-bs-theme=dark] .text-primary {
+  color: #6ea8fe !important;
+}
+
+[data-bs-theme=dark] .text-success {
+  color: #75b798 !important;
+}
+
+[data-bs-theme=dark] .text-danger {
+  color: #ea868f !important;
+}
+
+[data-bs-theme=dark] .text-warning {
+  color: #ffda6a !important;
+}
+
+[data-bs-theme=dark] .text-info {
+  color: #6edff6 !important;
 }
