@@ -125,6 +125,12 @@ class RelayNodeAnalysis {
                         textNode(' '),
                         el('small', { className: 'text-muted' }, `(${candidate.last_byte})`)
                     );
+                    if (candidate.is_client_mute) {
+                        candidateNodes.push(
+                            textNode(' '),
+                            el('small', { className: 'text-warning', title: 'CLIENT_MUTE nodes cannot relay packets' }, '(muted)')
+                        );
+                    }
                 });
                 candidatesCell.appendChild(fragment(candidateNodes));
             } else {
