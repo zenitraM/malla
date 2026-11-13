@@ -52,11 +52,11 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            MALLA_GIT_SHA=${{ github.sha }}
           push: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Generate artifact attestation
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository

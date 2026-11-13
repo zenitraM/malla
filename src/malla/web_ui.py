@@ -44,6 +44,34 @@ logger = logging.getLogger(__name__)
 _ASSET_VERSION = str(int(time.time()))
 
 
+def _resolve_git_sha() -> str:
+    """Return the commit the running build was created from, or ''.
+
+    CI Docker builds pass it as the MALLA_GIT_SHA build arg (ENV in the
+    image). Local dev falls back to reading git once at import time; failure
+    just means no version is shown in the footer.
+    """
+    sha = os.environ.get("MALLA_GIT_SHA", "").strip()
+    if sha:
+        return sha[:12]
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        return result.stdout.strip()
+    except Exception:  # noqa: BLE001 - best effort only
+        return ""
+
+
+GIT_SHA = _resolve_git_sha()
+
+
 class TrustedProxyClientIPMiddleware:
     """Rewrite REMOTE_ADDR from a trusted proxy-provided header."""
 
@@ -264,6 +292,7 @@ def create_app(cfg: AppConfig | None = None):  # noqa: D401
             # starts (i.e. on every deploy/restart), so browsers reliably pick
             # up updated JS/CSS instead of serving a stale cached copy.
             "ASSET_VERSION": _ASSET_VERSION,
+            "GIT_SHA": GIT_SHA,
         }
 
     # Initialize database
