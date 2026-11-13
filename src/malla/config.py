@@ -34,6 +34,14 @@ class AppConfig:
     custom_css: str = ""
     custom_html_head: str = ""
 
+    # Chat settings
+    # When enabled, only channels with decrypted text messages are returned to the chat UI
+    chat_hide_empty_channels: bool = False
+    # Optional comma-separated list of channel names to include in the chat UI (empty = all allowed)
+    chat_include_channels: str = ""
+    # Optional comma-separated list of channel names to exclude from the chat UI (empty = none excluded)
+    chat_exclude_channels: str = ""
+
     # Flask/server settings
     secret_key: str = "dev-secret-key-change-in-production"
     database_file: str = "meshtastic_history.db"
@@ -101,6 +109,14 @@ class AppConfig:
         # Filter out empty keys
         return [key for key in keys if key]
 
+    def get_chat_include_channels(self) -> list[str]:
+        """Return normalized list of channels to include in the chat UI."""
+        return _normalize_channel_list(self.chat_include_channels)
+
+    def get_chat_exclude_channels(self) -> list[str]:
+        """Return normalized list of channels to exclude from the chat UI."""
+        return _normalize_channel_list(self.chat_exclude_channels)
+
 
 # ---------------------------------------------------------------------------
 # Loader helpers
@@ -109,6 +125,20 @@ class AppConfig:
 
 _YAML_DEFAULT_PATH = "config.yaml"
 _ENV_PREFIX = "MALLA_"  # Prefix for environment variable overrides
+
+
+def _normalize_channel_list(val: Any) -> list[str]:
+    """Normalize a comma-separated string (or scalar/list fallback) of channel names into a deduplicated list[str]."""
+    if not val:
+        return []
+    items: list[str] = []
+    if isinstance(val, (int, float)):
+        items = [str(val)]
+    elif isinstance(val, list):
+        items = [str(item).strip() for item in val if str(item).strip()]
+    elif isinstance(val, str):
+        items = [item.strip() for item in val.split(",") if item.strip()]
+    return list(dict.fromkeys(items))
 
 
 def _resolve_type(t: Any) -> Any:  # noqa: ANN001

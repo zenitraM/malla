@@ -9,6 +9,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
+from ..config import get_config
 from ..database import (
     DashboardRepository,
     LocationRepository,
@@ -2130,6 +2131,57 @@ def api_packet_channels():
         return jsonify({"error": str(e), "channels": []}), 500
 
 
+@api_bp.route("/chat/channels")
+def api_chat_channels():
+    """API endpoint for available channels in the chat UI.
+
+    Respects the chat_hide_empty_channels config by default.
+    Optional query parameter ?all=true overrides to return all observed channels.
+    """
+    logger.info("API chat channels endpoint accessed")
+    try:
+        cfg = get_config()
+        only_with_messages = cfg.chat_hide_empty_channels
+
+        all_param = request.args.get("all")
+        if all_param is not None:
+            if all_param.lower() in ("1", "true", "yes"):
+                only_with_messages = False
+            elif all_param.lower() in ("0", "false", "no"):
+                only_with_messages = True
+
+        channels = NodeRepository.get_unique_chat_channels(
+            only_with_messages=only_with_messages
+        )
+
+        include_channels = cfg.get_chat_include_channels()
+        exclude_channels = cfg.get_chat_exclude_channels()
+
+        if include_channels:
+            include_set = set(include_channels)
+            channels = [ch for ch in channels if ch in include_set]
+
+        if exclude_channels:
+            exclude_set = set(exclude_channels)
+            channels = [ch for ch in channels if ch not in exclude_set]
+
+        return jsonify({"channels": channels})
+    except Exception as e:
+        logger.error(f"Error in API chat channels: {e}")
+        return jsonify({"error": "Failed to retrieve chat channels", "channels": []}), 500
+
+
+def _empty_chat_response(last_id: int):
+    """Return empty packet response matching api_chat_messages structure."""
+    return jsonify({
+        "packets": [],
+        "nodes": {},
+        "last_id": last_id,
+        "relays": {},
+        "relay_filters": {},
+    })
+
+
 @api_bp.route("/chat/messages")
 def api_chat_messages():
     """Lightweight chat endpoint — streams raw TEXT_MESSAGE_APP rows.
@@ -2177,9 +2229,32 @@ def api_chat_messages():
             where.append("id < ?")
             params.append(before_id)
 
+        cfg = get_config()
+        include_channels = cfg.get_chat_include_channels()
+        exclude_channels = cfg.get_chat_exclude_channels()
+
         if channel:
+            if (include_channels and channel not in set(include_channels)) or (
+                exclude_channels and channel in set(exclude_channels)
+            ):
+                conn.close()
+                return _empty_chat_response(db_last_id)
             where.append("channel_id = ?")
             params.append(channel)
+        else:
+            if include_channels:
+                exclude_set = set(exclude_channels)
+                effective_allowed = [ch for ch in include_channels if ch not in exclude_set]
+                if not effective_allowed:
+                    conn.close()
+                    return _empty_chat_response(db_last_id)
+                placeholders = ", ".join("?" for _ in effective_allowed)
+                where.append(f"channel_id IN ({placeholders})")
+                params.extend(effective_allowed)
+            elif exclude_channels:
+                placeholders = ", ".join("?" for _ in exclude_channels)
+                where.append(f"(channel_id IS NULL OR channel_id NOT IN ({placeholders}))")
+                params.extend(exclude_channels)
 
         params.append(limit)
 
