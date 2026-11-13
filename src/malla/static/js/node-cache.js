@@ -1,5 +1,5 @@
 (function () {
-    const CACHE_KEY = 'malla_nodes_cache_v1';
+    const CACHE_KEY = 'malla_nodes_cache_v2';
     const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
     // Internal state shared across the page
@@ -59,9 +59,9 @@
                     return;
                 }
 
-                // 2. Fetch from API
+                // 2. Fetch from API (request up to 10,000 nodes to cover all mesh nodes)
                 try {
-                    const resp = await fetch('/api/nodes?limit=1000');
+                    const resp = await fetch('/api/nodes?limit=10000');
                     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                     const data = await resp.json();
                     _nodes = data.nodes || [];
@@ -83,21 +83,38 @@
          * Resolves to null if not found.
          */
         async getNode(nodeId) {
+            if (nodeId === null || nodeId === undefined || nodeId === '') return null;
             await this.load();
             const idStr = nodeId.toString();
-            return _nodes.find((n) => n.node_id.toString() === idStr) || null;
+            const found = _nodes ? _nodes.find((n) => n.node_id.toString() === idStr) : null;
+            if (found) return found;
+
+            // Fallback: fetch from API directly
+            try {
+                const resp = await fetch(`/api/node/${encodeURIComponent(nodeId)}/info`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data && data.node) {
+                        this.addNode(data.node);
+                        return data.node;
+                    }
+                }
+            } catch (err) {
+                console.warn(`NodeCache: Failed to fetch node ${nodeId} from API:`, err);
+            }
+            return null;
         },
 
         /**
-         * Search nodes (client-side). Returns array matching the query.
+         * Search nodes (client-side with API fallback). Returns array matching the query.
          * Matches against long_name, short_name, decimal ID and hex ID (with leading '!').
          * Limit optional.
          */
         async search(query, limit = 20) {
-            // If we already have the full list, search locally
-            if (_loaded) {
+            let results = [];
+            if (_loaded && _nodes) {
                 const lower = query.toLowerCase();
-                const results = _nodes.filter((node) => {
+                results = _nodes.filter((node) => {
                     const nameLong = (node.long_name || '').toLowerCase();
                     const nameShort = (node.short_name || '').toLowerCase();
                     const hexId = `!${node.node_id.toString(16).padStart(8, '0')}`.toLowerCase();
@@ -109,16 +126,17 @@
                         decId.includes(lower)
                     );
                 });
-                return results.slice(0, limit);
+                if (results.length > 0) {
+                    return results.slice(0, limit);
+                }
             }
 
-            // If we're still loading the big list, perform a quick focused query to the API
+            // If no local matches or not yet loaded, query API directly
             try {
                 const resp = await fetch(`/api/nodes?search=${encodeURIComponent(query)}&limit=${limit}`);
                 if (resp.ok) {
                     const data = await resp.json();
-                    if (Array.isArray(data.nodes)) {
-                        // Merge the quick results into our cache for future lookups
+                    if (Array.isArray(data.nodes) && data.nodes.length > 0) {
                         data.nodes.forEach((n) => {
                             if (n && n.node_id !== undefined) {
                                 NodeCache.addNode(n);
@@ -131,9 +149,7 @@
                 console.warn('NodeCache.search: fallback API search failed', err);
             }
 
-            // As a last resort, wait for the full load to finish then search
-            await this.load();
-            return this.search(query, limit);
+            return results.slice(0, limit);
         },
 
         /**
