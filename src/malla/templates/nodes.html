@@ -266,11 +266,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 title: 'Name',
                 sortable: true,
                 render: (value, row) => {
-                    return el('a', {
+                    const link = el('a', {
                         href: safePath(`/node/${encodeURIComponent(String(row.node_id))}`),
                         className: 'text-decoration-none',
                         title: 'View node details'
                     }, value || 'Unnamed');
+                    const successor = row.renumbered_to;
+                    if (!successor) return link;
+                    // Firmware 2.8 renumbered this radio; point at the live id.
+                    return el('span', null, link, ' ', el('a', {
+                        href: safePath(`/node/${encodeURIComponent(String(successor.node_id))}`),
+                        className: 'badge bg-info text-decoration-none',
+                        title: `Renumbered by firmware 2.8 — now ${successor.hex_id}${successor.node_name ? ' ' + successor.node_name : ''}`
+                    }, `\u2192 ${successor.hex_id}`));
                 }
             },
             {
@@ -300,6 +308,22 @@ document.addEventListener('DOMContentLoaded', function() {
                         return badge(value, roleColors[value] || 'bg-secondary');
                     }
                     return badge('Unknown', 'bg-light text-dark');
+                }
+            },
+            {
+                key: 'firmware_label',
+                title: 'Firmware',
+                sortable: false,
+                render: (value, row) => {
+                    const label = value || 'Unknown';
+                    const cls = row.firmware_source === 'reported'
+                        ? 'bg-success'
+                        : (row.firmware_source === 'fingerprint' ? 'bg-secondary' : 'bg-light text-dark');
+                    const element = badge(label, cls);
+                    if (Array.isArray(row.firmware_evidence) && row.firmware_evidence.length) {
+                        element.title = row.firmware_evidence.join(', ');
+                    }
+                    return element;
                 }
             },
             {

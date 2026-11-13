@@ -63,6 +63,7 @@ Issues = "https://github.com/zenitraM/malla/issues"
 malla-web = "malla.web_ui:main"
 malla-web-gunicorn = "malla.wsgi:main"
 malla-capture = "malla.mqtt_capture:main"
+malla-fingerprint-backfill = "malla.fingerprint_backfill:main"
 
 [project.optional-dependencies]
 dev = [
