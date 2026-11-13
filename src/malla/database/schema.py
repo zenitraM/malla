@@ -3,6 +3,8 @@
 import logging
 import sqlite3
 
+from .traceroute_schema import ensure_traceroute_schema
+
 logger = logging.getLogger(__name__)
 
 
@@ -207,6 +209,9 @@ def ensure_startup_schema(
     existing_indexes = _get_existing_indexes(cursor)
 
     cursor.execute(ACTIVITY_ROLLUP_TABLE_SQL)
+
+    if "packet_history" in existing_tables:
+        ensure_traceroute_schema(cursor)
 
     if "node_info" in existing_tables:
         cursor.execute("PRAGMA table_info(node_info)")

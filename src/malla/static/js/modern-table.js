@@ -25,7 +25,8 @@ class ModernTable {
             data: [],
             totalCount: 0,
             totalPages: 0,
-            isGrouped: false
+            isGrouped: false,
+            totalCountExact: false
         };
 
         this.searchTimeout = null;
@@ -249,10 +250,14 @@ class ModernTable {
             this.state.totalCount = data.total_count || 0;
             this.state.totalPages = Math.ceil(this.state.totalCount / this.state.pageSize);
             this.state.isGrouped = params.get('group_packets') === 'true';
+            this.state.totalCountExact = true;
 
             this.renderTableBody();
             this.updatePagination();
-            this.emit('dataLoaded', { data: this.state.data, totalCount: this.state.totalCount });
+            this.emit('dataLoaded', {
+                data: this.state.data,
+                totalCount: this.state.totalCount,
+            });
         } catch (error) {
             console.error('Error loading table data:', error);
             this.showError(error.message);
@@ -386,7 +391,7 @@ class ModernTable {
         document.getElementById(`${this.container.id}-end`).textContent = end;
 
         const totalElement = document.getElementById(`${this.container.id}-total`);
-        if (this.state.isGrouped && this.state.data.length === this.state.pageSize) {
+        if (this.hasEstimatedCount()) {
             totalElement.textContent = `${this.state.totalCount}+`;
             totalElement.title = 'Estimated count (optimized for performance)';
         } else {
@@ -415,6 +420,14 @@ class ModernTable {
         paginationContainer.addEventListener('click', this.paginationClickHandler);
     }
 
+    hasEstimatedCount() {
+        return Boolean(
+            this.state.isGrouped &&
+            !this.state.totalCountExact &&
+            this.state.data.length === this.state.pageSize
+        );
+    }
+
     renderPaginationButtons() {
         const { page, totalPages } = this.state;
         const nodes = [];
@@ -425,7 +438,7 @@ class ModernTable {
             disabled: page <= 1
         }, icon('bi bi-chevron-left'), textNode(' Previous')));
 
-        if (this.state.isGrouped && this.state.data.length === this.state.pageSize) {
+        if (this.hasEstimatedCount()) {
             const maxDisplayPages = Math.min(totalPages, page + 5);
             for (let i = Math.max(1, page - 2); i <= Math.min(maxDisplayPages, page + 2); i++) {
                 nodes.push(this.createPageButton(i, i === page));
@@ -456,7 +469,7 @@ class ModernTable {
             }
         }
 
-        const hasNextPage = this.state.isGrouped ?
+        const hasNextPage = this.hasEstimatedCount() ?
             this.state.data.length === this.state.pageSize :
             page < totalPages;
 
