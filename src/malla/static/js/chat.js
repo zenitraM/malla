@@ -13,6 +13,10 @@
     var messagesEl = document.getElementById('chatMessages');
     var statusEl   = document.getElementById('chatStatus');
     var channelSel = document.getElementById('channelFilter');
+    var defaultChannel = (channelSel && channelSel.options.length > 0)
+        ? channelSel.options[0].value
+        : (channelSel ? channelSel.value : '');
+    var CHANNEL_STORAGE_KEY = 'malla-chat-channel';
     var scrollBtn  = document.getElementById('scrollBottomBtn');
     var unreadEl   = document.getElementById('unreadCount');
     var pauseBtn   = document.getElementById('pauseBtn');
@@ -23,6 +27,39 @@
     var lastId = 0, pollTimer = null, paused = false;
     var soundEnabled = localStorage.getItem('malla-chat-sound') === '1';
     var unreadCount = 0;
+
+    function getStoredChannel() {
+        try {
+            return localStorage.getItem(CHANNEL_STORAGE_KEY);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function clearStoredChannel() {
+        try {
+            localStorage.removeItem(CHANNEL_STORAGE_KEY);
+        } catch (e) {}
+    }
+
+    function setStoredChannel(val) {
+        if (!val || val === defaultChannel) {
+            clearStoredChannel();
+            return;
+        }
+        try {
+            localStorage.setItem(CHANNEL_STORAGE_KEY, val);
+        } catch (e) {}
+    }
+
+    function hasChannelOption(val) {
+        if (!channelSel || val === null || val === undefined) return false;
+        var opts = channelSel.options;
+        for (var i = 0; i < opts.length; i++) {
+            if (opts[i].value === val) return true;
+        }
+        return false;
+    }
 
     var nodeCache = {};
     var messagesByMesh = new Map();
@@ -42,12 +79,17 @@
 
     function readUrlState() {
         var p = new URLSearchParams(window.location.search);
-        return { channel: p.get('channel') || '', search: p.get('q') || '' };
+        return {
+            channel: p.has('channel') ? (p.get('channel') || '') : null,
+            search: p.get('q') || ''
+        };
     }
 
     function pushUrlState() {
         var p = new URLSearchParams();
-        if (channelSel.value) p.set('channel', channelSel.value);
+        if (channelSel && channelSel.value && channelSel.value !== defaultChannel) {
+            p.set('channel', channelSel.value);
+        }
         if (searchTerm) p.set('q', searchTerm);
         var qs = p.toString();
         var url = window.location.pathname + (qs ? '?' + qs : '');
@@ -727,14 +769,17 @@
     async function loadChannels() {
         try {
             var resp = await fetch('/api/meshtastic/packet-channels');
-            if (!resp.ok) return;
+            if (!resp.ok) return false;
             var data = await resp.json();
             (data.channels || []).forEach(function (ch) {
                 var opt = document.createElement('option');
                 opt.value = ch; opt.textContent = ch;
-                channelSel.appendChild(opt);
+                if (channelSel) channelSel.appendChild(opt);
             });
-        } catch (e) {}
+            return true;
+        } catch (e) {
+            return false;
+        }
     }
 
     // ----- search -----
@@ -793,7 +838,10 @@
         updateScrollButton();
     });
 
-    channelSel.addEventListener('change', resetChat);
+    channelSel.addEventListener('change', function () {
+        setStoredChannel(channelSel.value);
+        resetChat();
+    });
 
     pauseBtn.addEventListener('click', function () {
         paused = !paused;
@@ -890,7 +938,11 @@
     // Handle browser back/forward
     window.addEventListener('popstate', function () {
         var s = readUrlState();
-        channelSel.value = s.channel;
+        var targetChannel = (s.channel !== null) ? s.channel : defaultChannel;
+        if (channelSel) {
+            channelSel.value = hasChannelOption(targetChannel) ? targetChannel : defaultChannel;
+            setStoredChannel(channelSel.value);
+        }
         searchIn.value = s.search;
         searchTerm = s.search;
         resetChat();
@@ -899,9 +951,32 @@
     // ----- init -----
 
     (async function init() {
-        await loadChannels();
+        var loadChannelsSucceeded = await loadChannels();
         var s = readUrlState();
-        if (s.channel) channelSel.value = s.channel;
+        var savedChannel = getStoredChannel();
+
+        if (channelSel) channelSel.value = defaultChannel;
+
+        if (s.channel !== null) {
+            // URL parameter takes top priority
+            if (hasChannelOption(s.channel)) {
+                channelSel.value = s.channel;
+                setStoredChannel(s.channel);
+            } else if (loadChannelsSucceeded) {
+                // Channel param is definitely invalid; clean up URL
+                pushUrlState();
+            }
+        } else if (savedChannel) {
+            // Restore from localStorage
+            if (hasChannelOption(savedChannel)) {
+                channelSel.value = savedChannel;
+                pushUrlState();
+            } else if (loadChannelsSucceeded) {
+                // Saved channel no longer exists; evict it
+                clearStoredChannel();
+            }
+        }
+
         if (s.search) { searchIn.value = s.search; searchTerm = s.search; }
         updateSoundBtn();
         await loadInitial();
