@@ -214,6 +214,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Initialize the filter controller (after data + UI ready)
         controller.initialLoad(hasParams);
+        window.nodesFiltersReady = true;
     }
 
     Promise.all([loadHardwareModels(), loadNodeRoles(), loadPrimaryChannels()]).then(async () => {
@@ -406,9 +407,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Global range changes re-query when active_only relies on the window.
+    // Gate on filter readiness: a range re-publish before initialLoad applies
+    // the URL filters (e.g. the footer meta retention clamp) would trigger an
+    // unfiltered loadData() that paints rows without the URL filters.
+    window.nodesFiltersReady = false;
     if (window.MallaRange) {
         window.MallaRange.onRangeChange((range, meta) => {
             if (meta && meta.via === 'override') return;
+            if (!window.nodesFiltersReady) return;
             if (document.getElementById('active_only') && document.getElementById('active_only').checked) {
                 table.loadData();
             }

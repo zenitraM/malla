@@ -110,35 +110,39 @@ class URLFilterManager {
      */
     async setNodePickerValue(fieldName, nodeId) {
         try {
-            let displayName = `Node ${nodeId}`; // Default fallback
-
-            // Try to fetch node info to get display name
-            try {
-                const response = await fetch(`/api/v1/nodes/${nodeId}`);
-                if (response.ok) {
-                    const body = await response.json();
-                    const node = (body && body.data ? (body.data.node || body.data) : body) || {};
-                    displayName = node.long_name || node.short_name || node.hex_id || `Node ${nodeId}`;
-                }
-                // If response is not ok, we'll use the fallback display name
-            } catch (fetchError) {
-                console.warn(`Could not fetch node info for ${nodeId}, using fallback display name`);
-            }
-
-            // Set the picker value (try multiple selector patterns)
+            // Set the filter value FIRST so the table load never waits on the
+            // display-name lookup: /api/v1/nodes/<id> can take seconds
+            // (neighbors + locations) and applyURLParameters blocks the
+            // table's initialLoad behind this await.
             const hiddenField = document.querySelector(`input[name="${fieldName}"]`);
             const visibleField = document.querySelector(`#${fieldName}`) ||
                                document.querySelector(`input[data-field="${fieldName}"]`) ||
                                document.querySelector(`.node-picker-input[data-field="${fieldName}"]`);
 
-            if (hiddenField && visibleField) {
+            if (hiddenField) {
                 hiddenField.value = nodeId;
-                visibleField.value = displayName;
-
-                // Trigger change events for any listeners
                 hiddenField.dispatchEvent(new Event('change', { bubbles: true }));
-                visibleField.dispatchEvent(new Event('change', { bubbles: true }));
             }
+
+            // Display name is cosmetic: resolve it in the background. No
+            // await — the caller must not block on this seconds-long lookup.
+            fetch(`/api/v1/nodes/${nodeId}`)
+                .then((response) => (response.ok ? response.json() : null))
+                .then((body) => {
+                    if (!body) return;
+                    const node = (body && body.data ? (body.data.node || body.data) : body) || {};
+                    const visibleField2 = visibleField || document.querySelector(`#${fieldName}`) ||
+                        document.querySelector(`input[data-field="${fieldName}"]`) ||
+                        document.querySelector(`.node-picker-input[data-field="${fieldName}"]`);
+                    if (visibleField2) {
+                        visibleField2.value = node.long_name || node.short_name || node.hex_id || `Node ${nodeId}`;
+                        visibleField2.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                })
+                .catch((fetchError) => {
+                    console.warn(`Could not fetch node info for ${nodeId}, using fallback display name`);
+                });
+
         } catch (error) {
             console.error(`Error setting node picker value for ${fieldName}:`, error);
         }

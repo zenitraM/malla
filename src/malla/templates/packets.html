@@ -230,6 +230,7 @@ document.addEventListener('DOMContentLoaded', function() {
         await new Promise(resolve => setTimeout(resolve, 100));
         const hasParams = await urlManager.applyURLParameters();
         controller.initialLoad(hasParams);
+        window.packetsFiltersReady = true;
     }
 
     // ------------------------------------------------------------------
@@ -518,9 +519,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Global range changes re-query the table (page-local times win until the
     // next global change; the range chip flags the override).
+    // Before controller.initialLoad() applies the URL filters, a range
+    // re-publish (e.g. the footer /api/v1/meta retention clamp arriving
+    // early) would trigger an unfiltered loadData() that paints rows without
+    // the URL filters. Gate on a readiness flag; controller is declared
+    // below, so the listener must not touch it directly.
+    window.packetsFiltersReady = false;
     if (window.MallaRange) {
         window.MallaRange.onRangeChange((range, meta) => {
             if (meta && meta.via === 'override') return;
+            if (!window.packetsFiltersReady) return;
             table.loadData();
         });
     }
