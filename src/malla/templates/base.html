@@ -197,6 +197,9 @@
             <div class="row">
                 <div class="col-md-6">
                     <small>Powered by <a href="https://github.com/zenitraM/malla">Malla</a></small>
+                    {% if GIT_SHA %}
+                    <small class="text-muted ms-2">· build <a href="https://github.com/zenitraM/malla/commit/{{ GIT_SHA }}" title="Commit this deployment was built from"><code>{{ GIT_SHA[:7] }}</code></a></small>
+                    {% endif %}
                 </div>
             </div>
         </div>
