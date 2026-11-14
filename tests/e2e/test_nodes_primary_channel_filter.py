@@ -24,21 +24,40 @@ class TestNodesPrimaryChannelFilter:
         expect(channel_select).to_be_visible()
         channel_select.select_option(value="LongFast")
 
-        # Apply filters
-        page.locator("#applyFilters").click()
+        # Apply filters. The v1 cutover filters server-side, so wait for the
+        # filtered request to complete and for the loading row to clear before
+        # asserting row contents.
+        with page.expect_response(
+            lambda r: "/api/v1/nodes" in r.url and r.status == 200, timeout=15000
+        ) as filtered_response:
+            page.locator("#applyFilters").click()
+        filtered_response.value.finished()
 
-        # Wait for filtering to apply – expect same or fewer rows
         page.wait_for_function(
-            "(initial) => document.querySelectorAll('#nodesTable tbody tr').length <= initial",
-            timeout=5000,
-            arg=initial_rows,
+            """() => {
+                // A row counts only once fully rendered: no loading spinner
+                // inside it, and it displays the filtered channel value.
+                const rows = document.querySelectorAll('#nodesTable tbody tr');
+                for (const row of rows) {
+                    if (row.querySelector('.loading-spinner')) continue;
+                    if (row.textContent.includes('LongFast')) return true;
+                }
+                return false;
+            }""",
+            timeout=15000,
         )
 
-        filtered_rows = page.locator("#nodesTable tbody tr").count()
-        assert filtered_rows > 0, (
-            "Filtering by primary channel should return some nodes"
+        # The DOM can be mid-refresh (a settled row may be re-rendered with a
+        # spinner), so assert the server-side truth from the filtered response
+        # and keep the DOM check tolerant.
+        body = filtered_response.value.json()
+        assert body["data"], "Filtering by primary channel should return some nodes"
+        assert all(row.get("primary_channel") == "LongFast" for row in body["data"]), (
+            "every returned node must carry the filtered channel"
         )
-
-        # Each visible row should contain 'LongFast' badge in Channel column
-        rows_html = page.locator("#nodesTable tbody").inner_html()
-        assert "LongFast" in rows_html, "Filtered rows should display selected channel"
+        page.wait_for_function(
+            """() => document.querySelectorAll(
+                '#nodesTable tbody tr:not(:has(.loading-spinner))'
+            ).length > 0""",
+            timeout=15000,
+        )

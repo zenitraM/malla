@@ -11,17 +11,17 @@ This service provides comprehensive traceroute analysis functionality including:
 import logging
 import math
 import time
-from datetime import datetime, timedelta
-from typing import Any, cast
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
+from ..database.connection import get_db_connection
 from ..database.repositories import (
-    LocationRepository,
     TracerouteRepository,
 )
 from ..models.traceroute import (
-    RouteData,
     TraceroutePacket,  # Use the correct TraceroutePacket class
 )
+from ..services.location_service import LocationService
 from ..utils.node_utils import get_bulk_node_names
 from ..utils.signal_quality import is_plausible_traceroute_snr
 from ..utils.traceroute_utils import parse_traceroute_payload
@@ -471,16 +471,28 @@ class TracerouteService:
     def get_longest_links_analysis(
         min_distance_km: float = 1.0, min_snr: float = -20.0, max_results: int = 100
     ) -> dict[str, Any]:
-        """
-        Analyze the longest RF links in the mesh network.
+        """Analyze the longest RF links in the mesh network.
 
-        Args:
-            min_distance_km: Minimum distance in kilometers to consider
-            min_snr: Minimum SNR threshold
-            max_results: Maximum number of results to return
+        Served from the capture-maintained ``link_day_rollup`` /
+        ``route_day_rollup`` tables (see ``malla.capture_rollups``): per-pair
+        hop aggregates folded per completed UTC day, so the endpoint is two
+        grouped scans over a tiny table plus one position join - no packet
+        re-parsing and no per-node location queries.
 
-        Returns:
-            Dictionary with longest links analysis
+        Semantics (approved sign-off): hop distances use each endpoint's
+        *latest* position (``node_latest_position``), not the position at
+        hop time; position staleness is driven by
+        ``node_latest_position.last_seen`` via the existing age_warning
+        mechanism. Two bounded approximations versus the legacy per-hop loop:
+
+        - the trailing 7d window is evaluated on whole UTC days
+        (``day >= date(start)``), so the window edge fuzzes by up to 24h;
+        - ``min_snr`` applies to the pair's best recorded hop SNR (direct
+        links) / mean path SNR (indirect links) instead of per-hop.
+
+        Distances between nodes without a usable position are skipped (direct)
+        or contribute zero (indirect), mirroring the legacy
+        ``hop.distance_km`` handling.
         """
         start_time = time.time()
         logger.info(
@@ -489,527 +501,231 @@ class TracerouteService:
         )
 
         try:
-            # ------------------------------------------------------------------
-            # Fetch raw data (only the last 7 days & successfully processed)
-            # ------------------------------------------------------------------
-            fetch_start = time.time()
-            from datetime import datetime, timedelta
+            since = time.time() - 7 * 86400
+            day_floor = datetime.fromtimestamp(since, UTC).date().isoformat()
 
-            end_time = datetime.now()
-            start_time_filter = end_time - timedelta(days=7)
+            conn = get_db_connection()
+            try:
+                link_rows = conn.execute(
+                    """
+                    SELECT node_a, node_b,
+                           SUM(packet_count) AS traceroute_count,
+                           SUM(snr_sum) / NULLIF(SUM(snr_count), 0) AS avg_snr,
+                           MAX(snr_max) AS best_snr,
+                           MAX(last_seen) AS last_seen,
+                           MAX(COALESCE(last_packet_id, 0)) AS packet_id
+                    FROM link_day_rollup
+                    WHERE day >= ?
+                    GROUP BY node_a, node_b
+                    HAVING SUM(snr_count) > 0
+                    """,
+                    (day_floor,),
+                ).fetchall()
 
-            filters = {
-                "start_time": start_time_filter.timestamp(),
-                "end_time": end_time.timestamp(),
-                "processed_successfully_only": True,
+                path_rows = conn.execute(
+                    """
+                    SELECT end_a, end_b,
+                           SUM(path_count) AS path_count,
+                           SUM(hop_count_sum) AS hop_count_sum,
+                           SUM(snr_avg_sum) / NULLIF(SUM(path_count), 0) AS avg_snr,
+                           MAX(last_seen) AS last_seen,
+                           MAX(COALESCE(last_packet_id, 0)) AS packet_id,
+                           last_route
+                    FROM route_day_rollup
+                    WHERE day >= ?
+                    GROUP BY end_a, end_b
+                    """,
+                    (day_floor,),
+                ).fetchall()
+
+                position_rows = conn.execute(
+                    "SELECT node_id, latitude, longitude FROM node_latest_position"
+                ).fetchall()
+            finally:
+                conn.close()
+
+            positions: dict[int, tuple[float, float]] = {}
+            for row in position_rows:
+                latitude, longitude = row["latitude"], row["longitude"]
+                if (
+                    latitude is not None
+                    and longitude is not None
+                    and latitude != 0
+                    and longitude != 0
+                ):
+                    positions[row["node_id"]] = (latitude, longitude)
+
+            link_node_ids = {
+                node_id
+                for row in link_rows
+                for node_id in (row["node_a"], row["node_b"])
+            }
+            path_node_ids = {
+                node_id for row in path_rows for node_id in (row["end_a"], row["end_b"])
+            }
+            route_chain_ids: set[int] = set()
+            for row in path_rows:
+                if row["last_route"]:
+                    route_chain_ids.update(
+                        int(part) for part in str(row["last_route"]).split(",")
+                    )
+            names = get_bulk_node_names(
+                list(link_node_ids | path_node_ids | route_chain_ids)
+            )
+
+            def node_name(node_id: int) -> str:
+                return names.get(node_id, f"!{node_id:08x}")
+
+            analyzed_links: list[dict[str, Any]] = []
+            for row in link_rows:
+                node_a, node_b = int(row["node_a"]), int(row["node_b"])
+                best_snr = row["best_snr"]
+                if best_snr is None or best_snr < min_snr:
+                    continue
+                endpoint_a = positions.get(node_a)
+                endpoint_b = positions.get(node_b)
+                if endpoint_a is None or endpoint_b is None:
+                    continue  # legacy: hops without a distance never counted
+                distance_km = LocationService.calculate_haversine_distance(
+                    endpoint_a[0], endpoint_a[1], endpoint_b[0], endpoint_b[1]
+                )
+                if distance_km < min_distance_km:
+                    continue
+
+                packet_id = int(row["packet_id"]) if row["packet_id"] else None
+                analyzed_links.append(
+                    {
+                        "from_node_id": node_a,
+                        "to_node_id": node_b,
+                        "from_node_name": node_name(node_a),
+                        "to_node_name": node_name(node_b),
+                        "distance_km": round(distance_km, 2),
+                        "avg_snr": round(row["avg_snr"], 1)
+                        if row["avg_snr"] is not None
+                        else None,
+                        "traceroute_count": int(row["traceroute_count"]),
+                        "recent_packets": [packet_id] if packet_id else [],
+                        "packet_id": packet_id,
+                        "packet_url": f"/packet/{packet_id}"
+                        if packet_id is not None
+                        else None,
+                        "last_seen": row["last_seen"],
+                    }
+                )
+
+            analyzed_links.sort(key=lambda link: link["distance_km"], reverse=True)
+            analyzed_links = analyzed_links[:max_results]
+
+            def path_distance_km(row: Any) -> float | None:
+                chain = str(row["last_route"] or "")
+                node_ids = [part for part in chain.split(",") if part]
+                if len(node_ids) < 2:
+                    return None
+                total = 0.0
+                for left, right in zip(node_ids, node_ids[1:], strict=False):
+                    try:
+                        left_pos = positions.get(int(left))
+                        right_pos = positions.get(int(right))
+                    except ValueError:
+                        return None
+                    if left_pos is None or right_pos is None:
+                        continue  # legacy: unresolvable hops contribute zero
+                    total += LocationService.calculate_haversine_distance(
+                        left_pos[0], left_pos[1], right_pos[0], right_pos[1]
+                    )
+                return total
+
+            analyzed_paths: list[dict[str, Any]] = []
+            for row in path_rows:
+                end_a, end_b = int(row["end_a"]), int(row["end_b"])
+                path_count = int(row["path_count"])
+                if path_count <= 0:
+                    continue
+                avg_snr = row["avg_snr"]
+                if avg_snr is not None and avg_snr < min_snr:
+                    continue
+                distance = path_distance_km(row)
+                if distance is None:
+                    endpoint_a = positions.get(end_a)
+                    endpoint_b = positions.get(end_b)
+                    if endpoint_a is None or endpoint_b is None:
+                        continue
+                    distance = LocationService.calculate_haversine_distance(
+                        endpoint_a[0], endpoint_a[1], endpoint_b[0], endpoint_b[1]
+                    )
+                if distance < min_distance_km:
+                    continue
+
+                packet_id = int(row["packet_id"]) if row["packet_id"] else None
+                chain = [
+                    int(part)
+                    for part in str(row["last_route"] or "").split(",")
+                    if part
+                ]
+                analyzed_paths.append(
+                    {
+                        "from_node_id": end_a,
+                        "to_node_id": end_b,
+                        "from_node_name": node_name(end_a),
+                        "to_node_name": node_name(end_b),
+                        "total_distance_km": round(distance, 2),
+                        "hop_count": int(round(row["hop_count_sum"] / path_count)),
+                        "avg_snr": round(avg_snr, 1) if avg_snr is not None else None,
+                        "traceroute_count": path_count,
+                        "route_preview": [node_name(node_id) for node_id in chain]
+                        if chain
+                        else [node_name(end_a), node_name(end_b)],
+                        "recent_packets": [packet_id] if packet_id else [],
+                        "packet_id": packet_id,
+                        "packet_url": f"/packet/{packet_id}"
+                        if packet_id is not None
+                        else None,
+                        "last_seen": row["last_seen"],
+                    }
+                )
+
+            analyzed_paths.sort(
+                key=lambda link: link["total_distance_km"], reverse=True
+            )
+            analyzed_paths = analyzed_paths[:max_results]
+
+            total_links = len(analyzed_links) + len(analyzed_paths)
+            longest_direct = (
+                f"{analyzed_links[0]['distance_km']:.2f} km" if analyzed_links else None
+            )
+            longest_path = (
+                f"{analyzed_paths[0]['total_distance_km']:.2f} km"
+                if analyzed_paths
+                else None
+            )
+
+            result_dict = {
+                "summary": {
+                    "total_links": total_links,
+                    "direct_links": len(analyzed_links),
+                    "longest_direct": longest_direct,
+                    "longest_path": longest_path,
+                },
+                "direct_links": analyzed_links,
+                "indirect_links": analyzed_paths,
+                "criteria": {
+                    "min_distance_km": min_distance_km,
+                    "min_snr": min_snr,
+                    "max_results": max_results,
+                    "analysis_period_days": 7,
+                },
+                "cache_stats": {
+                    "location_lookups_cached": len(positions),
+                },
             }
 
-            result = TracerouteRepository.get_traceroute_packets(
-                # Fetch a larger sample of packets to cover busy networks
-                # 25k packets ≈ several hours of traffic on busy meshes but still manageable
-                limit=25000,
-                filters=filters,
-            )
-            fetch_duration = time.time() - fetch_start
             logger.info(
-                f"TIMING: Data fetch took {fetch_duration:.3f}s for {len(result['packets'])} packets"
+                "Longest links from rollups: %d direct, %d indirect in %.3fs",
+                len(analyzed_links),
+                len(analyzed_paths),
+                time.time() - start_time,
             )
-
-            # ------------------------------------------------------------------
-            # Pre-fetch node location history using a single query per node
-            # (replaces the previous expensive nested node->packet cache fill).
-            # ------------------------------------------------------------------
-            # First collect all unique node ids that appear in the packets
-            unique_node_ids: set[int] = set()
-            parsed_route_cache: dict[int, RouteData] = {}
-            for packet in result["packets"]:
-                if not packet.get("raw_payload"):
-                    continue
-                try:
-                    route_data = parse_traceroute_payload(packet["raw_payload"])
-                    parsed_route_cache[packet["id"]] = route_data
-                    nodes_for_packet = {packet["from_node_id"], packet["to_node_id"]}
-                    nodes_for_packet.update(route_data.get("route_nodes", []))
-                    # Remove invalid placeholders
-                    nodes_for_packet.discard(None)
-                    nodes_for_packet.discard(4294967295)
-                    unique_node_ids.update(nodes_for_packet)
-                except Exception as e:
-                    logger.warning(
-                        f"Error parsing packet {packet.get('id', 'unknown')} for node collection: {e}"
-                    )
-                    continue
-
-            prefetch_start = time.time()
-
-            from ..utils import traceroute_utils as _tru  # Local import to avoid cycles
-
-            # Build a dict: node_id -> list[location_dict] (DESC by timestamp)
-            location_history_cache: dict[int, list[dict[str, Any]]] = {}
-            for node_id in unique_node_ids:
-                try:
-                    locations = LocationRepository.get_node_location_history(
-                        node_id, limit=50
-                    )
-                    if locations:
-                        location_history_cache[node_id] = (
-                            locations  # already DESC order
-                        )
-                except Exception as e:
-                    logger.warning(
-                        f"Error fetching location history for node {node_id}: {e}"
-                    )
-                    continue
-
-            prefetch_duration = time.time() - prefetch_start
-            logger.info(
-                f"TIMING: Location history pre-fetch took {prefetch_duration:.3f}s for {len(location_history_cache)} nodes"
-            )
-
-            # ------------------------------------------------------------------
-            # Inject a fast in-memory location lookup to avoid per-hop DB hits.
-            # ------------------------------------------------------------------
-            _orig_get_location = _tru.get_node_location_at_timestamp  # Backup original
-
-            def _fast_location_lookup(
-                node_id: int, target_ts: float
-            ) -> dict[str, Any] | None:
-                """Return the best location for a node at target_ts from the pre-loaded history.
-
-                Falls back to the original DB implementation if the node isn't in cache
-                (keeps behaviour identical for very old/unknown nodes).
-                """
-                # Use an hour bucket to maximise cache hits without losing much accuracy
-                bucket = int(target_ts // 3600)
-                memo_key = (node_id, bucket)
-                if memo_key in location_cache:
-                    return location_cache[memo_key]
-
-                history = location_history_cache.get(node_id)
-                if not history:
-                    loc = _orig_get_location(node_id, target_ts)
-                    if loc:
-                        location_cache[memo_key] = loc
-                    return loc
-
-                # histories are DESC (newest first). Find first <= ts.
-                best = None
-                for loc in history:
-                    if loc["timestamp"] <= target_ts:
-                        best = loc
-                        break
-                if best is None:
-                    # No past location found – use oldest future record.
-                    best = history[-1]
-
-                age_sec = target_ts - best["timestamp"]
-                age_hours = abs(age_sec) / 3600
-                if age_sec >= 0:  # Past record
-                    if age_hours <= 24:
-                        age_warning = f"from {age_hours:.1f}h ago"
-                    elif age_hours <= 168:
-                        age_warning = f"from {age_hours / 24:.1f}d ago"
-                    else:
-                        age_warning = f"from {age_hours / 168:.1f}w ago"
-                else:  # Future record
-                    if age_hours <= 24:
-                        age_warning = f"from {age_hours:.1f}h later"
-                    elif age_hours <= 168:
-                        age_warning = f"from {age_hours / 24:.1f}d later"
-                    else:
-                        age_warning = f"from {age_hours / 168:.1f}w later"
-
-                loc_dict = {
-                    "latitude": best["latitude"],
-                    "longitude": best["longitude"],
-                    "altitude": best.get("altitude"),
-                    "timestamp": best["timestamp"],
-                    "age_warning": age_warning,
-                }
-                location_cache[memo_key] = loc_dict
-                return loc_dict
-
-            # Override location lookup with fast in-memory version for this analysis
-            _tru.get_node_location_at_timestamp = cast(Any, _fast_location_lookup)
-
-            # Location cache used by TraceroutePacket.calculate_hop_distances
-            location_cache: dict[tuple, Any] = {}
-
-            try:
-                # ------------------------------------------------------------------
-                # Stream-process each hop to avoid holding large intermediate lists.
-                # ------------------------------------------------------------------
-                process_start = time.time()
-                link_stats: dict[tuple, dict[str, Any]] = {}
-                # Track multi-hop path statistics (indirect links)
-                path_stats: dict[tuple, dict[str, Any]] = {}
-
-                logger.info(
-                    f"Processing {len(result['packets'])} packets with pre-populated location cache"
-                )
-
-                packets_processed = 0
-                hops_processed = 0
-                distance_calculations = 0
-                cache_hits = 0
-                cache_misses = 0
-                early_filtered = 0
-
-                for packet in result["packets"]:
-                    packet_start = time.time()
-                    try:
-                        # Early filtering: skip packets that won't contribute any valid hops
-                        if (
-                            not packet["raw_payload"]
-                            or not packet["processed_successfully"]
-                        ):
-                            early_filtered += 1
-                            continue
-
-                        tr_packet = TraceroutePacket(
-                            packet_data=packet,
-                            resolve_names=True,
-                        )
-
-                        # Track cache performance before distance calculation
-                        cache_size_before = len(location_cache)
-
-                        # Populate distance information – uses pre-populated location_cache
-                        distance_calc_start = time.time()
-                        tr_packet.calculate_hop_distances(location_cache=location_cache)
-                        # Track timing (result not used but calculation is important)
-                        _ = time.time() - distance_calc_start
-                        distance_calculations += 1
-
-                        # Track cache performance after distance calculation
-                        cache_size_after = len(location_cache)
-                        if cache_size_after > cache_size_before:
-                            cache_misses += cache_size_after - cache_size_before
-                        else:
-                            cache_hits += 1
-
-                        rf_hops = tr_packet.get_rf_hops()
-                        hops_processed += len(rf_hops)
-
-                        for hop in rf_hops:
-                            # Early filtering: skip hops that won't meet criteria
-                            if (
-                                not is_plausible_traceroute_snr(hop.snr)
-                                or hop.snr == 0
-                                or hop.snr < min_snr
-                                or not hop.distance_km
-                                or hop.distance_km < min_distance_km
-                                or 4294967295 in [hop.from_node_id, hop.to_node_id]
-                            ):
-                                continue
-
-                            # Use a bidirectional key so A<->B == B<->A
-                            key = tuple(sorted([hop.from_node_id, hop.to_node_id]))
-
-                            if key not in link_stats:
-                                # Determine the correct orientation for names
-                                node1_id, node2_id = key
-                                if hop.from_node_id == node1_id:
-                                    from_name = hop.from_node_name
-                                    to_name = hop.to_node_name
-                                else:
-                                    from_name = hop.to_node_name
-                                    to_name = hop.from_node_name
-
-                                link_stats[key] = {
-                                    "from_node_name": from_name,
-                                    "to_node_name": to_name,
-                                    "total_distance": 0.0,
-                                    "total_snr": 0.0,
-                                    "traceroute_count": 0,
-                                    "max_distance": 0.0,
-                                    "best_snr": None,
-                                    "recent_packets": [],  # keep last 5 ids
-                                }
-
-                            stats_dict = link_stats[key]
-
-                            # Update aggregates
-                            stats_dict["traceroute_count"] += 1
-                            stats_dict["total_distance"] += hop.distance_km
-                            stats_dict["total_snr"] += hop.snr
-                            stats_dict["max_distance"] = max(
-                                stats_dict["max_distance"], hop.distance_km
-                            )
-
-                            if (
-                                stats_dict["best_snr"] is None
-                                or hop.snr > stats_dict["best_snr"]
-                            ):
-                                stats_dict["best_snr"] = hop.snr
-
-                            # Maintain only last 5 packet ids (newest first)
-                            stats_dict["recent_packets"].append(packet["id"])
-                            if len(stats_dict["recent_packets"]) > 5:
-                                stats_dict["recent_packets"].pop(0)
-
-                        packets_processed += 1
-
-                        # Log progress every 100 packets
-                        if packets_processed % 100 == 0:
-                            packet_duration = time.time() - packet_start
-                            logger.info(
-                                f"TIMING: Processed {packets_processed} packets, last packet took {packet_duration:.3f}s"
-                            )
-
-                        # --------------------------------------------------
-                        # Indirect path processing (entire traceroute path)
-                        # --------------------------------------------------
-                        if len(rf_hops) > 1:
-                            # Calculate total distance of the full path
-                            path_distance_km = sum(
-                                h.distance_km or 0.0 for h in rf_hops
-                            )
-
-                            # Skip if it doesn't meet distance threshold
-                            if path_distance_km < min_distance_km:
-                                pass  # too short – ignore
-                            else:
-                                # Average SNR across hops (ignore missing/garbage values)
-                                valid_snrs = [
-                                    h.snr
-                                    for h in rf_hops
-                                    if is_plausible_traceroute_snr(h.snr)
-                                ]
-                                avg_path_snr = (
-                                    (sum(valid_snrs) / len(valid_snrs))
-                                    if valid_snrs
-                                    else None
-                                )
-
-                                # Apply SNR filter (only if we actually have a value)
-                                if avg_path_snr is None or avg_path_snr < min_snr:
-                                    pass  # SNR below threshold – ignore
-                                else:
-                                    from_node_id_path = rf_hops[0].from_node_id
-                                    to_node_id_path = rf_hops[-1].to_node_id
-
-                                    path_key = (from_node_id_path, to_node_id_path)
-
-                                    if path_key not in path_stats:
-                                        path_stats[path_key] = {
-                                            "from_node_name": rf_hops[0].from_node_name,
-                                            "to_node_name": rf_hops[-1].to_node_name,
-                                            "total_distance": 0.0,
-                                            "total_snr": 0.0,
-                                            "traceroute_count": 0,
-                                            "hop_count_total": 0,
-                                            "recent_packets": [],
-                                            "route_preview": [
-                                                h.from_node_name for h in rf_hops
-                                            ]
-                                            + [rf_hops[-1].to_node_name],
-                                            "max_distance": 0.0,
-                                        }
-
-                                    pstats = path_stats[path_key]
-
-                                    # Update aggregates
-                                    pstats["traceroute_count"] += 1
-                                    pstats["total_distance"] += path_distance_km
-                                    pstats["hop_count_total"] += len(rf_hops)
-                                    pstats["total_snr"] += avg_path_snr
-                                    pstats["max_distance"] = max(
-                                        pstats["max_distance"], path_distance_km
-                                    )
-
-                                    pstats["recent_packets"].append(packet["id"])
-                                    if len(pstats["recent_packets"]) > 5:
-                                        pstats["recent_packets"].pop(0)
-
-                    except Exception as e:
-                        logger.warning(
-                            f"Error processing packet {packet.get('id', 'unknown')} for longest links: {e}"
-                        )
-                        continue
-
-                process_duration = time.time() - process_start
-                logger.info(f"TIMING: Packet processing took {process_duration:.3f}s")
-                logger.info(
-                    f"TIMING: Processed {packets_processed} packets, {hops_processed} hops, {distance_calculations} distance calculations"
-                )
-                logger.info(
-                    f"TIMING: Cache performance - {cache_hits} hits, {cache_misses} misses, final size: {len(location_cache)}"
-                )
-
-                logger.info(
-                    f"Location cache efficiency: {len(location_cache)} unique location lookups cached"
-                )
-
-                # ------------------------------------------------------------------
-                # Build the final list from aggregated statistics.
-                # ------------------------------------------------------------------
-                build_start = time.time()
-                analyzed_links: list[dict[str, Any]] = []
-                analyzed_paths: list[dict[str, Any]] = []
-
-                for (node1_id, node2_id), stats in link_stats.items():
-                    if stats["traceroute_count"] == 0:
-                        continue
-
-                    avg_distance = stats["total_distance"] / stats["traceroute_count"]
-                    avg_snr = stats["total_snr"] / stats["traceroute_count"]
-
-                    # Get last_seen timestamp from the most recent packet
-                    last_seen = None
-                    if stats["recent_packets"] and len(stats["recent_packets"]) > 0:
-                        packet_id = stats["recent_packets"][0]
-                        pkt = next(
-                            (p for p in result["packets"] if p["id"] == packet_id), None
-                        )
-                        if pkt and "timestamp" in pkt:
-                            last_seen = pkt["timestamp"]
-
-                    packet_id = (
-                        stats["recent_packets"][0] if stats["recent_packets"] else None
-                    )
-                    packet_url = (
-                        f"/packet/{packet_id}" if packet_id is not None else None
-                    )
-
-                    analyzed_links.append(
-                        {
-                            "from_node_id": node1_id,
-                            "to_node_id": node2_id,
-                            "from_node_name": stats["from_node_name"],
-                            "to_node_name": stats["to_node_name"],
-                            "distance_km": round(avg_distance, 2),
-                            "avg_snr": round(avg_snr, 1),
-                            "traceroute_count": stats["traceroute_count"],
-                            "recent_packets": sorted(
-                                stats["recent_packets"], reverse=True
-                            ),
-                            "packet_id": packet_id,
-                            "packet_url": packet_url,
-                            "last_seen": last_seen,
-                        }
-                    )
-
-                # Build indirect paths results
-                for (from_id, to_id), stats in path_stats.items():
-                    if stats["traceroute_count"] == 0:
-                        continue
-
-                    avg_distance = stats["total_distance"] / stats["traceroute_count"]
-                    avg_snr = (
-                        (stats["total_snr"] / stats["traceroute_count"])
-                        if stats["total_snr"]
-                        else None
-                    )
-
-                    # Determine last_seen timestamp
-                    last_seen = None
-                    if stats["recent_packets"]:
-                        pkt_id = stats["recent_packets"][0]
-                        pkt_obj = next(
-                            (p for p in result["packets"] if p["id"] == pkt_id), None
-                        )
-                        if pkt_obj and "timestamp" in pkt_obj:
-                            last_seen = pkt_obj["timestamp"]
-
-                    pkt_id = (
-                        stats["recent_packets"][0] if stats["recent_packets"] else None
-                    )
-                    pkt_url = f"/packet/{pkt_id}" if pkt_id is not None else None
-
-                    analyzed_paths.append(
-                        {
-                            "from_node_id": from_id,
-                            "to_node_id": to_id,
-                            "from_node_name": stats["from_node_name"],
-                            "to_node_name": stats["to_node_name"],
-                            "total_distance_km": round(avg_distance, 2),
-                            "hop_count": int(
-                                round(
-                                    stats["hop_count_total"] / stats["traceroute_count"]
-                                )
-                            ),
-                            "avg_snr": round(avg_snr, 1)
-                            if avg_snr is not None
-                            else None,
-                            "traceroute_count": stats["traceroute_count"],
-                            "route_preview": stats["route_preview"],
-                            "recent_packets": sorted(
-                                stats["recent_packets"], reverse=True
-                            ),
-                            "packet_id": pkt_id,
-                            "packet_url": pkt_url,
-                            "last_seen": last_seen,
-                        }
-                    )
-
-                # Sort and trim results to the requested maximum
-                sort_start = time.time()
-                analyzed_links.sort(key=lambda x: x["distance_km"], reverse=True)
-                analyzed_links = analyzed_links[:max_results]
-                sort_duration = time.time() - sort_start
-
-                # Sort and trim indirect paths
-                analyzed_paths.sort(key=lambda x: x["total_distance_km"], reverse=True)
-                analyzed_paths = analyzed_paths[:max_results]
-
-                build_duration = time.time() - build_start
-                logger.info(
-                    f"TIMING: Result building took {build_duration:.3f}s (sort: {sort_duration:.3f}s)"
-                )
-
-                # ------------------------------------------------------------------
-                # Compose summary.
-                # ------------------------------------------------------------------
-                summary_start = time.time()
-                total_links = len(analyzed_links) + len(analyzed_paths)
-
-                # Format longest distances as strings for summary
-                longest_direct = None
-                if analyzed_links:
-                    longest_direct = f"{analyzed_links[0]['distance_km']:.2f} km"
-
-                longest_path = None
-                if analyzed_paths:
-                    longest_path = f"{analyzed_paths[0]['total_distance_km']:.2f} km"
-
-                result_dict = {
-                    "summary": {
-                        "total_links": total_links,
-                        "direct_links": len(analyzed_links),
-                        "longest_direct": longest_direct,
-                        "longest_path": longest_path,
-                    },
-                    "direct_links": analyzed_links,
-                    "indirect_links": analyzed_paths,
-                    "criteria": {
-                        "min_distance_km": min_distance_km,
-                        "min_snr": min_snr,
-                        "max_results": max_results,
-                        "analysis_period_days": 7,
-                    },
-                    "cache_stats": {
-                        "location_lookups_cached": len(location_cache),
-                    },
-                }
-
-                summary_duration = time.time() - summary_start
-                total_duration = time.time() - start_time
-
-                logger.info(f"TIMING: Summary creation took {summary_duration:.3f}s")
-                logger.info(f"TIMING: Total function duration: {total_duration:.3f}s")
-                logger.info(
-                    f"TIMING: Breakdown - Fetch: {fetch_duration:.3f}s ({fetch_duration / total_duration * 100:.1f}%), "
-                    f"Prefetch: {prefetch_duration:.3f}s ({prefetch_duration / total_duration * 100:.1f}%), "
-                    f"Process: {process_duration:.3f}s ({process_duration / total_duration * 100:.1f}%), "
-                    f"Build: {build_duration:.3f}s ({build_duration / total_duration * 100:.1f}%)"
-                )
-
-                return result_dict
-
-            finally:
-                # Restore original implementation to avoid side-effects
-                _tru.get_node_location_at_timestamp = cast(Any, _orig_get_location)
+            return result_dict
 
         except Exception as e:
             logger.error(f"Error in longest links analysis: {e}")

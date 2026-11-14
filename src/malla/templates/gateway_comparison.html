@@ -401,193 +401,186 @@ document.getElementById('gateway2').addEventListener('change', function() {
 </script>
 
 {% if comparison_data and not comparison_data.get('error') and comparison_data.chart_data %}
+<script src="{{ url_for('static', filename='js/plotly-theme.js') }}"></script>
 <script>
 // Chart data from server
 const chartData = {{ comparison_data.chart_data | tojson | safe }};
 
-// RSSI Scatter Plot
-const rssiScatterTrace = {
-    x: chartData.rssi_scatter.x,
-    y: chartData.rssi_scatter.y,
-    mode: 'markers',
-    type: 'scatter',
-    text: chartData.rssi_scatter.text,
-    hovertemplate: '%{text}<br>{{ comparison_data.gateway1_name }}: %{x} dBm<br>{{ comparison_data.gateway2_name }}: %{y} dBm<extra></extra>',
-    marker: {
-        size: 8,
-        color: 'rgba(31, 119, 180, 0.7)',
-        line: {
-            color: 'rgba(31, 119, 180, 1)',
-            width: 1
-        }
-    }
-};
+// Tokenized theme (malla.css); charts re-render on theme flips.
+const TPL = window.MallaPlotlyTheme;
 
-// Add diagonal line for reference
-const rssiMin = Math.min(...chartData.rssi_scatter.x, ...chartData.rssi_scatter.y) - 5;
-const rssiMax = Math.max(...chartData.rssi_scatter.x, ...chartData.rssi_scatter.y) + 5;
+// All charts are (re)built through this function so a theme flip can fully
+// re-tokenize colors, axes and text via MallaPlotlyTheme.
+function renderGatewayComparisonCharts() {
+    const C = () => TPL.colors();
 
-const rssiDiagonalTrace = {
-    x: [rssiMin, rssiMax],
-    y: [rssiMin, rssiMax],
-    mode: 'lines',
-    type: 'scatter',
-    line: {
-        color: 'rgba(255, 0, 0, 0.5)',
-        dash: 'dash'
-    },
-    name: 'Equal Performance',
-    hovertemplate: 'Equal Performance Line<extra></extra>'
-};
-
-Plotly.newPlot('rssiScatterChart', [rssiScatterTrace, rssiDiagonalTrace], {
-    title: 'RSSI: {{ comparison_data.gateway1_name }} vs {{ comparison_data.gateway2_name }}',
-    xaxis: { title: '{{ comparison_data.gateway1_name }} RSSI (dBm)' },
-    yaxis: { title: '{{ comparison_data.gateway2_name }} RSSI (dBm)' },
-    showlegend: false
-});
-
-// SNR Scatter Plot
-const snrScatterTrace = {
-    x: chartData.snr_scatter.x,
-    y: chartData.snr_scatter.y,
-    mode: 'markers',
-    type: 'scatter',
-    text: chartData.snr_scatter.text,
-    hovertemplate: '%{text}<br>{{ comparison_data.gateway1_name }}: %{x} dB<br>{{ comparison_data.gateway2_name }}: %{y} dB<extra></extra>',
-    marker: {
-        size: 8,
-        color: 'rgba(255, 127, 14, 0.7)',
-        line: {
-            color: 'rgba(255, 127, 14, 1)',
-            width: 1
-        }
-    }
-};
-
-// Add diagonal line for reference
-const snrMin = Math.min(...chartData.snr_scatter.x, ...chartData.snr_scatter.y) - 2;
-const snrMax = Math.max(...chartData.snr_scatter.x, ...chartData.snr_scatter.y) + 2;
-
-const snrDiagonalTrace = {
-    x: [snrMin, snrMax],
-    y: [snrMin, snrMax],
-    mode: 'lines',
-    type: 'scatter',
-    line: {
-        color: 'rgba(255, 0, 0, 0.5)',
-        dash: 'dash'
-    },
-    name: 'Equal Performance',
-    hovertemplate: 'Equal Performance Line<extra></extra>'
-};
-
-Plotly.newPlot('snrScatterChart', [snrScatterTrace, snrDiagonalTrace], {
-    title: 'SNR: {{ comparison_data.gateway1_name }} vs {{ comparison_data.gateway2_name }}',
-    xaxis: { title: '{{ comparison_data.gateway1_name }} SNR (dB)' },
-    yaxis: { title: '{{ comparison_data.gateway2_name }} SNR (dB)' },
-    showlegend: false
-});
-
-// RSSI Difference Histogram
-if (chartData.rssi_diff_histogram.values.length > 0) {
-    const rssiDiffTrace = {
-        x: chartData.rssi_diff_histogram.values,
-        type: 'histogram',
+    // RSSI Scatter Plot
+    const rssiScatterTrace = {
+        x: chartData.rssi_scatter.x,
+        y: chartData.rssi_scatter.y,
+        mode: 'markers',
+        type: 'scatter',
+        text: chartData.rssi_scatter.text,
+        hovertemplate: '%{text}<br>{{ comparison_data.gateway1_name }}: %{x} dBm<br>{{ comparison_data.gateway2_name }}: %{y} dBm<extra></extra>',
         marker: {
-            color: 'rgba(31, 119, 180, 0.7)',
-            line: {
-                color: 'rgba(31, 119, 180, 1)',
-                width: 1
-            }
+            size: 8,
+            color: TPL.alpha(C().primary, 0.7),
+            line: { color: C().primary, width: 1 }
         }
     };
 
-    Plotly.newPlot('rssiDiffHistogram', [rssiDiffTrace], {
-        title: 'RSSI Difference Distribution ({{ comparison_data.gateway2_name }} - {{ comparison_data.gateway1_name }})',
-        xaxis: { title: 'RSSI Difference (dBm)' },
-        yaxis: { title: 'Count' }
-    });
-}
+    const rssiMin = Math.min(...chartData.rssi_scatter.x, ...chartData.rssi_scatter.y) - 5;
+    const rssiMax = Math.max(...chartData.rssi_scatter.x, ...chartData.rssi_scatter.y) + 5;
 
-// SNR Difference Histogram
-if (chartData.snr_diff_histogram.values.length > 0) {
-    const snrDiffTrace = {
-        x: chartData.snr_diff_histogram.values,
-        type: 'histogram',
+    const rssiDiagonalTrace = {
+        x: [rssiMin, rssiMax],
+        y: [rssiMin, rssiMax],
+        mode: 'lines',
+        type: 'scatter',
+        line: { color: TPL.alpha(C().danger, 0.5), dash: 'dash' },
+        name: 'Equal Performance',
+        hovertemplate: 'Equal Performance Line<extra></extra>'
+    };
+
+    Plotly.react('rssiScatterChart', [rssiScatterTrace, rssiDiagonalTrace], TPL.layout({
+        title: { text: 'RSSI: {{ comparison_data.gateway1_name }} vs {{ comparison_data.gateway2_name }}' },
+        xaxis: { title: { text: '{{ comparison_data.gateway1_name }} RSSI (dBm)' } },
+        yaxis: { title: { text: '{{ comparison_data.gateway2_name }} RSSI (dBm)' } },
+        showlegend: false
+    }), TPL.config());
+
+    // SNR Scatter Plot
+    const snrScatterTrace = {
+        x: chartData.snr_scatter.x,
+        y: chartData.snr_scatter.y,
+        mode: 'markers',
+        type: 'scatter',
+        text: chartData.snr_scatter.text,
+        hovertemplate: '%{text}<br>{{ comparison_data.gateway1_name }}: %{x} dB<br>{{ comparison_data.gateway2_name }}: %{y} dB<extra></extra>',
         marker: {
-            color: 'rgba(255, 127, 14, 0.7)',
-            line: {
-                color: 'rgba(255, 127, 14, 1)',
-                width: 1
-            }
+            size: 8,
+            color: TPL.alpha(C().warning, 0.7),
+            line: { color: C().warning, width: 1 }
         }
     };
 
-    Plotly.newPlot('snrDiffHistogram', [snrDiffTrace], {
-        title: 'SNR Difference Distribution ({{ comparison_data.gateway2_name }} - {{ comparison_data.gateway1_name }})',
-        xaxis: { title: 'SNR Difference (dB)' },
-        yaxis: { title: 'Count' }
-    });
+    const snrMin = Math.min(...chartData.snr_scatter.x, ...chartData.snr_scatter.y) - 2;
+    const snrMax = Math.max(...chartData.snr_scatter.x, ...chartData.snr_scatter.y) + 2;
+
+    const snrDiagonalTrace = {
+        x: [snrMin, snrMax],
+        y: [snrMin, snrMax],
+        mode: 'lines',
+        type: 'scatter',
+        line: { color: TPL.alpha(C().danger, 0.5), dash: 'dash' },
+        name: 'Equal Performance',
+        hovertemplate: 'Equal Performance Line<extra></extra>'
+    };
+
+    Plotly.react('snrScatterChart', [snrScatterTrace, snrDiagonalTrace], TPL.layout({
+        title: { text: 'SNR: {{ comparison_data.gateway1_name }} vs {{ comparison_data.gateway2_name }}' },
+        xaxis: { title: { text: '{{ comparison_data.gateway1_name }} SNR (dB)' } },
+        yaxis: { title: { text: '{{ comparison_data.gateway2_name }} SNR (dB)' } },
+        showlegend: false
+    }), TPL.config());
+
+    // RSSI Difference Histogram
+    if (chartData.rssi_diff_histogram.values.length > 0) {
+        const rssiDiffTrace = {
+            x: chartData.rssi_diff_histogram.values,
+            type: 'histogram',
+            marker: {
+                color: TPL.alpha(C().primary, 0.7),
+                line: { color: C().primary, width: 1 }
+            }
+        };
+
+        Plotly.react('rssiDiffHistogram', [rssiDiffTrace], TPL.layout({
+            title: { text: 'RSSI Difference Distribution ({{ comparison_data.gateway2_name }} - {{ comparison_data.gateway1_name }})' },
+            xaxis: { title: { text: 'RSSI Difference (dBm)' } },
+            yaxis: { title: { text: 'Count' } }
+        }), TPL.config());
+    }
+
+    // SNR Difference Histogram
+    if (chartData.snr_diff_histogram.values.length > 0) {
+        const snrDiffTrace = {
+            x: chartData.snr_diff_histogram.values,
+            type: 'histogram',
+            marker: {
+                color: TPL.alpha(C().warning, 0.7),
+                line: { color: C().warning, width: 1 }
+            }
+        };
+
+        Plotly.react('snrDiffHistogram', [snrDiffTrace], TPL.layout({
+            title: { text: 'SNR Difference Distribution ({{ comparison_data.gateway2_name }} - {{ comparison_data.gateway1_name }})' },
+            xaxis: { title: { text: 'SNR Difference (dB)' } },
+            yaxis: { title: { text: 'Count' } }
+        }), TPL.config());
+    }
+
+    // RSSI Timeline
+    if (chartData.timeline_rssi.timestamps.length > 0) {
+        const rssiTimeline1 = {
+            x: chartData.timeline_rssi.timestamps,
+            y: chartData.timeline_rssi.gateway1,
+            mode: 'lines+markers',
+            type: 'scatter',
+            name: '{{ comparison_data.gateway1_name }}',
+            line: { color: C().primary },
+            marker: { size: 4 }
+        };
+
+        const rssiTimeline2 = {
+            x: chartData.timeline_rssi.timestamps,
+            y: chartData.timeline_rssi.gateway2,
+            mode: 'lines+markers',
+            type: 'scatter',
+            name: '{{ comparison_data.gateway2_name }}',
+            line: { color: C().warning },
+            marker: { size: 4 }
+        };
+
+        Plotly.react('rssiTimelineChart', [rssiTimeline1, rssiTimeline2], TPL.layout({
+            title: { text: 'RSSI Over Time' },
+            xaxis: { title: { text: 'Time' } },
+            yaxis: { title: { text: 'RSSI (dBm)' } }
+        }), TPL.config());
+    }
+
+    // SNR Timeline
+    if (chartData.timeline_snr.timestamps.length > 0) {
+        const snrTimeline1 = {
+            x: chartData.timeline_snr.timestamps,
+            y: chartData.timeline_snr.gateway1,
+            mode: 'lines+markers',
+            type: 'scatter',
+            name: '{{ comparison_data.gateway1_name }}',
+            line: { color: C().primary },
+            marker: { size: 4 }
+        };
+
+        const snrTimeline2 = {
+            x: chartData.timeline_snr.timestamps,
+            y: chartData.timeline_snr.gateway2,
+            mode: 'lines+markers',
+            type: 'scatter',
+            name: '{{ comparison_data.gateway2_name }}',
+            line: { color: C().warning },
+            marker: { size: 4 }
+        };
+
+        Plotly.react('snrTimelineChart', [snrTimeline1, snrTimeline2], TPL.layout({
+            title: { text: 'SNR Over Time' },
+            xaxis: { title: { text: 'Time' } },
+            yaxis: { title: { text: 'SNR (dB)' } }
+        }), TPL.config());
+    }
 }
 
-// RSSI Timeline
-if (chartData.timeline_rssi.timestamps.length > 0) {
-    const rssiTimeline1 = {
-        x: chartData.timeline_rssi.timestamps,
-        y: chartData.timeline_rssi.gateway1,
-        mode: 'lines+markers',
-        type: 'scatter',
-        name: '{{ comparison_data.gateway1_name }}',
-        line: { color: 'rgba(31, 119, 180, 1)' },
-        marker: { size: 4 }
-    };
-
-    const rssiTimeline2 = {
-        x: chartData.timeline_rssi.timestamps,
-        y: chartData.timeline_rssi.gateway2,
-        mode: 'lines+markers',
-        type: 'scatter',
-        name: '{{ comparison_data.gateway2_name }}',
-        line: { color: 'rgba(255, 127, 14, 1)' },
-        marker: { size: 4 }
-    };
-
-    Plotly.newPlot('rssiTimelineChart', [rssiTimeline1, rssiTimeline2], {
-        title: 'RSSI Over Time',
-        xaxis: { title: 'Time' },
-        yaxis: { title: 'RSSI (dBm)' }
-    });
-}
-
-// SNR Timeline
-if (chartData.timeline_snr.timestamps.length > 0) {
-    const snrTimeline1 = {
-        x: chartData.timeline_snr.timestamps,
-        y: chartData.timeline_snr.gateway1,
-        mode: 'lines+markers',
-        type: 'scatter',
-        name: '{{ comparison_data.gateway1_name }}',
-        line: { color: 'rgba(31, 119, 180, 1)' },
-        marker: { size: 4 }
-    };
-
-    const snrTimeline2 = {
-        x: chartData.timeline_snr.timestamps,
-        y: chartData.timeline_snr.gateway2,
-        mode: 'lines+markers',
-        type: 'scatter',
-        name: '{{ comparison_data.gateway2_name }}',
-        line: { color: 'rgba(255, 127, 14, 1)' },
-        marker: { size: 4 }
-    };
-
-    Plotly.newPlot('snrTimelineChart', [snrTimeline1, snrTimeline2], {
-        title: 'SNR Over Time',
-        xaxis: { title: 'Time' },
-        yaxis: { title: 'SNR (dB)' }
-    });
-}
+renderGatewayComparisonCharts();
+TPL.onThemeChange(renderGatewayComparisonCharts);
 
 // Initialize DataTable for common packets
 document.addEventListener('DOMContentLoaded', function() {

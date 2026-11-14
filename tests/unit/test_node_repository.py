@@ -184,6 +184,7 @@ class TestNodeRepository:
                 "short_name": "TGA",
                 "hw_model": "TBEAM",
                 "role": "ROUTER",
+                "primary_channel": None,
             },
         ]
 

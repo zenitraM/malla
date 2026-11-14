@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from malla import mqtt_capture
+from malla import capture_startup, mqtt_capture
 
 
 class TestDataCleanup:
@@ -31,7 +31,7 @@ class TestDataCleanup:
             mqtt_capture.DATABASE_FILE = temp_db_path
 
             # Initialize the database
-            mqtt_capture.init_database()
+            capture_startup.init_database(temp_db_path)
 
             # Insert test data
             current_time = time.time()
@@ -184,7 +184,7 @@ class TestDataCleanup:
             mqtt_capture.DATABASE_FILE = temp_db_path
 
             # Initialize the database
-            mqtt_capture.init_database()
+            capture_startup.init_database(temp_db_path)
 
             # Insert test data
             current_time = time.time()

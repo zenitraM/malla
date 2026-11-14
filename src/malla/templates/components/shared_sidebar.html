@@ -4,16 +4,17 @@
 <!-- Sidebar -->
 <div id="sidebar" class="sidebar">
     <div class="sidebar-header">
-        <h5><i class="bi bi-{{ sidebar_icon | default('map') }}"></i> {{ sidebar_title | default('Network View') }}</h5>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="toggleSidebar">
-            <i class="bi bi-chevron-right"></i>
+        <h2 class="h5"><i class="bi bi-{{ sidebar_icon | default('map') }}"></i> {{ sidebar_title | default('Network View') }}</h2>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="toggleSidebar"
+                aria-label="Collapse sidebar" title="Collapse sidebar">
+            <i class="bi bi-chevron-right" aria-hidden="true"></i>
         </button>
     </div>
 
     <!-- Selected Item Details -->
     <div class="sidebar-section" id="selectedDetails" style="display: none;">
         <div class="d-flex justify-content-between align-items-center mb-2">
-            <h6 class="mb-0"><i class="bi bi-info-circle"></i> Selected {{ selected_item_type | default('Item') }}</h6>
+            <h3 class="h6 mb-0"><i class="bi bi-info-circle"></i> Selected {{ selected_item_type | default('Item') }}</h3>
             <button type="button" class="btn btn-sm btn-outline-secondary" id="clearSelection" title="Clear selection">
                 <i class="bi bi-x"></i>
             </button>
@@ -26,7 +27,7 @@
     <!-- Hover Details (for graph view) -->
     {% if show_hover_details %}
     <div class="sidebar-section">
-        <h6><i class="bi bi-eye"></i> Hover Details</h6>
+        <h3 class="h6"><i class="bi bi-eye"></i> Hover Details</h3>
         <div id="hoverDetails" class="hover-details">
             <small class="text-muted">Hover over nodes or links for details</small>
         </div>
@@ -35,7 +36,7 @@
 
     <!-- Node Search and List Combined -->
     <div class="sidebar-section">
-        <h6><i class="bi bi-search"></i> Search & Filter Nodes</h6>
+        <h3 class="h6"><i class="bi bi-search"></i> Search & Filter Nodes</h3>
         <div class="input-group input-group-sm mb-2">
             <input type="text" class="form-control" id="nodeSearch" placeholder="Search by node name or ID...">
             <button class="btn btn-outline-secondary" type="button" id="clearSearch">
@@ -64,7 +65,7 @@
 
     <!-- Controls Section -->
     <div class="sidebar-section">
-        <h6><i class="bi bi-gear"></i> Controls</h6>
+        <h3 class="h6"><i class="bi bi-gear"></i> Controls</h3>
         <div class="d-grid gap-2" id="controlButtons">
             <!-- Control buttons will be added by the specific page -->
         </div>
@@ -73,7 +74,7 @@
     <!-- Filters Section -->
     {% if show_filters %}
     <div class="sidebar-section">
-        <h6><i class="bi bi-funnel"></i> Filters</h6>
+        <h3 class="h6"><i class="bi bi-funnel"></i> Filters</h3>
         <div id="filtersContainer">
             <!-- Filters will be added by the specific page -->
         </div>
@@ -82,7 +83,7 @@
 
     <!-- Statistics Section -->
     <div class="sidebar-section">
-        <h6><i class="bi bi-bar-chart"></i> Statistics</h6>
+        <h3 class="h6"><i class="bi bi-bar-chart"></i> Statistics</h3>
         <div id="statsContainer" class="stats-content">
             <small class="text-muted">Loading...</small>
         </div>
@@ -90,7 +91,7 @@
 
     <!-- Legend Section -->
     <div class="sidebar-section">
-        <h6><i class="bi bi-palette"></i> Legend</h6>
+        <h3 class="h6"><i class="bi bi-palette"></i> Legend</h3>
         <div class="legend-content" id="legendContainer">
             <!-- Legend content will be added by the specific page -->
         </div>

@@ -196,6 +196,39 @@ export MALLA_MQTT_BROKER_ADDRESS="127.0.0.1"  # Replace with your broker
 
 Both tools use the same SQLite database concurrently using thread-safe connections.
 
+## Database Schema and Migrations
+
+`malla-capture` owns the SQLite schema. On startup it applies every pending
+migration from `malla.migrations` and records progress in the `malla_meta` table.
+Each migration is tagged with the phase in which it may run:
+
+| Phase | What it does | When it runs |
+| --- | --- | --- |
+| `schema` | tables and columns (cheap DDL) | before the daemon connects, so the ingest path can always write |
+| `blocking` | write-locking DDL (index builds) | after connecting; incoming packets queue in memory and are replayed when the migration finishes, so none are lost |
+| `derived` | data work over stored rows (backfills, bounded `ANALYZE`) | in the background while packets are ingested |
+
+The web UI never runs the schema/blocking phases on a populated database; on
+boot it runs only the cheap DERIVED planner-stats bootstrap (creating
+`malla_meta`/`sqlite_stat1` on a fresh DB), checks which required tables are
+present, and serves an actionable 503 with bootstrap instructions while any
+are missing. **Start `malla-capture` once (or run `malla-migrate`) before
+expecting the web UI to serve data**: schema, indexes and the derived rollups
+are created there, and against a partially-migrated database the web UI's
+preflight reports exactly what is absent.
+
+Migrations can be inspected or applied without starting MQTT:
+
+```bash
+uv run malla-migrate --list                             # applied vs pending
+uv run malla-migrate --dry-run                          # what would run
+uv run malla-migrate --phase derived                    # a single phase
+uv run malla-migrate --forget primary_channel_backfill   # force one to run again
+```
+
+Every migration is idempotent: a crash between the work and writing its progress
+marker simply repeats the migration on the next start.
+
 ## Docker Configuration
 
 When using Docker, configuration is handled through environment variables defined in your `.env` file:
@@ -371,6 +404,10 @@ The sidebar can still be expanded by users clicking the toggle button, giving th
 ```
 
 This approach maximizes the visible map area while keeping full functionality accessible through the expandable sidebar.
+
+## Internal API
+
+The web UI talks to the backend over a versioned internal JSON API under `/api/v1`. It is undocumented by design and is not a public or stable contract; it exists to serve the UI and evolves with it. A machine-readable OpenAPI schema is served at [`/api/v1/openapi.json`](http://localhost:5008/api/v1/openapi.json) for internal tooling.
 
 ## Contributing
 

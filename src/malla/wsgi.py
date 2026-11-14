@@ -31,11 +31,23 @@ def _build_gunicorn_config(cfg):
         "threads": cfg.gunicorn_threads,
         "worker_class": worker_class,
         "worker_connections": 1000,
-        "max_requests": 1000,
-        "max_requests_jitter": 50,
+        # Recycle workers every few minutes: bounds how long a worker can run
+        # with any stale SQLite WAL-index state; jitter avoids all workers
+        # recycling at the same instant.
+        "max_requests": 200,
+        "max_requests_jitter": 100,
         "timeout": 30,
         "keepalive": 2,
-        "preload_app": True,
+        # preload_app=False is REQUIRED with SQLite WAL. With preloading the
+        # master imports the app (create_app opens the database for
+        # migrations/planner checks), so every forked worker inherits the
+        # master's -shm file descriptor and its mmap. That is the exact
+        # "carrying an open database connection across fork()" pattern the
+        # SQLite docs call out (howtocorrupt.html §2.7): after any checkpoint
+        # the stale inherited mapping serves 'database disk image is
+        # malformed' from every worker at once. Building the app inside each
+        # worker gives each one its own mapping.
+        "preload_app": False,
         "access_log_format": '%({REMOTE_ADDR}e)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s',
         "accesslog": "-",
         "errorlog": "-",
@@ -99,11 +111,14 @@ def main():
 
         gunicorn_config = _build_gunicorn_config(cfg)
 
-        # Create Gunicorn application
+        # Create Gunicorn application. Pass a factory callable, not an app
+        # instance: load() runs in each forked worker, so the app (and its
+        # SQLite connection and background threads) is built once per worker,
+        # never in the master.
         class MallaWSGIApplication(WSGIApplication):
-            def __init__(self, app, options=None):
+            def __init__(self, app_factory, options=None):
                 self.options = options or {}
-                self.application = app
+                self.app_factory = app_factory
                 super().__init__()
 
             def load_config(self):
@@ -117,11 +132,11 @@ def main():
                         self.cfg.set(key.lower(), value)
 
             def load(self):
-                return self.application
+                return self.app_factory()
 
         # Start Gunicorn
         logger.info(f"Starting Gunicorn server on {cfg.host}:{cfg.port}")
-        MallaWSGIApplication(get_application(), gunicorn_config).run()
+        MallaWSGIApplication(get_application, gunicorn_config).run()
 
     except ImportError:
         logger.error(

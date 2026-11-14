@@ -20,7 +20,7 @@ class TestTracerouteURLFilters:
         api_requests = []
 
         def track_requests(request):
-            if "/api/traceroute/data" in request.url:
+            if "/api/v1/traceroutes" in request.url:
                 api_requests.append({"url": request.url, "method": request.method})
 
         page.on("request", track_requests)
@@ -54,12 +54,10 @@ class TestTracerouteURLFilters:
 
         # Count unfiltered vs filtered requests
         unfiltered_requests = [
-            req
-            for req in api_requests
-            if f"from_node={test_from_node}" not in req["url"]
+            req for req in api_requests if f"from={test_from_node}" not in req["url"]
         ]
         filtered_requests = [
-            req for req in api_requests if f"from_node={test_from_node}" in req["url"]
+            req for req in api_requests if f"from={test_from_node}" in req["url"]
         ]
 
         print(f"Unfiltered requests: {len(unfiltered_requests)}")
@@ -102,7 +100,7 @@ class TestTracerouteURLFilters:
 
         # Verify the filtering worked by checking the API directly
         response = requests.get(
-            f"{test_server_url}/api/traceroute/data?from_node={test_from_node}&limit=5"
+            f"{test_server_url}/api/v1/traceroutes?from={test_from_node}&page_size=5"
         )
         assert response.status_code == 200
         api_data = response.json()
@@ -155,7 +153,7 @@ class TestTracerouteURLFilters:
         api_requests = []
 
         def track_requests(request):
-            if "/api/traceroute/data" in request.url:
+            if "/api/v1/traceroutes" in request.url:
                 api_requests.append({"url": request.url, "method": request.method})
 
         page.on("request", track_requests)
@@ -185,7 +183,7 @@ class TestTracerouteURLFilters:
         api_requests = []
 
         def track_requests(request):
-            if "/api/traceroute/data" in request.url:
+            if "/api/v1/traceroutes" in request.url:
                 api_requests.append({"url": request.url, "method": request.method})
 
         page.on("request", track_requests)
@@ -206,12 +204,11 @@ class TestTracerouteURLFilters:
         row_count = rows.count()
         assert row_count > 0, "Table should show filtered data"
 
-        # Should have exactly 1 filtered API request
-        filtered_requests = [
-            req for req in api_requests if f"route_node={test_route_node}" in req["url"]
-        ]
-        assert len(filtered_requests) == 1, (
-            f"Expected exactly 1 filtered request, but found {len(filtered_requests)}"
+        # route_node has no v1 API parameter — the traceroute table applies it
+        # client-side over the fetched page, so the filter must survive in the
+        # page URL and the table must still render.
+        assert f"route_node={test_route_node}" in page.url, (
+            f"Expected route_node to remain in the page URL, got: {page.url}"
         )
 
     def test_traceroute_gateway_filter_url(self, page: Page, test_server_url: str):
@@ -223,7 +220,7 @@ class TestTracerouteURLFilters:
         api_requests = []
 
         def track_requests(request):
-            if "/api/traceroute/data" in request.url:
+            if "/api/v1/traceroutes" in request.url:
                 api_requests.append({"url": request.url, "method": request.method})
 
         page.on("request", track_requests)
@@ -246,7 +243,7 @@ class TestTracerouteURLFilters:
 
         # Should have exactly 1 filtered API request
         filtered_requests = [
-            req for req in api_requests if f"gateway_id={test_gateway_id}" in req["url"]
+            req for req in api_requests if f"gateway={test_gateway_id}" in req["url"]
         ]
         assert len(filtered_requests) == 1, (
             f"Expected exactly 1 filtered request, but found {len(filtered_requests)}"

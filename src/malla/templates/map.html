@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% from "components/sidebar_macros.html" import sidebar_container, selected_details_section, search_section, controls_section, stats_section, legend_section, sidebar_styles %}
+{% from "macros.html" import node_picker %}
 
 {% block title %}Node Map - Malla{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/node-picker.css') }}">
 <!-- Leaflet CSS -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <!-- Leaflet MarkerCluster CSS -->
@@ -38,11 +40,12 @@
 
         <!-- Node Search and List Combined -->
         <div class="sidebar-section">
-            <h6><i class="bi bi-search"></i> Search & Filter Nodes</h6>
+            <h3 class="h6"><i class="bi bi-search"></i> Search & Filter Nodes</h3>
             <div class="input-group input-group-sm mb-2">
-                <input type="text" class="form-control" id="nodeSearch" placeholder="Search by node name or ID...">
-                <button class="btn btn-outline-secondary" type="button" id="clearSearch">
-                    <i class="bi bi-x"></i>
+                {{ node_picker("nodeSearch", label="Focus node", placeholder="Search name or !id", additional_classes="mb-2") }}
+                <button class="btn btn-outline-secondary" type="button" id="clearSearch"
+                        aria-label="Clear node search" title="Clear node search">
+                    <i class="bi bi-x" aria-hidden="true"></i>
                 </button>
             </div>
 
@@ -54,7 +57,7 @@
                         <span id="searchCount">0</span> results
                     </small>
                 </div>
-                <div id="nodeList" class="node-list">
+                <div id="nodeList" class="node-list" tabindex="0" aria-label="Node list">
                     <div class="text-center text-muted py-4">
                         <div class="spinner-border spinner-border-sm" role="status">
                             <span class="visually-hidden">Loading...</span>
@@ -73,18 +76,12 @@
 
         <!-- Filters -->
         <div class="sidebar-section">
-            <h6><i class="bi bi-funnel"></i> Filters</h6>
+            <h3 class="h6"><i class="bi bi-funnel"></i> Filters</h3>
             <form id="locationFilterForm">
                 <div class="mb-3">
-                    <label for="maxAge" class="form-label">Max Age</label>
-                    <select class="form-select form-select-sm" id="maxAge" name="maxAge">
-                        <option value="">No Limit</option>
-                        <option value="1">1 Hour</option>
-                        <option value="6">6 Hours</option>
-                        <option value="24" selected>24 Hours</option>
-                        <option value="72">3 Days</option>
-                        <option value="168">1 Week</option>
-                    </select>
+                    <span class="form-label d-block text-muted small">Time Window</span>
+                    <div id="mapWindowChip" class="fw-semibold small" data-window-key=""
+                         title="Set globally from the range selector in the navbar"><span class="text-muted">…</span></div>
                 </div>
                 <div class="mb-3">
                     <label for="roleFilter" class="form-label">Node Role</label>
@@ -109,19 +106,6 @@
                     </select>
                 </div>
                 <div class="mb-3">
-                    <label for="startDateTime" class="form-label">Start Date & Time</label>
-                    <input type="datetime-local" class="form-control form-control-sm" id="startDateTime" name="startDateTime">
-                </div>
-                <div class="mb-3">
-                    <label for="endDateTime" class="form-label">End Date & Time</label>
-                    <input type="datetime-local" class="form-control form-control-sm" id="endDateTime" name="endDateTime">
-                </div>
-                <div class="d-flex justify-content-end mb-2">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="clearDateRange">
-                        <i class="bi bi-x-circle"></i> Clear Dates
-                    </button>
-                </div>
-                <div class="mb-3">
                     <label for="minContacts" class="form-label">Min Contacts</label>
                     <input type="number" class="form-control form-control-sm" id="minContacts" name="minContacts" value="1" min="1">
                 </div>
@@ -133,7 +117,7 @@
 
         <!-- Map Stats -->
         <div class="sidebar-section">
-            <h6><i class="bi bi-bar-chart"></i> Statistics</h6>
+            <h3 class="h6"><i class="bi bi-bar-chart"></i> Statistics</h3>
             <div id="mapStats" class="stats-content">
                 <div><strong>Nodes:</strong> <span id="statsNodes">0</span></div>
                 <div><strong>With Location:</strong> <span id="statsWithLocation">0</span></div>
@@ -144,7 +128,7 @@
 
         <!-- Link visibility checkboxes -->
         <div class="sidebar-section">
-            <h6><i class="bi bi-diagram-3"></i> Link Types</h6>
+            <h3 class="h6"><i class="bi bi-diagram-3"></i> Link Types</h3>
             <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="tracerouteLinksCheckbox" checked>
                 <label class="form-check-label" for="tracerouteLinksCheckbox">Traceroute Links</label>
@@ -157,7 +141,7 @@
 
         <!-- Hop depth selector (shown only when a node is selected) -->
         <div class="sidebar-section" id="hopDepthSection" style="display: none;">
-            <h6><i class="bi bi-stack"></i> Hop Depth</h6>
+            <h3 class="h6"><i class="bi bi-stack"></i> Hop Depth</h3>
             <div class="small text-muted mb-2">Choose how many RF hops from the selected node remain visible.</div>
             <select class="form-select form-select-sm" id="hopDepthSelect">
                 <option value="1" selected>1 hop</option>
@@ -203,7 +187,7 @@
 
 .map-container {
     position: fixed;
-    top: 56px; /* Height of navbar */
+    top: var(--malla-nav-h, 56px);
     left: 0;
     right: 0;
     bottom: 0;
@@ -376,7 +360,7 @@
 @media (max-width: 768px) {
     .map-container {
         flex-direction: column;
-        top: 56px;
+        top: var(--malla-nav-h, 56px);
     }
 
     .map-main {
@@ -411,6 +395,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
 <!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!-- Leaflet MarkerCluster JS -->
@@ -451,6 +436,26 @@ function updateMapTheme() {
 }
 
 // Initialize the page
+// Pick black or white text for a given background (#rgb/#rrggbb) using
+// relative luminance, so dynamically coloured badges stay AA-readable.
+function readableTextOn(color) {
+    if (!color || typeof color !== 'string') return '#ffffff';
+    let hex = color.trim();
+    if (hex[0] === '#') hex = hex.slice(1);
+    if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('');
+    if (hex.length !== 6) return '#ffffff';
+    const n = parseInt(hex, 16);
+    const channel = (v) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    };
+    const L = 0.2126 * channel((n >> 16) & 255)
+        + 0.7152 * channel((n >> 8) & 255)
+        + 0.0722 * channel(n & 255);
+    // Pick whichever of white/ink gives the higher contrast ratio.
+    return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? '#ffffff' : '#0b1119';
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Check if sidebar should be collapsed by default (from URL parameter)
     // Pure frontend implementation - reads URL parameter directly
@@ -467,8 +472,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Wait for jQuery to be available
     function waitForJQuery() {
         if (typeof $ !== 'undefined') {
-            initializeInterface();
+            // initMap first: initializeInterface() dispatches change events for
+            // pre-filled filter fields, whose handlers call updateMapDisplay()
+            // (needs markerClusterGroup to exist).
             initMap();
+            initializeInterface();
 
             // Listen for theme changes
             window.addEventListener('themeChanged', function(event) {
@@ -547,20 +555,50 @@ function initializeInterface() {
     });
 
     // Handle node search with unified list
-    $('#nodeSearch').on('input', function() {
-        const query = this.value.toLowerCase().trim();
-        if (query.length > 0) {
-            searchNodes(query);
+    // Shared NodePicker: on selection, focus + select on the map when the
+    // node has a known position; informational toast otherwise.
+    $('#nodeSearch_value').on('change', function() {
+        const nodeId = Number(this.value);
+        if (!nodeId) { showAllNodes(); return; }
+        const node = allNodes.find(n => n.node_id === nodeId);
+        if (node && node.latitude != null && node.longitude != null) {
+            focusOnNode(node);
+            selectNode(node);
         } else {
-            showAllNodes();
+            if (window.MallaToast) {
+                window.MallaToast.info(`!${nodeId.toString(16).padStart(8, '0')}: no plotted position in the current window`, { title: 'Node selected' });
+            }
         }
     });
 
     $('#clearSearch').on('click', function() {
-        $('#nodeSearch').val('');
+        document.querySelectorAll('.node-picker-clear').forEach(b => b.click());
         showAllNodes();
         clearNodeSelection();
     });
+
+    // The global range is the map's only time control. The fetch is bound to
+    // it (see buildFilterParams): widening past the loaded snapshot refetches
+    // (debounced); narrowing filters the rows already in memory.
+    let _refetchTimer = null;
+    let _lastFetchWindow = '';
+    if (window.MallaRange) {
+        window.MallaRange.onRangeChange(function (range, meta) {
+            if (meta && meta.via === 'override') return;
+            updateWindowChip();
+            applyClientSideFilters();
+            const key = rangeKey();
+            // Reset the debounce on every move so a rapid A→B→A selection
+            // still lands one fetch for the final window.
+            if (_refetchTimer) clearTimeout(_refetchTimer);
+            if (key !== _lastFetchWindow) {
+                _refetchTimer = setTimeout(() => {
+                    _lastFetchWindow = key;
+                    if (typeof loadNodeLocations === 'function') loadNodeLocations();
+                }, 400);
+            }
+        });
+    }
 
     // Handle filter form submission
     $('#locationFilterForm').on('submit', function(e) {
@@ -592,37 +630,9 @@ function initializeInterface() {
     });
 
     // Sync MaxAge select with date-time pickers
-    function toLocalInputValue(dateObj) {
-        const pad = (n)=> n.toString().padStart(2,'0');
-        return `${dateObj.getFullYear()}-${pad(dateObj.getMonth()+1)}-${pad(dateObj.getDate())}T${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
-    }
+    // Reflect the global range on load (after handlers are bound).
+    updateWindowChip();
 
-    $('#maxAge').on('change', function() {
-        const val = this.value;
-        if (!val) {
-            // No Limit selected – clear date inputs
-            $('#startDateTime').val('');
-            $('#endDateTime').val('');
-        } else {
-            const hours = parseInt(val,10);
-            if (!isNaN(hours)) {
-                const now = new Date();
-                const start = new Date(now.getTime() - hours*3600*1000);
-                $('#startDateTime').val(toLocalInputValue(start));
-                // Don't set end date - leave it empty to show all data up to present
-                $('#endDateTime').val('');
-            }
-        }
-        applyClientSideFilters();
-    });
-
-    // Clear dates button
-    $('#clearDateRange').on('click', function() {
-        $('#startDateTime').val('');
-        $('#endDateTime').val('');
-        $('#maxAge').val('');
-        applyClientSideFilters();
-    });
 
     // Move hop depth section just below the selected details container
     $('#hopDepthSection').insertAfter($('#selectedDetails'));
@@ -632,16 +642,15 @@ function initializeInterface() {
     // --------------------------------------------------------------
     async function loadPrimaryChannels() {
         try {
-            const response = await fetch('/api/meshtastic/channels');
-            const data = await response.json();
-            if (data.channels) {
+            const channels = await window.MallaFilters.channels();
+            if (channels.length) {
                 const select = document.getElementById('channelFilter');
                 const allOption = select.querySelector('option[value=""]');
                 select.replaceChildren();
                 if (allOption) {
                     select.appendChild(allOption);
                 }
-                data.channels.forEach((ch) => {
+                channels.forEach((ch) => {
                     const option = document.createElement('option');
                     option.value = ch;
                     option.textContent = ch;
@@ -655,6 +664,9 @@ function initializeInterface() {
 
     // Load channels on interface init
     loadPrimaryChannels();
+
+    // Baseline the fetched window once the first load settles.
+    setTimeout(() => { _lastFetchWindow = rangeKey(); }, 2500);
 
     // Trigger change events for all form fields to initialize them based on default values
     const formFields = document.querySelectorAll('#locationFilterForm select, #locationFilterForm input');
@@ -705,13 +717,22 @@ function initMap() {
 
 // Build filter parameters from form
 function buildFilterParams() {
-    const form = document.getElementById('locationFilterForm');
-    const formData = new FormData(form);
     const params = new URLSearchParams();
 
-    // Only send server-side filters (gateway, search, etc.)
-    // Age and role filtering is now done client-side
+    // Bound the server window to the shared range as well: the endpoint
+    // caps at 14 days, so wider selections need the explicit window, and
+    // "all" needs an explicit epoch-0 bound or it silently shows 14 days.
+    if (window.MallaRange && window.MallaRange.get) {
+        const r = window.MallaRange.get();
+        if (r.key === 'all') {
+            params.set('since', '1970-01-01T00:00:00.000Z');
+        } else if (r.sinceEpoch) {
+            params.set('since', new Date(r.sinceEpoch * 1000).toISOString());
+        }
+        if (r.untilEpoch) params.set('until', new Date(r.untilEpoch * 1000).toISOString());
+    }
 
+    // Role/etc filtering stays client-side
     return params;
 }
 
@@ -721,8 +742,54 @@ async function loadNodeLocations() {
         showLoading();
 
         const params = buildFilterParams();
-        const response = await fetch(`/api/locations?${params.toString()}`);
-        const data = await response.json();
+        // v1 composite: paged location rows + opt-in link overlays
+        // (links are computed over the whole window, so page 1 only).
+        const rows = [];
+        let links = { traceroute_links: [], packet_links: [] };
+        let page = 1;
+        let hasNext = true;
+        while (hasNext && page <= 4) {
+            const query = new URLSearchParams(params);
+            query.set('page', String(page));
+            query.set('page_size', '5000');
+            if (page === 1) query.set('include_links', 'true');
+            const url = `/api/v1/locations?${query.toString()}`;
+            let body;
+            if (window.MallaAPI && typeof window.MallaAPI.getDetailed === 'function') {
+                const detailed = await window.MallaAPI.getDetailed(url, { silent: true });
+                // `links` is a top-level sibling of the envelope (payload).
+                body = {
+                    data: detailed.data,
+                    meta: detailed.meta,
+                    links: detailed.payload ? detailed.payload.links : null,
+                };
+            } else {
+                const resp = await fetch(url, { headers: { Accept: 'application/json' } });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                body = await resp.json();
+            }
+            rows.push(...(Array.isArray(body.data) ? body.data : []));
+            if (page === 1 && body.links) links = body.links;
+            hasNext = !!(body.meta && body.meta.pagination && body.meta.pagination.has_next);
+            page += 1;
+        }
+        // v1 normalises `timestamp` to ISO-8601; the client-side age/date
+        // filters and formatters below all expect epoch seconds.
+        const toEpoch = (value) => {
+            if (value == null) return value;
+            if (typeof value === 'number') return value;
+            const ms = Date.parse(value);
+            return Number.isNaN(ms) ? value : ms / 1000;
+        };
+        const data = {
+            locations: rows.map((loc) => (
+                loc && loc.timestamp != null
+                    ? { ...loc, timestamp: toEpoch(loc.timestamp) }
+                    : loc
+            )),
+            traceroute_links: links.traceroute_links || [],
+            packet_links: links.packet_links || [],
+        };
 
         if (data.error) {
             showError(data.error);
@@ -749,17 +816,37 @@ async function loadNodeLocations() {
     }
 }
 
+// Time window: the global range is the map's only time control; the window
+// is never edited here, only reflected. The fetch is bounded by it and the
+// range listener refetches when the effective window moves.
+function rangeKey() {
+    if (!window.MallaRange || !window.MallaRange.get) return "";
+    const r = window.MallaRange.get();
+    return `${r.key}:${Math.round((r.sinceEpoch || 0) / 60)}:${Math.round((r.untilEpoch || 0) / 60)}`;
+}
+
+function mapWindow() {
+    if (!window.MallaRange || !window.MallaRange.get) return { since: null, until: null };
+    const r = window.MallaRange.get();
+    return { since: r.sinceEpoch || null, until: r.untilEpoch || null, key: r.key };
+}
+
+function updateWindowChip() {
+    const chip = document.getElementById('mapWindowChip');
+    if (!chip || !window.MallaRange) return;
+    const r = window.MallaRange.get();
+    chip.textContent = window.MallaRange.describe ? window.MallaRange.describe() : String(r.key);
+    chip.dataset.windowKey = String(r.key);
+}
+
 // Apply client-side filters to the data
 function applyClientSideFilters() {
     const form = document.getElementById('locationFilterForm');
     const formData = new FormData(form);
 
     // Get filter values
-    const maxAge = formData.get('maxAge'); // still read to sync UI but no longer used for filtering
     const roleFilter = formData.get('roleFilter');
     const channelFilter = formData.get('channelFilter');
-    const startDateTime = formData.get('startDateTime');
-    const endDateTime = formData.get('endDateTime');
     const minContacts = formData.get('minContacts');
 
     // Start with all data
@@ -785,16 +872,14 @@ function applyClientSideFilters() {
         filteredNodes = filteredNodes.filter(node => node.primary_channel === channelFilter);
     }
 
-    // Convert date inputs to timestamps for comparison
-    let startTimestamp = null;
-    let endTimestamp = null;
-    if (startDateTime) {
-        startTimestamp = new Date(startDateTime).getTime() / 1000;
+    // Time window comes from the global range (single source of truth).
+    const windowBounds = mapWindow();
+    const startTimestamp = windowBounds.since;
+    const endTimestamp = windowBounds.until;
+    if (startTimestamp !== null) {
         filteredNodes = filteredNodes.filter(node => node.timestamp >= startTimestamp);
     }
-
-    if (endDateTime) {
-        endTimestamp = new Date(endDateTime).getTime() / 1000;
+    if (endTimestamp !== null) {
         filteredNodes = filteredNodes.filter(node => node.timestamp <= endTimestamp);
     }
 
@@ -959,7 +1044,13 @@ function buildNodeListItem(node, selectHandler) {
             node.role ? textNode(' ') : null,
             node.role ? el('span', {
                 className: 'badge badge-sm',
-                style: { backgroundColor: roleColor, fontSize: '0.6em' }
+                // Role colours span bright pastels and dark slates; choose the
+                // text colour that passes contrast on the actual background.
+                style: {
+                    backgroundColor: roleColor,
+                    color: readableTextOn(roleColor),
+                    fontSize: '0.6em'
+                }
             }, formatRole(node.role)) : null
         ),
         el('small', { className: 'text-muted' }, `!${nodeIdHex}`),

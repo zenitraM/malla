@@ -33,7 +33,14 @@ class URLFilterManager {
      */
     updateURL(filters) {
         const url = new URL(window.location);
-        url.search = ''; // Clear existing params
+        // The global time range shares this URL but is owned by
+        // range-context.js; never drop it while rewriting the filter set.
+        const preserved = ['range', 'range_since', 'range_until']
+            .map((key) => [key, url.searchParams.get(key)])
+            .filter(([, value]) => value !== null);
+        url.search = ''; // Clear existing filter params
+
+        preserved.forEach(([key, value]) => url.searchParams.set(key, value));
 
         // Add non-empty filters to URL
         Object.entries(filters).forEach(([key, value]) => {
@@ -103,35 +110,45 @@ class URLFilterManager {
      */
     async setNodePickerValue(fieldName, nodeId) {
         try {
-            let displayName = `Node ${nodeId}`; // Default fallback
-
-            // Try to fetch node info to get display name
-            try {
-                const response = await fetch(`/api/node/${nodeId}/info`);
-                if (response.ok) {
-                    const data = await response.json();
-                    const node = data.node || data;
-                    displayName = node.long_name || node.short_name || node.hex_id || `Node ${nodeId}`;
-                }
-                // If response is not ok, we'll use the fallback display name
-            } catch (fetchError) {
-                console.warn(`Could not fetch node info for ${nodeId}, using fallback display name`);
-            }
-
-            // Set the picker value (try multiple selector patterns)
+            // Set the filter value FIRST so the table load never waits on the
+            // display-name lookup: /api/v1/nodes/<id> can take seconds
+            // (neighbors + locations) and applyURLParameters blocks the
+            // table's initialLoad behind this await.
             const hiddenField = document.querySelector(`input[name="${fieldName}"]`);
             const visibleField = document.querySelector(`#${fieldName}`) ||
                                document.querySelector(`input[data-field="${fieldName}"]`) ||
                                document.querySelector(`.node-picker-input[data-field="${fieldName}"]`);
 
-            if (hiddenField && visibleField) {
+            if (hiddenField) {
                 hiddenField.value = nodeId;
-                visibleField.value = displayName;
-
-                // Trigger change events for any listeners
                 hiddenField.dispatchEvent(new Event('change', { bubbles: true }));
-                visibleField.dispatchEvent(new Event('change', { bubbles: true }));
             }
+
+            // Display name is cosmetic: resolve it in the background. No
+            // await — the caller must not block on this seconds-long lookup.
+            fetch(`/api/v1/nodes/${nodeId}`)
+                .then((response) => (response.ok ? response.json() : null))
+                .then((body) => {
+                    if (!body) return;
+                    // The lookup may finish after the user selected a
+                    // different node or cleared the picker; never overwrite
+                    // the visible label unless the hidden filter still holds
+                    // the node this lookup was issued for.
+                    const currentHidden = document.querySelector(`input[name="${fieldName}"]`);
+                    if (!currentHidden || String(currentHidden.value) !== String(nodeId)) return;
+                    const node = (body && body.data ? (body.data.node || body.data) : body) || {};
+                    const visibleField2 = visibleField || document.querySelector(`#${fieldName}`) ||
+                        document.querySelector(`input[data-field="${fieldName}"]`) ||
+                        document.querySelector(`.node-picker-input[data-field="${fieldName}"]`);
+                    if (visibleField2) {
+                        visibleField2.value = node.long_name || node.short_name || node.hex_id || `Node ${nodeId}`;
+                        visibleField2.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                })
+                .catch((fetchError) => {
+                    console.warn(`Could not fetch node info for ${nodeId}, using fallback display name`);
+                });
+
         } catch (error) {
             console.error(`Error setting node picker value for ${fieldName}:`, error);
         }
@@ -165,26 +182,27 @@ class URLFilterManager {
                 } catch (_) { /* ignore */ }
             }
 
-            // Fallback: call /api/node/<id>/info for more accurate name
+            // Fallback: call /api/v1/nodes/<id> for a more accurate name
             if (displayName === gatewayId) {
                 try {
-                    const resp = await fetch(`/api/node/${nodeId}/info`);
+                    const resp = await fetch(`/api/v1/nodes/${nodeId}`);
                     if (resp.ok) {
-                        const data = await resp.json();
-                        const node = data.node || data;
+                        const body = await resp.json();
+                        const node = (body && body.data ? (body.data.node || body.data) : body) || {};
                         displayName = node.long_name || node.short_name || node.hex_id || gatewayId;
                     }
                 } catch (_) { /* ignore */ }
             }
 
-            // Final fallback: attempt /api/gateways/search (handles non-node gateways)
+            // Final fallback: /api/v1/gateways?q= (handles non-node gateways)
             if (displayName === gatewayId) {
                 try {
-                    const response = await fetch(`/api/gateways/search?q=${encodeURIComponent(gatewayId)}&limit=1`);
+                    const response = await fetch(`/api/v1/gateways?q=${encodeURIComponent(gatewayId)}&page_size=1`);
                     if (response.ok) {
-                        const data = await response.json();
-                        if (data.gateways && data.gateways.length) {
-                            const gw = data.gateways[0];
+                        const body = await response.json();
+                        const rows = (body && body.data) || [];
+                        if (rows.length) {
+                            const gw = rows[0];
                             displayName = gw.display_name || gw.name || gw.gateway_id || gatewayId;
                         }
                     }

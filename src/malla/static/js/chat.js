@@ -1,6 +1,12 @@
 (function () {
     'use strict';
 
+
+// /api/v1 responses are enveloped as {data, meta}; the payload inside is the
+// same object the legacy endpoints returned.
+function unwrapV1(body) {
+    return body && typeof body === 'object' && 'data' in body ? body.data : body;
+}
     var POLL_MS               = 3000;
     var INIT_LIMIT            = 500;
     var INIT_TARGET_TOP_LEVEL = 120;
@@ -146,9 +152,9 @@
         try {
             var params = new URLSearchParams();
             keys.forEach(function (key) { params.append('pair', key); });
-            var resp = await fetch('/api/chat/relay-filters?' + params.toString());
+            var resp = await fetch('/api/v1/chat/relay-filters?' + params.toString());
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            var data = await resp.json();
+            var data = unwrapV1(await resp.json()) || {};
             mergeRelayFilters(data.relay_filters || {});
             if (activePop) refreshPop(activePop.meshId);
         } catch (err) {
@@ -604,7 +610,7 @@
         p.set('limit', limit);
         var ch = channelSel.value;
         if (ch) p.set('channel', ch);
-        return '/api/chat/messages?' + p.toString();
+        return '/api/v1/chat/messages?' + p.toString();
     }
 
     function removeLoading() { var el = document.getElementById('chatLoading'); if (el) el.remove(); }
@@ -622,7 +628,7 @@
             while (batches < MAX_INITIAL_BATCHES && initialTopLevelMeshIds.size < INIT_TARGET_TOP_LEVEL) {
                 var resp = await fetch(apiUrl(0, INIT_LIMIT, beforeId));
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                data = await resp.json();
+                data = unwrapV1(await resp.json()) || {};
 
                 Object.assign(nodeCache, data.nodes || {});
                 mergeRelays(data.relays || {});
@@ -658,7 +664,7 @@
         try {
             var resp = await fetch(apiUrl(lastId, POLL_LIMIT, 0));
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            var data = await resp.json();
+            var data = unwrapV1(await resp.json()) || {};
             var wasBottom = atBottom();
             Object.assign(nodeCache, data.nodes || {});
             mergeRelays(data.relays || {});
@@ -726,10 +732,8 @@
 
     async function loadChannels() {
         try {
-            var resp = await fetch('/api/meshtastic/packet-channels');
-            if (!resp.ok) return;
-            var data = await resp.json();
-            (data.channels || []).forEach(function (ch) {
+            var channels = await window.MallaFilters.packetChannels();
+            channels.forEach(function (ch) {
                 var opt = document.createElement('option');
                 opt.value = ch; opt.textContent = ch;
                 channelSel.appendChild(opt);

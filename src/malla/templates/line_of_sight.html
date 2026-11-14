@@ -60,12 +60,12 @@
 
     .attribution-box {
         background-color: var(--bs-light);
-        border-left: 4px solid #0d6efd;
+        border-left: 4px solid var(--malla-primary);
         padding: 1rem;
     }
 
     .attribution-box h6 {
-        color: #0d6efd;
+        color: var(--malla-primary);
         font-weight: 600;
         margin-bottom: 0.5rem;
     }
@@ -124,10 +124,27 @@
     /* Chart tooltip styling */
     .chart-crosshair {
         position: absolute;
-        border-left: 2px dashed rgba(255, 0, 0, 0.5);
+        border-left: 2px dashed var(--malla-danger);
         pointer-events: none;
         z-index: 10;
     }
+
+    /* Map markers (tokenized, theme-safe) */
+    .los-marker-start,
+    .los-marker-end {
+        color: var(--malla-on-primary, #fff);
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 2px solid var(--malla-surface);
+        box-shadow: var(--malla-shadow-sm);
+    }
+
+    .los-marker-start { background: var(--malla-success); }
+    .los-marker-end { background: var(--malla-danger); }
 
     /* Map marker pulse */
     .map-marker-pulse {
@@ -300,8 +317,29 @@
 <script src="{{ url_for('static', filename='js/node-picker.js') }}"></script>
 
 <script>
+// Theme tokens for canvas/leaflet colors (see malla.css); re-read on demand.
+function losTheme() {
+    const css = getComputedStyle(document.documentElement);
+    const get = (n, f) => css.getPropertyValue(n).trim() || f;
+    const dark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    return {
+        text: get('--malla-text', '#17212e'),
+        muted: get('--malla-text-muted', '#5b6b7c'),
+        border: get('--malla-border', '#dfe5ec'),
+        surface: get('--malla-surface', '#ffffff'),
+        primary: get('--malla-primary', '#2563eb'),
+        warning: get('--malla-warning-strong', '#d97706'),
+        danger: get('--malla-danger', '#c0392b'),
+        dangerSoft: dark ? 'rgba(248, 113, 113, 0.7)' : 'rgba(192, 57, 43, 0.7)',
+        grid: dark ? 'rgba(255,255,255,0.08)' : 'rgba(15, 23, 42, 0.08)',
+        terrainStroke: dark ? '#c9a06a' : '#8a6d4b',
+        terrainFill: dark ? 'rgba(201, 160, 106, 0.25)' : 'rgba(138, 109, 75, 0.25)',
+    };
+}
+
 let map = null;
 let elevationChart = null;
+let lastElevationArgs = null;
 let currentData = null;
 let fromNodePicker = null;
 let toNodePicker = null;
@@ -826,7 +864,7 @@ function updateMap(fromNode, toNode, geoPoints, obstacles) {
     const startMarker = L.marker([fromNode.latitude, fromNode.longitude], {
         icon: L.divIcon({
             className: 'custom-marker',
-            html: '<div style="background-color: #28a745; color: white; border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"><i class="bi bi-geo-alt-fill"></i></div>',
+            html: '<div class="los-marker-start"><i class="bi bi-geo-alt-fill"></i></div>',
             iconSize: [30, 30]
         })
     }).addTo(map);
@@ -834,7 +872,7 @@ function updateMap(fromNode, toNode, geoPoints, obstacles) {
     const endMarker = L.marker([toNode.latitude, toNode.longitude], {
         icon: L.divIcon({
             className: 'custom-marker',
-            html: '<div style="background-color: #dc3545; color: white; border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"><i class="bi bi-geo-alt-fill"></i></div>',
+            html: '<div class="los-marker-end"><i class="bi bi-geo-alt-fill"></i></div>',
             iconSize: [30, 30]
         })
     }).addTo(map);
@@ -858,7 +896,7 @@ function updateMap(fromNode, toNode, geoPoints, obstacles) {
 
     // Helper function to get color based on elevation (green=low, yellow=mid, red=high)
     function getElevationColor(elevation) {
-        if (elevRange === 0) return '#0d6efd'; // Default blue if no elevation change
+        if (elevRange === 0) return tokenColor('--malla-primary', '#2563eb'); // theme-aware default
 
         const normalized = (elevation - minElev) / elevRange; // 0 to 1
 
@@ -935,8 +973,8 @@ function updateMap(fromNode, toNode, geoPoints, obstacles) {
     obstacles.forEach((obstacle, index) => {
         L.circleMarker([obstacle.latitude, obstacle.longitude], {
             radius: 6,
-            fillColor: '#ffc107',
-            color: '#dc3545',
+            fillColor: losTheme().warning,
+            color: losTheme().danger,
             weight: 2,
             fillOpacity: 0.9
         }).addTo(map).bindPopup(el('div', null,
@@ -981,8 +1019,8 @@ function updateMap(fromNode, toNode, geoPoints, obstacles) {
     if (!chartHoverMarker) {
         chartHoverMarker = L.circleMarker([0, 0], {
             radius: 8,
-            fillColor: '#ff0000',
-            color: '#ffffff',
+            fillColor: losTheme().danger,
+            color: losTheme().surface,
             weight: 2,
             fillOpacity: 0.8,
             className: 'map-marker-pulse'
@@ -992,10 +1030,13 @@ function updateMap(fromNode, toNode, geoPoints, obstacles) {
 
 // Update elevation chart with hover integration
 function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltitude, fromTerrainElevation, toTerrainElevation, useNodeElevation) {
+    lastElevationArgs = arguments;
     // Destroy existing chart
     if (elevationChart) {
         elevationChart.destroy();
     }
+
+    const theme = losTheme();
 
     const startElevation = useNodeElevation ? (fromAltitude || fromTerrainElevation) : fromTerrainElevation;
     const endElevation = useNodeElevation ? (toAltitude || toTerrainElevation) : toTerrainElevation;
@@ -1028,7 +1069,7 @@ function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltit
     });
 
     const ctx = document.getElementById('elevationChart').getContext('2d');
-    
+
     // Determine aspect ratio based on screen width
     const isMobile = window.innerWidth <= 768;
     const aspectRatio = isMobile ? 1.2 : 2;
@@ -1040,8 +1081,8 @@ function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltit
                 {
                     label: 'Terrain Elevation',
                     data: terrainData,
-                    borderColor: 'rgb(101, 67, 33)',
-                    backgroundColor: 'rgba(101, 67, 33, 0.3)',
+                    borderColor: theme.terrainStroke,
+                    backgroundColor: theme.terrainFill,
                     fill: 'origin',
                     tension: 0,
                     pointRadius: 0,
@@ -1050,7 +1091,7 @@ function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltit
                 {
                     label: 'Line of Sight',
                     data: lineOfSightData,
-                    borderColor: 'rgb(13, 110, 253)',
+                    borderColor: theme.primary,
                     backgroundColor: 'transparent',
                     borderWidth: 2,
                     pointRadius: 0,
@@ -1060,7 +1101,7 @@ function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltit
                 {
                     label: 'Fresnel Zone (60%)',
                     data: fresnelData,
-                    borderColor: 'rgba(255, 193, 7, 0.5)',
+                    borderColor: theme.warning,
                     backgroundColor: 'transparent',
                     borderWidth: 1,
                     pointRadius: 0,
@@ -1080,7 +1121,13 @@ function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltit
             plugins: {
                 title: {
                     display: true,
-                    text: `Elevation Profile: ${fromName} → ${toName}`
+                    text: `Elevation Profile: ${fromName} → ${toName}`,
+                    color: theme.text
+                },
+                legend: {
+                    display: true,
+                    position: 'top',
+                    labels: { color: theme.text }
                 },
                 tooltip: {
                     callbacks: {
@@ -1098,30 +1145,29 @@ function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltit
                             return 'Distance: ' + context[0].parsed.x.toFixed(2) + ' km';
                         }
                     }
-                },
-                legend: {
-                    display: true,
-                    position: 'top'
                 }
             },
             scales: {
                 x: {
                     type: 'linear',
+                    border: { color: theme.border },
+                    grid: { color: theme.grid },
+                    ticks: { color: theme.muted },
                     title: {
                         display: true,
-                        text: 'Distance (km)'
-                    },
-                    ticks: {
-                        callback: function(value) {
-                            return value.toFixed(1);
-                        }
+                        text: 'Distance (km)',
+                        color: theme.muted
                     }
                 },
                 y: {
                     type: 'linear',
+                    border: { color: theme.border },
+                    grid: { color: theme.grid },
+                    ticks: { color: theme.muted },
                     title: {
                         display: true,
-                        text: 'Elevation (m)'
+                        text: 'Elevation (m)',
+                        color: theme.muted
                     },
                     beginAtZero: false
                 }
@@ -1164,6 +1210,14 @@ function updateElevationChart(fromName, toName, geoPoints, fromAltitude, toAltit
     });
 }
 
+// Re-theme the elevation chart when the color scheme flips; map overlays
+// re-color on the next analysis or hover redraw.
+window.addEventListener('themeChanged', () => {
+    if (lastElevationArgs) {
+        updateElevationChart(...lastElevationArgs);
+    }
+});
+
 // Chart crosshair helpers for map hover
 let chartCrosshairPlugin = null;
 
@@ -1191,7 +1245,7 @@ function updateChartCrosshair(distanceKm) {
                 ctx.moveTo(xPos, yScale.top);
                 ctx.lineTo(xPos, yScale.bottom);
                 ctx.lineWidth = 2;
-                ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
+                ctx.strokeStyle = losTheme().dangerSoft;
                 ctx.setLineDash([5, 5]);
                 ctx.stroke();
                 ctx.restore();
