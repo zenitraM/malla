@@ -5,6 +5,7 @@
     // Internal state shared across the page
     let _nodes = null;              // Array of node objects
     let _loaded = false;            // Whether we attempted to load
+    let _complete = false;          // Whether _nodes covers the whole catalog
     let _loadPromise = null;        // Promise that resolves once loading finished
 
     /**
@@ -127,25 +128,26 @@
          * Always returns a Promise which resolves to the array of nodes.
          */
         load() {
-            if (_loaded) return Promise.resolve(_nodes || []);
+            if (_loaded && _complete) return Promise.resolve(_nodes || []);
             if (_loadPromise) return _loadPromise;
 
             _loadPromise = new Promise(async (resolve) => {
-                // 1. Try localStorage first
+                // 1. Try localStorage first (only ever persisted complete)
                 const cached = _restoreFromLocalStorage();
                 if (cached) {
                     _nodes = cached;
                     _loaded = true;
+                    _complete = true;
                     resolve(_nodes);
                     return;
                 }
 
                 // 2. Fetch from the v1 API (server-side pagination)
+                let complete = false;
                 try {
-                    const { rows: fetched, complete } = await _paged(
-                        '/api/v1/nodes?order=asc'
-                    );
-                    _nodes = fetched;
+                    const paged = await _paged('/api/v1/nodes?order=asc');
+                    complete = paged.complete;
+                    _nodes = paged.rows;
                     // Never persist a truncated list: a later page load would
                     // serve it instead of refetching.
                     if (complete && _nodes.length) _persistToLocalStorage(_nodes);
@@ -157,7 +159,14 @@
                     if (cached) _nodes = cached;
                 }
 
+                // A capped or partially failed fetch still resolves with the
+                // rows in hand, but the catalog is NOT marked complete:
+                // search() keeps using the server-side fallback and the next
+                // load() call retries instead of serving a permanently
+                // truncated list.
                 _loaded = true;
+                _complete = complete && !!_nodes.length;
+                _loadPromise = null;
                 resolve(_nodes);
             });
 
@@ -180,8 +189,10 @@
          * Limit optional.
          */
         async search(query, limit = 20) {
-            // If we already have the full list, search locally
-            if (_loaded) {
+            // Search locally only when the catalog is known complete; a
+            // capped or partially failed load must not hide nodes the local
+            // subset happens to omit.
+            if (_loaded && _complete) {
                 const lower = query.toLowerCase();
                 const results = _nodes.filter((node) => {
                     const nameLong = (node.long_name || '').toLowerCase();
@@ -220,9 +231,36 @@
                 console.warn('NodeCache.search: fallback API search failed', err);
             }
 
-            // As a last resort, wait for the full load to finish then search
+            // Last resort: wait for a load attempt. Retry the search once
+            // after a fresh load attempt if the catalog is still incomplete,
+            // so a transient failure gets another shot; otherwise fall back
+            // to the (possibly partial) local rows.
             await this.load();
-            return this.search(query, limit);
+            if (_loaded && !_complete) {
+                _loaded = false;
+                try {
+                    await this.load();
+                } finally {
+                    _loaded = true;
+                }
+            }
+            if (_loaded && _complete) {
+                return this.search(query, limit);
+            }
+            const lower = query.toLowerCase();
+            const localResults = _nodes.filter((node) => {
+                const nameLong = (node.long_name || '').toLowerCase();
+                const nameShort = (node.short_name || '').toLowerCase();
+                const hexId = `!${node.node_id.toString(16).padStart(8, '0')}`.toLowerCase();
+                const decId = node.node_id.toString();
+                return (
+                    nameLong.includes(lower) ||
+                    nameShort.includes(lower) ||
+                    hexId.includes(lower) ||
+                    decId.includes(lower)
+                );
+            });
+            return localResults.slice(0, limit);
         },
 
         /**
