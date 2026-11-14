@@ -1065,10 +1065,13 @@ async function loadTracerouteMap(routeNodes) {
             }
         });
 
-        // Fetch node locations
-        // v1 rows keep legacy field names (timestamp is ISO; timestamp_str
-        // is dropped — normalise back for the popup renderers below).
-        const locationsResponse = await fetch('/api/v1/locations?enrich=false&page_size=5000');
+        // Fetch node locations, scoped to the route's node IDs so a network
+        // larger than the page-size ceiling cannot drop stored positions
+        // (which would trigger bogus interpolation).
+        const locationsResponse = await fetch(
+            '/api/v1/locations?enrich=false&page_size=5000&node_ids=' +
+            encodeURIComponent(nodeIds.join(','))
+        );
         const locationsBody = await locationsResponse.json();
         const data = { locations: (locationsBody.data || []).map(normaliseLocationRow) };
 
@@ -1355,13 +1358,26 @@ async function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocation
         let allLocationsData = null;
         let relayLocations = [];
 
-        // Check if we need to fetch locations for relay candidates
-        const needsLocations = (window.packetData.relayCandidates && window.packetData.relayCandidates.length > 0) ||
-                               (otherReceptions && otherReceptions.some(r => r.relay_candidates && r.relay_candidates.length > 0));
+        // Collect every relay candidate ID (primary + other receptions)
+        const relayCandidateIds = new Set();
+        (window.packetData.relayCandidates || []).forEach(c => {
+            if (c && c.node_id != null) relayCandidateIds.add(Number(c.node_id));
+        });
+        (otherReceptions || []).forEach(r => {
+            (r.relay_candidates || []).forEach(c => {
+                if (c && c.node_id != null) relayCandidateIds.add(Number(c.node_id));
+            });
+        });
+        const needsLocations = relayCandidateIds.size > 0;
 
         if (needsLocations) {
             try {
-                const response = await fetch('/api/v1/locations?enrich=false&page_size=5000');
+                // Scoped to the candidate IDs so a network larger than the
+                // page-size ceiling cannot drop stored positions.
+                const response = await fetch(
+                    '/api/v1/locations?enrich=false&page_size=5000&node_ids=' +
+                    encodeURIComponent(Array.from(relayCandidateIds).join(','))
+                );
                 const body = await response.json();
                 allLocationsData = { locations: (body.data || []).map(normaliseLocationRow) };
 

@@ -130,6 +130,12 @@ class URLFilterManager {
                 .then((response) => (response.ok ? response.json() : null))
                 .then((body) => {
                     if (!body) return;
+                    // The lookup may finish after the user selected a
+                    // different node or cleared the picker; never overwrite
+                    // the visible label unless the hidden filter still holds
+                    // the node this lookup was issued for.
+                    const currentHidden = document.querySelector(`input[name="${fieldName}"]`);
+                    if (!currentHidden || String(currentHidden.value) !== String(nodeId)) return;
                     const node = (body && body.data ? (body.data.node || body.data) : body) || {};
                     const visibleField2 = visibleField || document.querySelector(`#${fieldName}`) ||
                         document.querySelector(`input[data-field="${fieldName}"]`) ||

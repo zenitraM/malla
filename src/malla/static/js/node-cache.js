@@ -68,6 +68,11 @@
         let page = 1;
         let hasNext = true;
         let complete = true;
+        if (page === maxPages && hasNext) {
+            // Exiting at the ceiling: the collection is larger than the
+            // fetch budget, so this is a truncated list, not the full one.
+            complete = false;
+        }
         while (hasNext && page <= maxPages) {
             const sep = path.includes('?') ? '&' : '?';
             try {

@@ -111,11 +111,14 @@ def main():
 
         gunicorn_config = _build_gunicorn_config(cfg)
 
-        # Create Gunicorn application
+        # Create Gunicorn application. Pass a factory callable, not an app
+        # instance: load() runs in each forked worker, so the app (and its
+        # SQLite connection and background threads) is built once per worker,
+        # never in the master.
         class MallaWSGIApplication(WSGIApplication):
-            def __init__(self, app, options=None):
+            def __init__(self, app_factory, options=None):
                 self.options = options or {}
-                self.application = app
+                self.app_factory = app_factory
                 super().__init__()
 
             def load_config(self):
@@ -129,11 +132,11 @@ def main():
                         self.cfg.set(key.lower(), value)
 
             def load(self):
-                return self.application
+                return self.app_factory()
 
         # Start Gunicorn
         logger.info(f"Starting Gunicorn server on {cfg.host}:{cfg.port}")
-        MallaWSGIApplication(get_application(), gunicorn_config).run()
+        MallaWSGIApplication(get_application, gunicorn_config).run()
 
     except ImportError:
         logger.error(
