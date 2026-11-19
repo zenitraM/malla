@@ -220,6 +220,46 @@ class TestRelayNodeAnalysisFixtures:
             )
 
     @pytest.mark.integration
+    def test_candidates_include_is_client_mute_field(self, client):
+        """Test that candidates include is_client_mute field."""
+        response = client.get("/api/node/1128074276/relay-node-analysis?limit=50")
+        assert response.status_code == 200
+
+        data = response.get_json()
+
+        for stat in data["relay_node_stats"]:
+            for candidate in stat["candidates"]:
+                assert "is_client_mute" in candidate, (
+                    f"Candidate {candidate.get('node_name', candidate.get('node_id'))} "
+                    "should have is_client_mute field"
+                )
+                assert isinstance(candidate["is_client_mute"], bool)
+
+    @pytest.mark.integration
+    def test_client_mute_candidates_sorted_last(self, client):
+        """Test that CLIENT_MUTE candidates are sorted after non-mute candidates."""
+        response = client.get("/api/node/1128074276/relay-node-analysis?limit=50")
+        assert response.status_code == 200
+
+        data = response.get_json()
+
+        for stat in data["relay_node_stats"]:
+            if len(stat["candidates"]) > 1:
+                has_non_mute = any(not c["is_client_mute"] for c in stat["candidates"])
+                has_mute = any(c["is_client_mute"] for c in stat["candidates"])
+                if has_non_mute and has_mute:
+                    last_non_mute_idx = max(
+                        i for i, c in enumerate(stat["candidates"]) if not c["is_client_mute"]
+                    )
+                    first_mute_idx = min(
+                        i for i, c in enumerate(stat["candidates"]) if c["is_client_mute"]
+                    )
+                    assert last_non_mute_idx < first_mute_idx, (
+                        f"CLIENT_MUTE candidates should appear after non-mute candidates "
+                        f"in relay_byte {stat['relay_hex']}"
+                    )
+
+    @pytest.mark.integration
     def test_fixtures_bidirectional_candidates(self, client):
         """Test that bidirectional 0-hop links are detected in fixtures."""
         # Test Mobile Beta (1128074277) should appear as a candidate
@@ -243,3 +283,4 @@ class TestRelayNodeAnalysisFixtures:
                 assert isinstance(candidate["node_name"], str)
                 assert isinstance(candidate["hex_id"], str)
                 assert isinstance(candidate["last_byte"], str)
+                assert "is_client_mute" in candidate
