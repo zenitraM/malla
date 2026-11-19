@@ -350,7 +350,13 @@ function displayNodeList(nodes, isSearchResults = false) {
             const roleColor = getRoleColor(node.role);
             roleInfo = el('span', {
                 className: 'badge badge-sm',
-                style: { backgroundColor: roleColor, fontSize: '0.6em' }
+                // role colours span bright pastels and dark slates; pick the
+                // text colour with the higher contrast ratio.
+                style: {
+                    backgroundColor: roleColor,
+                    color: readableTextOnColor(roleColor),
+                    fontSize: '0.6em'
+                }
             }, formatRole(node.role));
         }
 
@@ -439,6 +445,26 @@ function formatAge(ageHours) {
     } else {
         return `${Math.round(ageHours / 24)}d ago`;
     }
+}
+
+// Highest-contrast text colour (ink or white) for a #rgb/#rrggbb background.
+function readableTextOnColor(color) {
+    if (!color || typeof color !== 'string') return '#ffffff';
+    let hex = color.trim();
+    if (hex[0] === '#') hex = hex.slice(1);
+    if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('');
+    if (hex.length !== 6) return '#ffffff';
+    const n = parseInt(hex, 16);
+    const channel = (v) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    };
+    const L = 0.2126 * channel((n >> 16) & 255)
+        + 0.7152 * channel((n >> 8) & 255)
+        + 0.0722 * channel(n & 255);
+    const contrastWithWhite = 1.05 / (L + 0.05);
+    const contrastWithInk = (L + 0.05) / 0.05;
+    return contrastWithWhite >= contrastWithInk ? '#ffffff' : '#0b1119';
 }
 
 function getRoleColor(role) {

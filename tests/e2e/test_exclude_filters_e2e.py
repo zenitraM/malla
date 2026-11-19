@@ -462,12 +462,12 @@ class TestExcludeFiltersE2E:
 
         # Get direct API results for comparison
         api_response = requests.get(
-            f"{test_server_url}/api/packets/data?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}&limit=25"
+            f"{test_server_url}/api/v1/packets?exclude_from={exclude_from_id}&exclude_to={exclude_to_id}&page_size=25"
         )
         assert api_response.status_code == 200
         api_data = api_response.json()
         api_packet_count = len(api_data["data"])
-        api_total_count = api_data["total_count"]
+        api_total_count = api_data["meta"]["pagination"]["total"]
 
         print(f"API results: {api_packet_count} packets, {api_total_count} total")
 

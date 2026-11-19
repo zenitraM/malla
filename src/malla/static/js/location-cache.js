@@ -55,21 +55,39 @@
                     return _locations;
                 }
 
-                // Fetch from API
+                // Fetch from the v1 API (paged; rows keep legacy field names,
+                // `timestamp` is ISO and `timestamp_str` is dropped).
                 try {
-                    const resp = await fetch('/api/locations');
-                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                    const data = await resp.json();
+                    const rows = [];
+                    let page = 1;
+                    let hasNext = true;
+                    while (hasNext && page <= 4) {
+                        const url = `/api/v1/locations?enrich=false&page=${page}&page_size=5000`;
+                        let data, meta;
+                        if (window.MallaAPI && typeof window.MallaAPI.getDetailed === 'function') {
+                            ({ data, meta } = await window.MallaAPI.getDetailed(url, { silent: true }));
+                        } else {
+                            const resp = await fetch(url, { headers: { Accept: 'application/json' } });
+                            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                            const body = await resp.json();
+                            data = body && body.data;
+                            meta = body && body.meta;
+                        }
+                        rows.push(...(Array.isArray(data) ? data : []));
+                        hasNext = !!(meta && meta.pagination && meta.pagination.has_next);
+                        page += 1;
+                    }
 
                     // Convert array to map for fast lookup
                     _locations = {};
-                    if (Array.isArray(data.locations)) {
-                        data.locations.forEach(loc => {
-                            if (loc && loc.node_id) {
-                                _locations[loc.node_id] = loc;
+                    rows.forEach(loc => {
+                        if (loc && loc.node_id) {
+                            if (loc.timestamp_str == null && loc.timestamp != null) {
+                                loc.timestamp_str = loc.timestamp;
                             }
-                        });
-                    }
+                            _locations[loc.node_id] = loc;
+                        }
+                    });
 
                     _persistToLocalStorage(_locations);
                 } catch (err) {

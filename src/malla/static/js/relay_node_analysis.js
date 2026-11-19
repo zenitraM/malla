@@ -45,14 +45,16 @@ class RelayNodeAnalysis {
             loadingIndicator.style.display = 'block';
             contentDiv.style.display = 'none';
 
-            const response = await fetch(`/api/node/${this.nodeId}/relay-node-analysis?limit=50`);
+            const response = await fetch(`/api/v1/nodes/${this.nodeId}/relay-node-analysis?limit=50`);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
-            const data = await response.json();
+            const body = await response.json();
+            // v1 envelope: the payload lives under `data`.
+            const data = body && body.data ? body.data : body;
 
-            if (data.error) {
-                throw new Error(data.error);
+            if (body && body.error) {
+                throw new Error(body.error.message || 'Failed to load relay analysis');
             }
 
             this.data = data;

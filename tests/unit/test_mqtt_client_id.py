@@ -61,7 +61,9 @@ class TestMQTTClientIdUsage:
     """Test that the MQTT client ID is passed correctly to the MQTT client."""
 
     @patch("malla.mqtt_capture.mqtt.Client")
-    @patch("malla.mqtt_capture.init_database")
+    @patch("malla.capture_startup.start_background_migrations")
+    @patch("malla.capture_startup.run_write_locking_migrations")
+    @patch("malla.capture_startup.init_database")
     @patch("malla.mqtt_capture.load_node_cache")
     @patch("malla.mqtt_capture.get_node_statistics")
     def test_main_uses_configured_client_id(
@@ -69,6 +71,8 @@ class TestMQTTClientIdUsage:
         mock_stats,
         mock_load_cache,
         mock_init_db,
+        mock_write_locking,
+        mock_start_background,
         mock_mqtt_client_class,
     ):
         """main() passes the configured client ID to mqtt.Client."""
@@ -106,7 +110,9 @@ class TestMQTTClientIdUsage:
         )
 
     @patch("malla.mqtt_capture.mqtt.Client")
-    @patch("malla.mqtt_capture.init_database")
+    @patch("malla.capture_startup.start_background_migrations")
+    @patch("malla.capture_startup.run_write_locking_migrations")
+    @patch("malla.capture_startup.init_database")
     @patch("malla.mqtt_capture.load_node_cache")
     @patch("malla.mqtt_capture.get_node_statistics")
     def test_main_uses_empty_string_when_no_client_id(
@@ -114,6 +120,8 @@ class TestMQTTClientIdUsage:
         mock_stats,
         mock_load_cache,
         mock_init_db,
+        mock_write_locking,
+        mock_start_background,
         mock_mqtt_client_class,
     ):
         """main() passes empty string to mqtt.Client when no client ID is configured (random)."""

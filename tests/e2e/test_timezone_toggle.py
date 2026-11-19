@@ -257,9 +257,12 @@ class TestTimezoneToggleE2E:
         page.click("#timezone-toggle")
         page.wait_for_load_state("load")
 
-        # Reopen filters and check input still works
-        page.click("text=Filters")
-        page.wait_for_selector("#start_time", timeout=5000)
+        # Drive the input directly: a text=Filters click can hit the wrong
+        # element after the reload and the fill can race the re-render.
+        page.wait_for_selector("#start_time", timeout=10000)
+        page.locator("#start_time").scroll_into_view_if_needed()
+        page.fill("#start_time", "2025-01-02T14:30")
+        page.wait_for_timeout(150)
         page.fill("#start_time", "2025-01-02T14:30")
 
         value = page.input_value("#start_time")

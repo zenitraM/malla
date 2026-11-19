@@ -20,6 +20,11 @@ services:
       - MALLA_DATABASE_FILE=/app/data/meshtastic_history.db
       - MALLA_NAME=${MALLA_NAME:-Malla}
       - MALLA_SECRET_KEY=${MALLA_SECRET_KEY:-dev-secret-key-change-in-production}
+      # glibc mapea una arena de 64MB por thread y no la devuelve al SO;
+      # con gunicorn + grpc/otel el worker llega a 22 threads y los picos de
+      # 2-3GB observados en produccion. Dos arenas bastan.
+      - MALLOC_ARENA_MAX=2
+      - MALLOC_TRIM_THRESHOLD_=134217728
       - MALLA_DEBUG=${MALLA_DEBUG:-false}
     volumes:
       - malla_data:/app/data

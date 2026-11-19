@@ -1,0 +1,273 @@
+"""Capture-daemon startup: connect first, migrate around the connection.
+
+The daemon's startup order is what makes the migration phases useful:
+
+1. ``SCHEMA`` migrations run before the MQTT connect, so the ingest path can
+   always write;
+2. the daemon connects and subscribes next, so packets published while the
+   write-locking migrations run are buffered instead of lost
+   (see :mod:`malla.ingest_buffer`);
+3. ``BLOCKING`` migrations run with ingestion paused — their packets wait in
+   the buffer — and the buffer is drained through the normal ingest path when
+   they finish;
+4. ``DERIVED`` migrations run in a background thread. They only touch stored
+   rows and are idempotent by contract, so they need neither a drained buffer
+   nor the daemon's writer lock.
+
+Keeping the sequence in one module lets ``main()`` read like that list, and
+lets each phase be exercised without the MQTT stack.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import sqlite3
+import threading
+import time
+from contextlib import nullcontext
+
+from . import activity_rollup
+from .migrations import MIGRATIONS, MigrationResult, Phase, Status, run_migrations
+from .migrations.structural import missing_indexes
+
+logger = logging.getLogger(__name__)
+
+#: Environment knob for the migration-lock staleness threshold (seconds). A
+#: lock older than this is taken over even if its holder looks alive.
+LOCK_STALE_AFTER_ENV = "MALLA_MIGRATION_LOCK_STALE_AFTER"
+LOCK_STALE_AFTER_DEFAULT = 900.0
+
+
+def migration_lock_stale_after() -> float:
+    """Staleness threshold for the runner's advisory lock.
+
+    Tunable via ``MALLA_MIGRATION_LOCK_STALE_AFTER`` (seconds); malformed
+    values fall back to the default rather than disabling takeover.
+    """
+    raw = os.getenv(LOCK_STALE_AFTER_ENV)
+    if not raw:
+        return LOCK_STALE_AFTER_DEFAULT
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid %s=%r, using %ss",
+            LOCK_STALE_AFTER_ENV,
+            raw,
+            LOCK_STALE_AFTER_DEFAULT,
+        )
+        return LOCK_STALE_AFTER_DEFAULT
+
+
+def configure_connection(conn: sqlite3.Connection, *, cache_kib: int = 65536) -> None:
+    """Apply the daemon's SQLite tuning pragmas to *conn*.
+
+    ``cache_kib`` is passed to ``PRAGMA cache_size`` negated because SQLite reads
+    a negative value as KiB rather than a page count. mmap is intentionally left
+    off: with continuous writes, memory-mapped readers can report "database disk
+    image is malformed" during WAL checkpoints.
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=30000")
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute(f"PRAGMA cache_size=-{cache_kib}")
+    cursor.execute("PRAGMA temp_store=MEMORY")
+    cursor.execute("PRAGMA analysis_limit=1000")  # bound ANALYZE / optimize work
+
+
+def _log_results(results: list[MigrationResult]) -> None:
+    for result in results:
+        if result.status is Status.FAILED:
+            logger.error("Migration %s failed: %s", result.name, result.detail)
+        elif result.status is Status.APPLIED:
+            logger.info("Migration %s", result.describe())
+        else:
+            logger.debug("Migration %s: %s", result.name, result.detail)
+
+
+def _configure_bulk_ddl_connection(conn: sqlite3.Connection) -> None:
+    """Tuning for the BLOCKING phase's index builds, on top of the defaults.
+
+    The phase runs alone (MQTT loop paused, ingest buffered, advisory lock
+    held), so the serving-oriented trade-offs in :func:`configure_connection`
+    can be relaxed for the duration:
+
+    - The page cache keeps the SERVING budget: index builds over a
+      multi-gigabyte table let SQLite's sorter and the rollback journal
+      grow with the data, and on a small-RAM host (8 GB total, no swap) an
+      oversized cache plus an in-memory journal is an OOM kill that
+      restarts the whole build. Only the per-page durability cost goes.
+    - ``synchronous=OFF``: durable-ness of a rebuildable index is not worth
+      fsync-per-page during a multi-minute batch. A crash mid-build loses
+      nothing that matters — the runner marks the migration failed and the
+      next start rebuilds.
+    - The journal stays in its default mode and the sorter spills to
+      ``SQLITE_TMPDIR``/``/tmp`` when needed: disk-backed spill on a
+      small-RAM host is minutes slower, not fatal, while an in-memory
+      journal on a 7.9 M-row build was the OOM in production.
+
+    Everything is set on this throwaway connection only; serving connections
+    keep their WAL/NORMAL configuration untouched.
+    """
+    configure_connection(conn)  # same cache budget as serving
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA synchronous=OFF")
+
+
+def run_phase(
+    db_path: str,
+    phase: Phase,
+    *,
+    lock: threading.Lock | None = None,
+) -> list[MigrationResult]:
+    """Apply every migration of *phase* on its own connection.
+
+    *lock* is the daemon's writer lock; only the phases that run while ingestion
+    is paused should pass it. Holding it during DERIVED work (a bounded ANALYZE,
+    a bucket backfill) would stall packet inserts for minutes. The runner's own
+    advisory lock needs no decision here: it is taken for the schema-changing
+    phases only.
+    """
+    guard = lock if lock is not None else nullcontext()
+    with guard:
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        try:
+            if phase is Phase.BLOCKING:
+                # Index builds over the full history: relax the serving
+                # trade-offs for this alone-on-the-database connection.
+                _configure_bulk_ddl_connection(conn)
+            else:
+                configure_connection(conn)
+            results = run_migrations(
+                conn,
+                MIGRATIONS,
+                phases=(phase,),
+                stale_after=migration_lock_stale_after(),
+            )
+        finally:
+            conn.close()
+    _log_results(results)
+    return results
+
+
+def init_database(
+    db_path: str, *, lock: threading.Lock | None = None
+) -> list[MigrationResult]:
+    """Apply the cheap SCHEMA migrations so the ingest path can write."""
+    started = time.time()
+    results = run_phase(db_path, Phase.SCHEMA, lock=lock)
+    logger.info("Database schema ready: %s (%.3fs)", db_path, time.time() - started)
+    return results
+
+
+def run_write_locking_migrations(
+    db_path: str, *, lock: threading.Lock | None = None
+) -> list[MigrationResult]:
+    """Apply the BLOCKING migrations: DDL that cannot run while packets are written."""
+    # Announce the expensive phase with its actual workload: the runner only
+    # logs per *migration*, and core_indexes (all packet_history indexes) is
+    # one migration that can run for many minutes in silence. Saying "N
+    # indexes to build" up front is what tells an operator "working, wait"
+    # instead of "hung, restart".
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30)
+    try:
+        pending = missing_indexes(conn)
+    finally:
+        conn.close()
+    if pending:
+        logger.info(
+            "BLOCKING migrations pending: %d index(es) to build over existing "
+            "history (packet_history: %s%s); this can take tens of minutes on "
+            "a large database — packets are buffered meanwhile",
+            len(pending),
+            ", ".join(pending[:3]),
+            " …" if len(pending) > 3 else "",
+        )
+    return run_phase(db_path, Phase.BLOCKING, lock=lock)
+
+
+def refresh_activity_buckets(db_path: str, *, lock: threading.Lock) -> int:
+    """Append completed quarter-hour activity buckets. Returns rows inserted.
+
+    The writer lock is taken per CHUNK (at most
+    :data:`activity_rollup.DEFAULT_MAX_BUCKET_SPAN` buckets, one day) and
+    released between chunks, so a first backfill over retained history — also
+    the ``activity_quarter_backfill`` DERIVED shape — never stars packet
+    ingestion for more than one chunk. The cursor advances by whole chunks even
+    through stretches with no packets, so the backfill always finishes.
+    """
+    span = activity_rollup.DEFAULT_MAX_BUCKET_SPAN * activity_rollup.BUCKET_SECONDS
+    total = 0
+    cursor: int | None = None
+    while True:
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        try:
+            # The resume point and horizon are plain reads (WAL); only the
+            # chunk's writes need the writer lock.
+            if cursor is None:
+                start = activity_rollup.resume_bucket(conn)
+                if start is None:
+                    break
+            else:
+                start = cursor
+            end = activity_rollup.bucket_start(time.time())
+            if start >= end:
+                break
+            chunk_end = min(start + span, end)
+            with lock:
+                total += activity_rollup.refresh_chunk(conn, start, chunk_end)
+        finally:
+            conn.close()
+        cursor = chunk_end
+    return total
+
+
+def start_background_migrations(db_path: str) -> threading.Thread:
+    """Apply the DERIVED migrations in a daemon thread, alongside ingestion.
+
+    The boot thread and the steady-state maintenance loop (the 60s slot that
+    calls :func:`refresh_activity_buckets`) may work on the same tables at the
+    same time. That is safe by construction: every bucket write is ``INSERT OR
+    IGNORE`` on natural keys, so a duplicate application is a no-op, not a
+    conflict. Leave it as is.
+    """
+
+    def _worker() -> None:
+        try:
+            run_phase(db_path, Phase.DERIVED)
+        except Exception as exc:  # noqa: BLE001 - must never kill the daemon
+            logger.warning("Background migrations failed: %s", exc)
+
+    thread = threading.Thread(target=_worker, name="db-migrations", daemon=True)
+    thread.start()
+    return thread
+
+
+def retry_derived_migrations(db_path: str) -> None:
+    """Re-run pending DERIVED migrations on their own connection.
+
+    Called from the maintenance loop: a DERIVED migration that failed at boot
+    (a killed ``ANALYZE``, a busy database) is retried here every minute
+    instead of never. The pending checks are cheap, the work is idempotent,
+    and every exception is logged rather than raised — the next tick retries.
+    """
+    try:
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        try:
+            configure_connection(conn)
+            results = run_migrations(
+                conn,
+                MIGRATIONS,
+                phases=(Phase.DERIVED,),
+                take_lock=False,
+                stale_after=migration_lock_stale_after(),
+            )
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - never break the maintenance loop
+        logger.warning("Deferred-migration retry failed: %s", exc)
+        return
+    _log_results(results)

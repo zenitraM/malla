@@ -3,15 +3,36 @@ Analytics service for Meshtastic Mesh Health Web UI
 """
 
 import logging
+import sqlite3
 import time
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 
+from .. import activity_rollup
 from ..database.repositories import NodeRepository
 from ..utils.signal_quality import rssi_valid_sql, snr_valid_sql
 
 logger = logging.getLogger(__name__)
+
+
+def _signal_index_hint() -> str:
+    """``INDEXED BY`` for the signal index, or nothing while it is missing.
+
+    The BLOCKING migration builds ``idx_packet_history_signal_time`` over the
+    full packet_history on first boot; until then the pinned query raises
+    ``no such index``. Running unpinned is correct but scans more rows, so
+    this is a degradation window, not a behavior change once built. The probe
+    is cached, so steady-state adds no per-request catalog reads.
+    """
+    from ..database.connection import pinned_index_available
+
+    return (
+        "INDEXED BY idx_packet_history_signal_time"
+        if pinned_index_available("idx_packet_history_signal_time")
+        else ""
+    )
+
 
 # NOTE: Lightweight, in-process cache so that repeated calls in a short period
 # do not hit the database multiple times. This is intentionally simple to keep
@@ -272,6 +293,7 @@ class AnalyticsService:
 
         conn = get_db_connection()
         cursor = conn.cursor()
+        signal_hint = _signal_index_hint()
 
         # Get signal statistics using SQL aggregation. Every branch restricts
         # itself to plausible values: without the guard a single garbage row
@@ -299,7 +321,7 @@ class AnalyticsService:
                 -- otherwise pile a fake spike at 0 in the histogram panel.
                 AVG(CASE WHEN {snr_valid_sql()} AND {rssi_valid_sql()}
                     THEN snr END) as rf_avg_snr
-            FROM packet_history
+            FROM packet_history {signal_hint}
             WHERE {where_clause}
         """,
             params,
@@ -327,7 +349,7 @@ class AnalyticsService:
             f"""
             SELECT MIN(MAX(CAST((rssi + 150) / 5 AS INTEGER), ?), ?) AS bin,
                    COUNT(*) AS count
-            FROM packet_history
+            FROM packet_history {signal_hint}
             WHERE {where_clause} AND {rssi_valid_sql()}
             GROUP BY bin
             """,
@@ -340,7 +362,7 @@ class AnalyticsService:
         cursor.execute(
             f"""
             SELECT CAST((snr + 30.0) / 2 AS INTEGER) AS bin, COUNT(*) AS count
-            FROM packet_history
+            FROM packet_history {signal_hint}
             WHERE {where_clause} AND {snr_valid_sql()} AND {rssi_valid_sql()}
             GROUP BY bin
             """,
@@ -512,15 +534,6 @@ class AnalyticsService:
     # (range_key, tz_offset_minutes) → (timestamp, data)
     _TIMELINE_CACHE: dict[tuple[str, int], tuple[float, dict[str, Any]]] = {}
 
-    # Wall-clock budget per request for backfilling missing rollup days. Must
-    # stay well under the gunicorn worker timeout (30s in wsgi.py): a request
-    # that runs out of budget returns a "pending" response with its progress
-    # already committed, instead of being SIGKILLed mid-transaction — which
-    # would roll everything back and make the next request start from zero,
-    # a permanent failure loop on deployments where the full backfill can't
-    # finish inside one worker timeout.
-    _ROLLUP_TIME_BUDGET_SEC: float = 15.0
-
     @staticmethod
     def get_activity_timeline(
         range_key: str = "7d", tz_offset_minutes: int = 0
@@ -528,20 +541,22 @@ class AnalyticsService:
         """Get the activity timeline for one of the ranges 24h / 7d / 30d / all.
 
         Buckets are hourly for 24h and per local calendar day otherwise
-        (tz_offset_minutes = viewer's minutes east of UTC). Each bucket carries
-        packet volume, distinct sending nodes, distinct reporting gateways and
-        newly discovered nodes. Completed days are served from the
-        activity_daily_rollup table (append-only history makes them immutable),
-        so even the "all" range stays fast; only the current day/hour window is
-        aggregated live.
+        (tz_offset_minutes = viewer's minutes east of UTC, rounded to a quarter
+        hour so that day boundaries fall on bucket boundaries). Each bucket
+        carries packet volume, distinct sending nodes, distinct reporting
+        gateways and newly discovered nodes.
 
-        Backfilling missing rollup days is bounded by _ROLLUP_TIME_BUDGET_SEC
-        per request. If the budget runs out the response carries
-        ``pending: True`` plus ``days_remaining``; the committed progress
-        survives, so the client just retries until pending clears.
+        Completed days come from the quarter-hour activity buckets, which the
+        capture daemon maintains; only the current day (or hour) is aggregated
+        live. Nothing is computed or written on this path, so a request never
+        exceeds a couple of queries.
         """
         if range_key not in AnalyticsService.TIMELINE_RANGES:
             range_key = "7d"
+
+        # Day boundaries must land on bucket boundaries for the stored buckets
+        # to tile a viewer's day exactly; the store floors the offset itself.
+        tz_offset_minutes = activity_rollup.snap_offset_minutes(tz_offset_minutes)
 
         cache_key = (range_key, tz_offset_minutes)
         now_ts = time.time()
@@ -552,37 +567,60 @@ class AnalyticsService:
         if range_key == "24h":
             buckets = AnalyticsService._get_hourly_buckets(tz_offset_minutes)
             granularity = "hour"
-            days_remaining = 0
         else:
-            buckets, days_remaining = AnalyticsService._get_daily_buckets(
-                range_key, tz_offset_minutes
-            )
+            buckets = AnalyticsService._get_daily_buckets(range_key, tz_offset_minutes)
             granularity = "day"
 
         result = {
             "range": range_key,
             "granularity": granularity,
             "buckets": buckets,
-            "pending": days_remaining > 0,
         }
-        if days_remaining:
-            # Partial: some completed days aren't rolled up yet. Don't cache —
-            # the next request must resume the backfill, not replay this.
-            result["days_remaining"] = days_remaining
-            return result
 
         AnalyticsService._TIMELINE_CACHE[cache_key] = (now_ts, result)
         return result
 
     @staticmethod
     def _get_hourly_buckets(tz_offset_minutes: int) -> list[dict[str, Any]]:
-        """Aggregate the trailing 24 local-clock hours (last bucket = this hour so far)."""
+        """Aggregate the trailing 24 local-clock hours (last bucket = this hour so far).
+
+        Completed hours are summed from the quarter-hour buckets the capture
+        maintains (four per hour — the same indexed pattern as the daily view);
+        only the still-filling current hour is aggregated live from
+        ``packet_history``. The output shape is unchanged.
+        """
         from ..database.connection import get_db_connection
 
         offset_sec = tz_offset_minutes * 60
         current_hour_local = (int(time.time() + offset_sec) // 3600) * 3600
         start_local = current_hour_local - 23 * 3600
+
+        conn = get_db_connection()
+        try:
+            return AnalyticsService._hourly_buckets_in_window(
+                conn.cursor(), offset_sec, start_local, current_hour_local
+            )
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _hourly_buckets_in_window(
+        cursor: sqlite3.Cursor,
+        offset_sec: int,
+        start_local: int,
+        current_hour_local: int,
+    ) -> list[dict[str, Any]]:
+        """The 24 hourly rows for the local hours starting at *start_local*.
+
+        Hours before *current_hour_local* are completed: they are tiled exactly
+        by four quarter buckets each (real UTC offsets are multiples of the 15
+        minutes the store keys on), so they are read from the bucket tables.
+        The current hour is aggregated live from ``packet_history`` because its
+        last quarter is still filling. Every local hour appears exactly once,
+        zeros included; keys and values match the historical live-only layout.
+        """
         start_utc = start_local - offset_sec
+        current_hour_utc = current_hour_local - offset_sec
 
         buckets: dict[str, dict[str, Any]] = {}
         for i in range(24):
@@ -597,11 +635,65 @@ class AnalyticsService:
                 "new_nodes": 0,
             }
 
-        conn = get_db_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
+        # Completed hours: quarter buckets, one labelled row per bucket, the
+        # same label expression as the live queries (a 15-minute bucket never
+        # straddles a local hour when the offset is a multiple of 15 min).
+        cursor.execute(
+            f"""
+                SELECT
+                    strftime('%Y-%m-%d %H:00', bucket + ?, 'unixepoch') AS hour_label,
+                    SUM(total_packets) AS total_packets
+                FROM {activity_rollup.PACKET_TABLE}
+                WHERE bucket >= ? AND bucket < ?
+                GROUP BY hour_label
+            """,
+            (offset_sec, start_utc, current_hour_utc),
+        )
+        sums: dict[str, int] = {}
+        for row in cursor.fetchall():
+            sums[row["hour_label"]] = int(row["total_packets"] or 0)
+
+        cursor.execute(
+            f"""
+                SELECT
+                    strftime('%Y-%m-%d %H:00', bucket + ?, 'unixepoch') AS hour_label,
+                    COUNT(DISTINCT node_id) AS active_nodes
+                FROM {activity_rollup.NODE_TABLE}
+                WHERE bucket >= ? AND bucket < ?
+                GROUP BY hour_label
+            """,
+            (offset_sec, start_utc, current_hour_utc),
+        )
+        actors: dict[str, int] = {}
+        for row in cursor.fetchall():
+            actors[row["hour_label"]] = int(row["active_nodes"] or 0)
+
+        cursor.execute(
+            f"""
+                SELECT
+                    strftime('%Y-%m-%d %H:00', bucket + ?, 'unixepoch') AS hour_label,
+                    COUNT(DISTINCT gateway_id) AS gateway_count
+                FROM {activity_rollup.GATEWAY_TABLE}
+                WHERE bucket >= ? AND bucket < ?
+                GROUP BY hour_label
+            """,
+            (offset_sec, start_utc, current_hour_utc),
+        )
+        gateways: dict[str, int] = {}
+        for row in cursor.fetchall():
+            gateways[row["hour_label"]] = int(row["gateway_count"] or 0)
+
+        for key, entry in buckets.items():
+            if key in sums:
+                entry["total_packets"] = sums[key]
+            if key in actors:
+                entry["active_nodes"] = actors[key]
+            if key in gateways:
+                entry["gateway_count"] = gateways[key]
+
+        # Current hour: still filling, so straight from packet_history.
+        cursor.execute(
+            """
                 SELECT
                     strftime('%Y-%m-%d %H:00', timestamp + ?, 'unixepoch') AS bucket,
                     COUNT(*) AS total_packets,
@@ -610,16 +702,16 @@ class AnalyticsService:
                 WHERE timestamp >= ?
                 GROUP BY bucket
             """,
-                (offset_sec, start_utc),
-            )
-            for row in cursor.fetchall():
-                entry = buckets.get(row["bucket"])
-                if entry:
-                    entry["total_packets"] = row["total_packets"]
-                    entry["active_nodes"] = row["active_nodes"]
+            (offset_sec, current_hour_utc),
+        )
+        for row in cursor.fetchall():
+            entry = buckets.get(row["bucket"])
+            if entry:
+                entry["total_packets"] = row["total_packets"]
+                entry["active_nodes"] = row["active_nodes"]
 
-            cursor.execute(
-                """
+        cursor.execute(
+            """
                 SELECT
                     strftime('%Y-%m-%d %H:00', timestamp + ?, 'unixepoch') AS bucket,
                     COUNT(DISTINCT gateway_id) AS gateway_count
@@ -627,15 +719,17 @@ class AnalyticsService:
                 WHERE gateway_id IS NOT NULL AND timestamp >= ?
                 GROUP BY bucket
             """,
-                (offset_sec, start_utc),
-            )
-            for row in cursor.fetchall():
-                entry = buckets.get(row["bucket"])
-                if entry:
-                    entry["gateway_count"] = row["gateway_count"]
+            (offset_sec, current_hour_utc),
+        )
+        for row in cursor.fetchall():
+            entry = buckets.get(row["bucket"])
+            if entry:
+                entry["gateway_count"] = row["gateway_count"]
 
-            cursor.execute(
-                """
+        # New nodes remain a node_info aggregation (the buckets store activity,
+        # not first-seen); unchanged from the live-only implementation.
+        cursor.execute(
+            """
                 SELECT
                     strftime('%Y-%m-%d %H:00', first_seen + ?, 'unixepoch') AS bucket,
                     COUNT(*) AS new_nodes
@@ -643,174 +737,71 @@ class AnalyticsService:
                 WHERE first_seen >= ?
                 GROUP BY bucket
             """,
-                (offset_sec, start_utc),
-            )
-            for row in cursor.fetchall():
-                entry = buckets.get(row["bucket"])
-                if entry:
-                    entry["new_nodes"] = row["new_nodes"]
-        finally:
-            conn.close()
+            (offset_sec, start_utc),
+        )
+        for row in cursor.fetchall():
+            entry = buckets.get(row["bucket"])
+            if entry:
+                entry["new_nodes"] = row["new_nodes"]
 
         return list(buckets.values())
 
     @staticmethod
     def _get_daily_buckets(
         range_key: str, tz_offset_minutes: int
-    ) -> tuple[list[dict[str, Any]], int]:
-        """Aggregate per local calendar day for 7d / 30d / all.
+    ) -> list[dict[str, Any]]:
+        """Per local calendar day for 7d / 30d / all, from the activity buckets.
 
-        Completed days come from (and are persisted to) activity_daily_rollup;
-        only today is computed live from packet_history. Returns the buckets
-        and how many completed days are still missing from the rollup (0 when
-        the timeline is complete; buckets for missing days read as zero).
+        Completed days are read from the quarter-hour buckets the capture daemon
+        maintains (see :mod:`malla.activity_rollup`), which is what keeps even
+        the "all" range to a couple of indexed queries. Only today is aggregated
+        live, because its buckets are still filling up.
         """
         from ..database.connection import get_db_connection
-        from ..database.schema import ACTIVITY_ROLLUP_TABLE_SQL
-
-        offset_sec = tz_offset_minutes * 60
-        deadline = time.time() + AnalyticsService._ROLLUP_TIME_BUDGET_SEC
-        today_local = (int(time.time() + offset_sec) // 86400) * 86400
 
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            # Defensive create: the web app normally creates this at startup,
-            # but the service must also work against bare test databases.
-            cursor.execute(ACTIVITY_ROLLUP_TABLE_SQL)
-
-            if range_key == "7d":
-                start_local = today_local - 7 * 86400
-            elif range_key == "30d":
-                start_local = today_local - 30 * 86400
-            else:  # all: from the local day of the first recorded packet
+            if range_key == "all":
+                # From the local day of the first recorded packet.
                 cursor.execute("SELECT MIN(timestamp) AS mn FROM packet_history")
                 row = cursor.fetchone()
-                mn = row["mn"] if row else None
-                start_local = (
-                    (int(mn + offset_sec) // 86400) * 86400
-                    if mn is not None
-                    else today_local
+                window = activity_rollup.viewer_window(
+                    tz_offset_minutes, since=row["mn"] if row else None
                 )
-                start_local = min(start_local, today_local)
-
-            day_epochs = list(range(start_local, today_local + 86400, 86400))
-            completed_epochs = [d for d in day_epochs if d < today_local]
-
-            rollup_rows, days_remaining = AnalyticsService._ensure_daily_rollup(
-                cursor, tz_offset_minutes, offset_sec, completed_epochs, deadline
-            )
-            conn.commit()
-
-            if days_remaining:
-                # Out of budget: the caller will report pending and the client
-                # retries, so don't spend more time aggregating today live.
-                today_stats: dict[str, dict[str, Any]] = {}
             else:
-                today_stats = AnalyticsService._compute_daily_span(
-                    cursor, offset_sec, today_local, today_local + 86400
+                window = activity_rollup.viewer_window(
+                    tz_offset_minutes, days=7 if range_key == "7d" else 30
                 )
+
+            stats = activity_rollup.daily_buckets(conn, window)
+            for day, count in activity_rollup.new_nodes_by_day(conn, window).items():
+                stats.setdefault(day, {})["new_nodes"] = count
+
+            today_stats = AnalyticsService._compute_daily_span(
+                cursor,
+                window.offset_sec,
+                window.today_local,
+                window.today_local + activity_rollup.DAY_SECONDS,
+            )
         finally:
             conn.close()
 
         buckets: list[dict[str, Any]] = []
-        for day_epoch in day_epochs:
-            key = AnalyticsService._local_day_key(day_epoch)
-            source = today_stats if day_epoch >= today_local else rollup_rows
-            stats = source.get(key, {})
+        for day_epoch in window.day_epochs:
+            key = activity_rollup.day_key(day_epoch)
+            source = today_stats if day_epoch >= window.today_local else stats
+            day_stats = source.get(key, {})
             buckets.append(
                 {
                     "bucket": key,
-                    "total_packets": stats.get("total_packets", 0),
-                    "active_nodes": stats.get("active_nodes", 0),
-                    "gateway_count": stats.get("gateway_count", 0),
-                    "new_nodes": stats.get("new_nodes", 0),
+                    "total_packets": day_stats.get("total_packets", 0),
+                    "active_nodes": day_stats.get("active_nodes", 0),
+                    "gateway_count": day_stats.get("gateway_count", 0),
+                    "new_nodes": day_stats.get("new_nodes", 0),
                 }
             )
-        return buckets, days_remaining
-
-    @staticmethod
-    def _local_day_key(local_day_epoch: int) -> str:
-        """ISO date string for a local-midnight epoch (local time == shifted UTC)."""
-        return datetime.fromtimestamp(local_day_epoch, tz=UTC).date().isoformat()
-
-    @staticmethod
-    def _ensure_daily_rollup(
-        cursor: Any,
-        tz_offset_minutes: int,
-        offset_sec: int,
-        completed_epochs: list[int],
-        deadline: float,
-    ) -> tuple[dict[str, dict[str, Any]], int]:
-        """Return rollup stats for the given completed local days, computing
-        missing ones from packet_history until *deadline* and persisting them.
-
-        Rows are safe to persist forever: packet_history is append-only with
-        insert-time timestamps and node_info.first_seen is assigned once, so a
-        finished local day can never change retroactively.
-
-        Missing days are computed one at a time, newest first, and each day is
-        committed as soon as it is done, so progress survives even if this
-        request is killed or runs out of budget. At least one day is always
-        computed per call (guaranteed convergence); past that, the loop stops
-        once *deadline* is reached. Returns the stats found/computed plus the
-        number of days still missing (0 = complete).
-        """
-        if not completed_epochs:
-            return {}, 0
-
-        wanted = {AnalyticsService._local_day_key(d): d for d in completed_epochs}
-        placeholders = ",".join("?" * len(wanted))
-        cursor.execute(
-            f"""
-            SELECT day, total_packets, active_nodes, gateway_count, new_nodes
-            FROM activity_daily_rollup
-            WHERE tz_offset_minutes = ? AND day IN ({placeholders})
-        """,
-            [tz_offset_minutes, *wanted.keys()],
-        )
-        cached: dict[str, dict[str, Any]] = {
-            row["day"]: dict(row) for row in cursor.fetchall()
-        }
-
-        missing = sorted(
-            (epoch for key, epoch in wanted.items() if key not in cached),
-            reverse=True,
-        )
-        for done, epoch in enumerate(missing):
-            if done and time.time() >= deadline:
-                return cached, len(missing) - done
-
-            key = AnalyticsService._local_day_key(epoch)
-            stats = AnalyticsService._compute_daily_span(
-                cursor, offset_sec, epoch, epoch + 86400
-            ).get(key, {})
-            row = {
-                "total_packets": stats.get("total_packets", 0),
-                "active_nodes": stats.get("active_nodes", 0),
-                "gateway_count": stats.get("gateway_count", 0),
-                "new_nodes": stats.get("new_nodes", 0),
-            }
-            cursor.execute(
-                """
-                INSERT OR REPLACE INTO activity_daily_rollup
-                (tz_offset_minutes, day, total_packets, active_nodes,
-                 gateway_count, new_nodes, computed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    tz_offset_minutes,
-                    key,
-                    row["total_packets"],
-                    row["active_nodes"],
-                    row["gateway_count"],
-                    row["new_nodes"],
-                    time.time(),
-                ),
-            )
-            cursor.connection.commit()
-            cached[key] = {"day": key, **row}
-        return cached, 0
+        return buckets
 
     @staticmethod
     def _compute_daily_span(

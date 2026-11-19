@@ -1,0 +1,107 @@
+/* ---------------------------------------------------------------------------
+ * Link timeline drawer (link-timeline.js)
+ * ------------------------------------------------------------------------- */
+.lt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10050; /* above the packet-detail modal (9999/10000) */
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.lt-drawer {
+  width: min(480px, 94vw);
+  height: 100%;
+  background: var(--malla-surface, #fff);
+  color: var(--malla-text, inherit);
+  border-left: 1px solid var(--malla-border);
+  box-shadow: -12px 0 32px rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  animation: lt-slide-in 0.18s ease-out;
+}
+
+@keyframes lt-slide-in {
+  from { transform: translateX(24px); opacity: 0.6; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lt-drawer { animation: none; }
+}
+
+.lt-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--malla-border);
+}
+
+.lt-title { margin: 0; font-size: 1.05rem; }
+
+.lt-subtitle {
+  font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.8rem;
+}
+
+.lt-chipbar { padding: 0.75rem 1.25rem 0; }
+
+.lt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.lt-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--malla-border);
+  border-radius: 999px;
+  background: var(--malla-surface-2, rgba(0, 0, 0, 0.02));
+  font-size: 0.72rem;
+}
+
+.lt-chip-label { color: var(--malla-text-muted, inherit); }
+
+.lt-chip-value { font-variant-numeric: tabular-nums; }
+
+.lt-body {
+  padding: 0.75rem 1.25rem 1.25rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lt-mode { align-self: flex-start; }
+
+.lt-note { font-size: 0.75rem; }
+
+.lt-mount { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.lt-chart { width: 100%; height: 300px; }
+
+.lt-empty {
+  padding: 2rem 0.5rem;
+  text-align: center;
+  color: var(--malla-text-muted, inherit);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.lt-empty-icon { font-size: 1.6rem; }
+
+.lt-loading { padding: 1.5rem 0; text-align: center; }
+
+/* Focus ring parity with the design system. */
+.lt-backdrop :focus-visible {
+  outline: 2px solid var(--malla-focus);
+  outline-offset: 2px;
+}

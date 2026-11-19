@@ -4,6 +4,7 @@
 {% block title %}Packet #{{ packet.id }} - Malla{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/link-timeline.css') }}">
 <!-- Leaflet CSS -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 {% include 'components/openfreemap_css.html' %}
@@ -893,6 +894,7 @@
 <script src="{{ url_for('static', filename='js/openfreemap.js') }}?v={{ ASSET_VERSION }}"></script>
 <!-- D3.js for graph visualisation -->
 <script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="{{ url_for('static', filename='js/link-timeline.js') }}"></script>
 
 <script>
 // Embed data directly in JavaScript variables to avoid HTML attribute parsing issues
@@ -904,6 +906,21 @@ window.packetData = {{ {
     'relayCandidates': packet.relay_candidates if packet.relay_candidates else None,
     'relayHex': packet.relay_hex if packet.relay_hex else None
 } | tojson }};
+
+// v1 location rows: `timestamp` is ISO-8601 and `timestamp_str` is dropped.
+// Restore epoch seconds for age maths and a human string for popups.
+function normaliseLocationRow(loc) {
+    if (!loc) return loc;
+    let epoch = loc.timestamp;
+    if (typeof epoch === 'string') {
+        const ms = Date.parse(epoch);
+        epoch = Number.isNaN(ms) ? epoch : ms / 1000;
+    }
+    const display = (typeof formatTimestamp === 'function' && typeof epoch === 'number')
+        ? formatTimestamp(epoch)
+        : (loc.timestamp_str || loc.timestamp);
+    return { ...loc, timestamp: epoch, timestamp_str: display };
+}
 
 // Initialize maps if data exists
 document.addEventListener('DOMContentLoaded', function() {
@@ -1048,12 +1065,18 @@ async function loadTracerouteMap(routeNodes) {
             }
         });
 
-        // Fetch node locations
-        const response = await fetch('/api/locations');
-        const data = await response.json();
+        // Fetch node locations, scoped to the route's node IDs so a network
+        // larger than the page-size ceiling cannot drop stored positions
+        // (which would trigger bogus interpolation).
+        const locationsResponse = await fetch(
+            '/api/v1/locations?enrich=false&page_size=5000&node_ids=' +
+            encodeURIComponent(nodeIds.join(','))
+        );
+        const locationsBody = await locationsResponse.json();
+        const data = { locations: (locationsBody.data || []).map(normaliseLocationRow) };
 
-        if (data.error) {
-            throw new Error(data.error);
+        if (locationsBody.error) {
+            throw new Error(locationsBody.error);
         }
 
         // Filter locations for our route nodes and interpolate missing ones
@@ -1335,16 +1358,30 @@ async function loadReceptionMap(primaryGateway, otherReceptions, gatewayLocation
         let allLocationsData = null;
         let relayLocations = [];
 
-        // Check if we need to fetch locations for relay candidates
-        const needsLocations = (window.packetData.relayCandidates && window.packetData.relayCandidates.length > 0) ||
-                               (otherReceptions && otherReceptions.some(r => r.relay_candidates && r.relay_candidates.length > 0));
+        // Collect every relay candidate ID (primary + other receptions)
+        const relayCandidateIds = new Set();
+        (window.packetData.relayCandidates || []).forEach(c => {
+            if (c && c.node_id != null) relayCandidateIds.add(Number(c.node_id));
+        });
+        (otherReceptions || []).forEach(r => {
+            (r.relay_candidates || []).forEach(c => {
+                if (c && c.node_id != null) relayCandidateIds.add(Number(c.node_id));
+            });
+        });
+        const needsLocations = relayCandidateIds.size > 0;
 
         if (needsLocations) {
             try {
-                const response = await fetch('/api/locations');
-                allLocationsData = await response.json();
+                // Scoped to the candidate IDs so a network larger than the
+                // page-size ceiling cannot drop stored positions.
+                const response = await fetch(
+                    '/api/v1/locations?enrich=false&page_size=5000&node_ids=' +
+                    encodeURIComponent(Array.from(relayCandidateIds).join(','))
+                );
+                const body = await response.json();
+                allLocationsData = { locations: (body.data || []).map(normaliseLocationRow) };
 
-                if (!allLocationsData.error && window.packetData.relayCandidates) {
+                if (!body.error && window.packetData.relayCandidates) {
                     // Find locations for primary gateway's relay candidates
                     window.packetData.relayCandidates.forEach(candidate => {
                         const location = allLocationsData.locations.find(loc => loc.node_id === candidate.node_id);
