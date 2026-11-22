@@ -178,6 +178,14 @@ def get_packet_details(
             except (ValueError, TypeError):
                 packet["mesh_packet_id"] = None
 
+        # mesh_packet_id 0 is the "unset" sentinel: no real mesh packet
+        # carries it, but databases accumulate many such rows. Correlating
+        # receptions on it would merge every zero-id row into one giant
+        # reception list (issue #146), so treat it as missing and fall back
+        # to time-based correlation below.
+        if packet["mesh_packet_id"] == 0:
+            packet["mesh_packet_id"] = None
+
         # Get node names
         node_ids = [packet["from_node_id"], packet["to_node_id"]]
         node_ids = [nid for nid in node_ids if nid]
