@@ -107,11 +107,15 @@ class PacketRepositoryOptimized:
                 # Since grouped packets are usually within ~10 min of each other,
                 # we use a time-windowed approach instead of expensive GROUP BY + ORDER BY
 
-                # Add mesh_packet_id filter
+                # Add mesh_packet_id filter (exclude 0 as it's often a special case)
                 if where_conditions:
-                    where_clause += " AND mesh_packet_id IS NOT NULL"
+                    where_clause += (
+                        " AND mesh_packet_id IS NOT NULL AND mesh_packet_id != 0"
+                    )
                 else:
-                    where_clause = "WHERE mesh_packet_id IS NOT NULL"
+                    where_clause = (
+                        "WHERE mesh_packet_id IS NOT NULL AND mesh_packet_id != 0"
+                    )
 
                 # Add time window to limit data scan (improves performance dramatically)
                 # If no explicit time filter, default to last 7 days for reasonable performance

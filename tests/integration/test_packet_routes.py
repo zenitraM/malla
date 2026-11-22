@@ -84,3 +84,62 @@ class TestPacketRoutes:
         assert locations[1819569748]["lat"] == pytest.approx(40.7128)
         assert locations[1819569748]["lon"] == pytest.approx(-74.006)
         assert locations[555666777]["lat"] == pytest.approx(40.7831)
+
+    def test_packet_detail_mesh_packet_id_zero_not_correlated(self, client):
+        """mesh_packet_id=0 is the "unset" sentinel, not a real packet id.
+
+        Correlating receptions on it would merge every zero-id row into one
+        giant reception list (issue #146 reported 100 MiB packet pages for
+        databases with tens of thousands of mesh_packet_id=0 rows).
+        """
+        from src.malla.database.connection import get_db_connection
+        from src.malla.routes.packet_routes import get_packet_details
+
+        base_id = 9146000
+        rows = [
+            # (id, timestamp, from_node_id, portnum, mesh_packet_id)
+            (base_id + 1, 1_700_000_000, 111111, 1, 0),  # packet under test
+            (
+                base_id + 2,
+                1_700_000_001,
+                111111,
+                1,
+                0,
+            ),  # same sender, +1s: real reception
+            (
+                base_id + 3,
+                1_700_000_500,
+                111111,
+                1,
+                0,
+            ),  # same sender, far later: unrelated
+            (base_id + 4, 1_700_000_000, 222222, 1, 0),  # different sender: unrelated
+            (base_id + 5, 1_700_000_000, 111111, 6, 0),  # different portnum: unrelated
+        ]
+        conn = get_db_connection()
+        try:
+            conn.executemany(
+                """
+                INSERT INTO packet_history
+                    (id, timestamp, topic, from_node_id, portnum, portnum_name,
+                     gateway_id, mesh_packet_id, payload_length,
+                     processed_successfully)
+                VALUES (?, ?, 'molla/test', ?, ?, 'TEXT_MESSAGE_APP',
+                        '!aabbccdd', ?, 0, 1)
+                """,
+                rows,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        details = get_packet_details(base_id + 1)
+        assert details is not None
+
+        # The zero id is treated as missing: time-based correlation is used.
+        assert details["packet"]["mesh_packet_id"] is None
+        assert details["correlation_method"] == "time_based"
+
+        # Only the genuinely-matching reception is correlated — never every
+        # mesh_packet_id=0 row in the database.
+        assert [r["id"] for r in details["other_receptions"]] == [base_id + 2]
