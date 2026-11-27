@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from flask import Blueprint, render_template, request
+from meshtastic import mesh_pb2
+from meshtastic.protobuf import mesh_beacon_pb2
 
 from ..database.connection import get_db_connection
 
@@ -19,6 +21,19 @@ from ..utils.traceroute_graph import build_combined_traceroute_graph
 logger = logging.getLogger(__name__)
 
 packet_bp = Blueprint("packet", __name__)
+
+# Portnums whose payload is UTF-8 text rather than a protobuf message.
+_TEXT_PORTNUMS = frozenset({"TEXT_MESSAGE_APP", "ALERT_APP", "REPLY_APP"})
+
+
+def _packet_enum_name(enum_wrapper: Any, value: Any) -> str | None:
+    """Name a MeshPacket enum value, or None when absent/unknown."""
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    try:
+        return enum_wrapper.Name(value)
+    except ValueError:
+        return None
 
 
 def sort_receptions_for_display(
@@ -170,6 +185,14 @@ def get_packet_details(
         )
         packet["has_payload"] = packet["payload_length"] > 0
         packet["success"] = packet["processed_successfully"]
+        packet["transport_mechanism_name"] = _packet_enum_name(
+            mesh_pb2.MeshPacket.TransportMechanism,
+            packet.get("transport_mechanism"),
+        )
+        packet["ack_proof_status_name"] = _packet_enum_name(
+            mesh_pb2.MeshPacket.AckProofStatus,
+            packet.get("ack_proof_status"),
+        )
 
         # Ensure mesh_packet_id is an integer for template formatting
         if packet["mesh_packet_id"] is not None:
@@ -1002,16 +1025,21 @@ def get_all_protobuf_message_classes() -> dict[str, Any]:
 
         import meshtastic
 
-        # Get all protobuf modules
-        protobuf_modules = [attr for attr in dir(meshtastic) if attr.endswith("_pb2")]
+        # Get all protobuf modules. Most live at the package root, but newer
+        # packet payloads (MeshBeacon) ship in a submodule that the package
+        # __init__ does not re-export.
+        protobuf_modules = {
+            attr: getattr(meshtastic, attr)
+            for attr in dir(meshtastic)
+            if attr.endswith("_pb2")
+        }
+        protobuf_modules["mesh_beacon_pb2"] = mesh_beacon_pb2
 
         # Map to store all discovered message classes
         all_message_classes: dict[str, Any] = {}
 
-        for module_name in protobuf_modules:
+        for module_name, module in protobuf_modules.items():
             try:
-                module = getattr(meshtastic, module_name)
-
                 # Find all protobuf message classes in this module
                 for name, obj in inspect.getmembers(module):
                     if inspect.isclass(obj) and hasattr(obj, "DESCRIPTOR"):
@@ -1050,7 +1078,7 @@ def get_protobuf_message_class_for_portnum(portnum_name: str) -> Any | None:
             "WAYPOINT_APP": "Waypoint",  # From mesh_pb2
             "AUDIO_APP": None,  # Custom format - no standard protobuf
             "DETECTION_SENSOR_APP": None,  # Custom format
-            "REPLY_APP": None,  # Custom format
+            "REPLY_APP": None,  # ASCII plaintext (handled by _TEXT_PORTNUMS)
             "IP_TUNNEL_APP": None,  # Custom format
             "SERIAL_APP": None,  # Custom format
             "STORE_FORWARD_APP": "StoreAndForward",  # From storeforward_pb2
@@ -1067,7 +1095,14 @@ def get_protobuf_message_class_for_portnum(portnum_name: str) -> Any | None:
             "PAXCOUNTER_APP": "Paxcount",  # From paxcount_pb2
             "PRIVATE_APP": None,  # Custom format
             "RETICULUM_TUNNEL_APP": None,  # Custom format
-            "ALERT_APP": None,  # Custom format or not available
+            "ALERT_APP": None,  # Text message (same encoding as TEXT_MESSAGE_APP)
+            "REMOTE_SHELL_APP": "RemoteShell",  # From mesh_pb2
+            "KEY_VERIFICATION_APP": "KeyVerification",  # From mesh_pb2
+            "NODE_STATUS_APP": "StatusMessage",  # From mesh_pb2
+            "MESH_BEACON_APP": "MeshBeacon",  # From mesh_beacon_pb2
+            "PAGING_APP": None,  # Reserved; payload protobuf not shipped yet
+            "STORE_FORWARD_PLUSPLUS_APP": None,
+            "GROUPALARM_APP": None,
             "UNKNOWN_APP": None,
             "MAX": None,
         }
@@ -1117,7 +1152,7 @@ def decode_protobuf_payload(packet: dict[str, Any]) -> dict[str, Any] | None:
             }
 
         # Special case for text messages - they're UTF-8 strings, not protobuf
-        if portnum_name == "TEXT_MESSAGE_APP":
+        if portnum_name in _TEXT_PORTNUMS:
             try:
                 return {
                     "text": raw_payload.decode("utf-8"),

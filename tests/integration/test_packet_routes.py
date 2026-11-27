@@ -143,3 +143,62 @@ class TestPacketRoutes:
         # Only the genuinely-matching reception is correlated — never every
         # mesh_packet_id=0 row in the database.
         assert [r["id"] for r in details["other_receptions"]] == [base_id + 2]
+
+    def test_packet_detail_renders_28_header_fields_and_status_payload(self, client):
+        """A 2.8.x-era packet exposes transport, signature and status payload."""
+        import json
+
+        from meshtastic import mesh_pb2, mqtt_pb2
+
+        from src.malla.database.connection import get_db_connection
+
+        status = mesh_pb2.StatusMessage(status="seaside node").SerializeToString()
+        mesh_packet = mesh_pb2.MeshPacket(
+            transport_mechanism=mesh_pb2.MeshPacket.TransportMechanism.TRANSPORT_LORA,
+            xeddsa_signed=True,
+            ack_proof_status=mesh_pb2.MeshPacket.AckProofStatus.ACK_PROOF_VALID,
+        )
+        envelope = mqtt_pb2.ServiceEnvelope()
+        envelope.packet.CopyFrom(mesh_packet)
+        raw_envelope = envelope.SerializeToString()
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO packet_history
+                    (timestamp, topic, from_node_id, to_node_id, portnum,
+                     portnum_name, gateway_id, channel_id, mesh_packet_id,
+                     payload_length, raw_payload, processed_successfully,
+                     channel_index, raw_service_envelope)
+                VALUES (?, 'molla/test', 1, 4294967295, 36, 'NODE_STATUS_APP',
+                        '!aabbccdd', 'LongFast', 424242, ?, ?, 1, 2, ?)
+                """,
+                (
+                    1_700_100_000,
+                    len(status),
+                    status,
+                    raw_envelope,
+                ),
+            )
+            packet_id = cursor.lastrowid
+            conn.commit()
+        finally:
+            conn.close()
+
+        response = client.get(f"/api/v1/packets/{packet_id}")
+        assert response.status_code == 200
+        payload = json.loads(response.data)["data"]
+        packet = payload["packet"]
+
+        assert packet["channel_index"] == 2
+        assert packet["transport_mechanism_name"] == "TRANSPORT_LORA"
+        assert packet["xeddsa_signed"] == 1
+        assert packet["ack_proof_status_name"] == "ACK_PROOF_VALID"
+        assert payload["payload_info"]["data"]["status"] == "seaside node"
+
+        page = client.get(f"/packet/{packet_id}")
+        assert page.status_code == 200
+        assert b"TRANSPORT_LORA" in page.data
+        assert b"XEdDSA signed" in page.data
+        assert b"seaside node" in page.data

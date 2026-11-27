@@ -282,6 +282,34 @@
                                         {% endif %}
                                     </td>
                                 </tr>
+                                <tr>
+                                    <th>Transport:</th>
+                                    <td>
+                                        {% if packet.transport_mechanism_name %}
+                                            <span class="badge bg-secondary">{{ packet.transport_mechanism_name }}</span>
+                                        {% else %}
+                                            <span class="text-muted">Unknown</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Signature:</th>
+                                    <td>
+                                        {% if packet.xeddsa_signed is none %}
+                                            <span class="text-muted">Unknown</span>
+                                        {% elif packet.xeddsa_signed %}
+                                            <span class="badge bg-success">XEdDSA signed</span>
+                                        {% else %}
+                                            <span class="text-muted">Not signed</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% if packet.ack_proof_status_name and packet.ack_proof_status %}
+                                <tr>
+                                    <th>Ack Proof:</th>
+                                    <td><span class="badge bg-secondary">{{ packet.ack_proof_status_name }}</span></td>
+                                </tr>
+                                {% endif %}
                             </table>
                         </div>
                     </div>
@@ -396,6 +424,29 @@
                                         {% endif %}
                                     </table>
                                 {% endif %}
+                            {% elif payload_info.portnum == 'NODE_STATUS_APP' %}
+                                <table class="table table-sm">
+                                    {% if payload_info.data.status %}
+                                        <tr><th>Status:</th><td>{{ payload_info.data.status }}</td></tr>
+                                    {% else %}
+                                        <tr><td class="text-muted">Empty status message</td></tr>
+                                    {% endif %}
+                                </table>
+                            {% elif payload_info.portnum == 'MESH_BEACON_APP' %}
+                                <table class="table table-sm">
+                                    {% if payload_info.data.message %}
+                                        <tr><th>Beacon Message:</th><td>{{ payload_info.data.message }}</td></tr>
+                                    {% endif %}
+                                    {% if payload_info.data.offer_region %}
+                                        <tr><th>Offered Region:</th><td>{{ payload_info.data.offer_region }}</td></tr>
+                                    {% endif %}
+                                    {% if payload_info.data.offer_preset is defined %}
+                                        <tr><th>Offered Preset:</th><td>{{ payload_info.data.offer_preset }}</td></tr>
+                                    {% endif %}
+                                    {% if payload_info.data.offer_frequency_slot %}
+                                        <tr><th>Frequency Slot:</th><td>{{ payload_info.data.offer_frequency_slot }}</td></tr>
+                                    {% endif %}
+                                </table>
                             {% elif payload_info.portnum == 'NEIGHBORINFO_APP' %}
                                 <h6><i class="bi bi-diagram-3"></i> Neighbor Information Report</h6>
                                 <div class="row mb-3">

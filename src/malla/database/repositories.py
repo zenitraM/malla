@@ -600,6 +600,9 @@ class PacketRepository:
         packet: dict[str, Any],
     ) -> tuple[mqtt_pb2.ServiceEnvelope | None, mesh_pb2.MeshPacket | None]:
         """Deserialize the stored ServiceEnvelope and populate protobuf-derived metadata."""
+        packet.setdefault("transport_mechanism", None)
+        packet.setdefault("xeddsa_signed", None)
+        packet.setdefault("ack_proof_status", None)
         raw_service_envelope = packet.get("raw_service_envelope")
         if not raw_service_envelope:
             return None, None
@@ -608,6 +611,10 @@ class PacketRepository:
             env = mqtt_pb2.ServiceEnvelope()
             env.ParseFromString(raw_service_envelope)
             mesh_packet = env.packet
+
+            packet["transport_mechanism"] = int(mesh_packet.transport_mechanism)
+            packet["xeddsa_signed"] = int(mesh_packet.xeddsa_signed)
+            packet["ack_proof_status"] = int(mesh_packet.ack_proof_status)
 
             decryption_keys = get_config().get_decryption_keys()
             if decryption_keys and getattr(mesh_packet, "encrypted", b""):
