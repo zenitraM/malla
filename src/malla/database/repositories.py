@@ -1747,7 +1747,7 @@ class NodeRepository:
                                       AND hop_start = hop_limit
                                       AND {snr_valid_sql()}
                                      THEN CAST(snr AS FLOAT) END) as avg_snr
-                        FROM packet_history
+                        FROM packet_history {_pinned_index_hint("idx_packet_history_stats")}
                         WHERE timestamp > (strftime('%s', 'now') - 86400)
                         GROUP BY from_node_id
                     ) stats ON ni.node_id = stats.node_id
@@ -1755,7 +1755,7 @@ class NodeRepository:
                         SELECT
                             gateway_id,
                             COUNT(*) as gateway_packet_count_24h
-                        FROM packet_history
+                        FROM packet_history {_pinned_index_hint("idx_packet_history_gateway_stats")}
                         WHERE timestamp > (strftime('%s', 'now') - 86400)
                           AND gateway_id IS NOT NULL AND gateway_id != ''
                         GROUP BY gateway_id
