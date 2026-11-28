@@ -1076,7 +1076,7 @@ _NODE_PACKETS_SELECT = """
         id, timestamp, from_node_id, to_node_id, portnum, portnum_name,
         gateway_id, channel_id, mesh_packet_id, rssi, snr, hop_limit, hop_start,
         payload_length, processed_successfully, raw_payload, relay_node, via_mqtt,
-        want_ack, pki_encrypted,
+        want_ack, pki_encrypted, next_hop, tx_after,
         (hop_start - hop_limit) AS hop_count
     FROM packet_history
 """
@@ -2616,6 +2616,23 @@ _PACKET_SCHEMA = {
         "to_node_id": {"type": ["integer", "null"]},
         "portnum": {"type": ["integer", "null"]},
         "portnum_name": {"type": ["string", "null"]},
+        "next_hop": {"type": ["integer", "null"]},
+        "relay_node": {"type": ["integer", "null"]},
+        "tx_after": {"type": ["integer", "null"]},
+        "transport_mechanism": {
+            "type": ["integer", "null"],
+            "description": "MeshPacket.TransportMechanism enum (LoRa radio, MQTT, ...).",
+        },
+        "transport_mechanism_name": {"type": ["string", "null"]},
+        "xeddsa_signed": {
+            "type": ["integer", "boolean", "null"],
+            "description": "True when the firmware marked the payload XEdDSA-signed.",
+        },
+        "ack_proof_status": {
+            "type": ["integer", "null"],
+            "description": "MeshPacket.AckProofStatus verdict for an ack/nak (2.8.1+).",
+        },
+        "ack_proof_status_name": {"type": ["string", "null"]},
         "gateway_id": {"type": ["string", "null"]},
         "channel_id": {"type": ["string", "null"]},
         "mesh_packet_id": {"type": ["integer", "null"]},

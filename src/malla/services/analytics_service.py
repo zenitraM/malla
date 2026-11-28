@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .. import activity_rollup
-from ..database.repositories import NodeRepository
+from ..database.repositories import NodeRepository, _pinned_index_hint
 from ..utils.signal_quality import rssi_valid_sql, snr_valid_sql
 
 logger = logging.getLogger(__name__)
@@ -901,7 +901,7 @@ class AnalyticsService:
             SELECT
                 (hop_start - hop_limit) AS hops,
                 COUNT(*) AS count
-            FROM packet_history
+            FROM packet_history {_pinned_index_hint("idx_packet_history_stats")}
             WHERE {where_clause}
             GROUP BY hops
             ORDER BY hops
@@ -967,35 +967,34 @@ class AnalyticsService:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Get packet type distribution with percentages
+        # Get packet type distribution with percentages. Keep the aggregation
+        # to one table scan: materialising a second CTE for the total made
+        # SQLite re-read the range on this table size.
         cursor.execute(
             f"""
-            WITH type_counts AS (
-                SELECT
-                    portnum_name,
-                    COUNT(*) as count
-                FROM packet_history
-                WHERE {where_clause}
-                GROUP BY portnum_name
-            ),
-            total_count AS (
-                SELECT SUM(count) as total FROM type_counts
-            )
             SELECT
-                tc.portnum_name,
-                tc.count,
-                ROUND(tc.count * 100.0 / t.total, 2) as percentage
-            FROM type_counts tc, total_count t
-            ORDER BY tc.count DESC
-            LIMIT 15
+                portnum_name,
+                COUNT(*) as count
+            FROM packet_history
+            WHERE {where_clause}
+            GROUP BY portnum_name
+            ORDER BY count DESC
         """,
             params,
         )
 
-        packet_types = [dict(row) for row in cursor.fetchall()]
+        rows = cursor.fetchall()
         conn.close()
 
-        return packet_types
+        total = sum(row["count"] for row in rows)
+        return [
+            {
+                "portnum_name": row["portnum_name"],
+                "count": row["count"],
+                "percentage": round(row["count"] * 100.0 / total, 2) if total else 0,
+            }
+            for row in rows[:15]
+        ]
 
     @staticmethod
     def _get_gateway_distribution(

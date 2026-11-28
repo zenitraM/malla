@@ -30,8 +30,6 @@ Data Cleanup:
     The cleanup runs every hour. Set to 0 (default) to disable cleanup.
 """
 
-import base64
-import hashlib
 import logging
 import os
 import socket
@@ -41,8 +39,6 @@ import time
 from typing import Any
 
 import paho.mqtt.client as mqtt
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from meshtastic import (
     config_pb2,
     mesh_pb2,
@@ -59,6 +55,9 @@ from malla.config import get_config  # Import here to avoid circular import issu
 
 from . import activity_rollup, capture_rollups, capture_startup
 from .ingest_buffer import IngestBuffer
+from .utils.decryption import (
+    try_decrypt_mesh_packet as _try_decrypt_mesh_packet,
+)
 
 # Load the singleton configuration once at module import time.  This ensures the
 # capture tool honours the same YAML + optional environment override mechanism
@@ -140,179 +139,20 @@ stop_cleanup = threading.Event()  # Event to signal cleanup thread to stop
 ingest_buffer = IngestBuffer()
 
 
-# --- Decryption Functions ---
-def derive_key_from_channel_name(channel_name: str, key_base64: str) -> bytes:
-    """
-    Derive encryption key from channel name and base key.
-    This follows Meshtastic's key derivation algorithm.
-    """
-    try:
-        # Decode the base key from base64
-        key_bytes = base64.b64decode(key_base64)
-
-        # If channel name is provided, derive key using SHA256
-        if channel_name and channel_name != "":
-            # Convert channel name to bytes
-            channel_bytes = channel_name.encode("utf-8")
-            # Create SHA256 hash of base key + channel name
-            hasher = hashlib.sha256()
-            hasher.update(key_bytes)
-            hasher.update(channel_bytes)
-            derived_key = hasher.digest()
-            return derived_key
-        else:
-            # For primary channel, use the key as-is (should already be 32 bytes for AES256)
-            return key_bytes
-    except Exception as e:
-        logging.warning(f"Error deriving key: {e}")
-        return b"\x00" * 32  # Return null key on error
-
-
-def decrypt_packet(
-    encrypted_payload: bytes, packet_id: int, sender_id: int, key: bytes
-) -> bytes:
-    """
-    Decrypt a Meshtastic packet using AES256-CTR.
-
-    Args:
-        encrypted_payload: The encrypted payload bytes
-        packet_id: The packet ID for nonce construction
-        sender_id: The sender node ID for nonce construction
-        key: The encryption key (32 bytes for AES256)
-
-    Returns:
-        Decrypted payload bytes or empty bytes if decryption fails
-    """
-    try:
-        if len(encrypted_payload) == 0:
-            logging.debug("Empty encrypted payload, nothing to decrypt")
-            return b""
-
-        # Construct nonce: packet_id (8 bytes) + sender_id (8 bytes) = 16 bytes
-        packet_id_bytes = packet_id.to_bytes(8, byteorder="little")
-        sender_id_bytes = sender_id.to_bytes(8, byteorder="little")
-        nonce = packet_id_bytes + sender_id_bytes
-
-        if len(nonce) != 16:
-            logging.warning(f"Invalid nonce length: {len(nonce)}, expected 16 bytes")
-            return b""
-
-        # Create AES-CTR cipher
-        cipher = Cipher(
-            algorithms.AES(key), modes.CTR(nonce), backend=default_backend()
-        )
-        decryptor = cipher.decryptor()
-
-        # Decrypt the payload
-        decrypted = decryptor.update(encrypted_payload) + decryptor.finalize()
-
-        logging.debug(
-            f"Successfully decrypted {len(encrypted_payload)} bytes to {len(decrypted)} bytes"
-        )
-        return decrypted
-
-    except Exception as e:
-        logging.warning(f"Decryption failed: {e}")
-        return b""
-
-
+# --- Decryption ---
 def try_decrypt_mesh_packet(
-    mesh_packet: Any, channel_name: str = "", keys_base64: list[str] | None = None
+    mesh_packet: Any,
+    channel_name: str = "",
+    keys_base64: list[str] | None = None,
+    info: dict[str, Any] | None = None,
 ) -> bool:
-    """
-    Try to decrypt an encrypted MeshPacket and update it with decoded content.
-
-    Attempts decryption with each key in the provided list until successful.
-
-    Args:
-        mesh_packet: The MeshPacket protobuf object
-        channel_name: Channel name for key derivation (empty for primary channel)
-        keys_base64: List of base64-encoded encryption keys to try (uses DECRYPTION_KEYS if None)
-
-    Returns:
-        bool: True if decryption was successful and packet was updated
-    """
-    try:
-        # Check if packet already has decoded data
-        if (
-            hasattr(mesh_packet, "decoded")
-            and mesh_packet.decoded.portnum != portnums_pb2.PortNum.UNKNOWN_APP
-        ):
-            logging.debug("Packet already decoded successfully")
-            return False
-
-        # Check if packet has encrypted data
-        if not hasattr(mesh_packet, "encrypted") or not mesh_packet.encrypted:
-            logging.debug("No encrypted payload found in packet")
-            return False
-
-        encrypted_payload = mesh_packet.encrypted
-        packet_id = mesh_packet.id
-        sender_id = getattr(mesh_packet, "from")  # 'from' is a Python keyword
-
-        logging.debug(
-            f"Attempting to decrypt packet {packet_id} from {sender_id}, encrypted payload: {len(encrypted_payload)} bytes"
-        )
-
-        # Use provided keys or fall back to global DECRYPTION_KEYS
-        keys_to_try = keys_base64 if keys_base64 is not None else DECRYPTION_KEYS
-
-        if not keys_to_try:
-            logging.debug("No decryption keys configured")
-            return False
-
-        # Try each key until one works
-        for key_index, key_base64 in enumerate(keys_to_try):
-            logging.debug(f"Trying decryption key {key_index + 1}/{len(keys_to_try)}")
-
-            # Derive the decryption key
-            key = derive_key_from_channel_name(channel_name, key_base64)
-
-            # Decrypt the payload
-            decrypted_payload = decrypt_packet(
-                encrypted_payload, packet_id, sender_id, key
-            )
-
-            if not decrypted_payload:
-                logging.debug(
-                    f"Decryption with key {key_index + 1} returned empty payload"
-                )
-                continue
-
-            # Try to parse the decrypted payload as a Data protobuf
-            try:
-                decoded_data = mesh_pb2.Data()
-                decoded_data.ParseFromString(decrypted_payload)
-
-                # Validate that we got a valid portnum (not UNKNOWN_APP)
-                if decoded_data.portnum == portnums_pb2.PortNum.UNKNOWN_APP:
-                    logging.debug(
-                        f"Key {key_index + 1} produced UNKNOWN_APP portnum, trying next key"
-                    )
-                    continue
-
-                # Update the mesh packet with decoded data
-                mesh_packet.decoded.CopyFrom(decoded_data)
-
-                logging.info(
-                    f"✅ Successfully decrypted packet {packet_id} from {sender_id} with key {key_index + 1}/{len(keys_to_try)}: {portnums_pb2.PortNum.Name(decoded_data.portnum)}"
-                )
-                return True
-
-            except Exception as parse_error:
-                logging.debug(
-                    f"Failed to parse decrypted payload with key {key_index + 1} as Data protobuf: {parse_error}"
-                )
-                continue
-
-        logging.debug(
-            f"Failed to decrypt packet with any of the {len(keys_to_try)} provided keys"
-        )
-        return False
-
-    except Exception as e:
-        logging.warning(f"Error in try_decrypt_mesh_packet: {e}")
-        return False
+    """Decrypt with the configured keys, falling back to global DECRYPTION_KEYS."""
+    return _try_decrypt_mesh_packet(
+        mesh_packet,
+        channel_name=channel_name,
+        keys_base64=DECRYPTION_KEYS if keys_base64 is None else keys_base64,
+        info=info,
+    )
 
 
 def load_node_cache() -> None:
@@ -689,7 +529,10 @@ def log_packet_to_database(
     want_ack = getattr(mesh_packet, "want_ack", None) if mesh_packet else None
     priority = getattr(mesh_packet, "priority", None) if mesh_packet else None
     delayed = getattr(mesh_packet, "delayed", None) if mesh_packet else None
-    channel_index = getattr(mesh_packet, "channel_index", None) if mesh_packet else None
+    # MeshPacket.channel is a local channel index only for plaintext packets;
+    # encrypted MQTT packets carry a channel hash there, not an index, so we
+    # leave the sender-local channel_index unset.
+    channel_index = None
     rx_time = getattr(mesh_packet, "rx_time", None) if mesh_packet else None
     pki_encrypted = getattr(mesh_packet, "pki_encrypted", None) if mesh_packet else None
     next_hop = getattr(mesh_packet, "next_hop", None) if mesh_packet else None

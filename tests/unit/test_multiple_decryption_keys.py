@@ -115,7 +115,7 @@ class TestTryDecryptMeshPacketMultipleKeys:
         """Test that already decoded packets are skipped."""
         mesh_packet = self.create_mock_mesh_packet(already_decoded=True)
 
-        with patch("malla.mqtt_capture.portnums_pb2") as mock_portnums:
+        with patch("malla.utils.decryption.portnums_pb2") as mock_portnums:
             mock_portnums.PortNum.UNKNOWN_APP = 0
             result = try_decrypt_mesh_packet(
                 mesh_packet, keys_base64=["1PG7OiApB1nwvP+rz05pAQ=="]
@@ -133,10 +133,10 @@ class TestTryDecryptMeshPacketMultipleKeys:
 
         assert result is False
 
-    @patch("malla.mqtt_capture.decrypt_packet")
-    @patch("malla.mqtt_capture.derive_key_from_channel_name")
-    @patch("malla.mqtt_capture.mesh_pb2")
-    @patch("malla.mqtt_capture.portnums_pb2")
+    @patch("malla.utils.decryption.decrypt_packet_payload")
+    @patch("malla.utils.decryption.derive_key_from_channel_name")
+    @patch("malla.utils.decryption.mesh_pb2")
+    @patch("malla.utils.decryption.portnums_pb2")
     def test_try_decrypt_first_key_succeeds(
         self, mock_portnums, mock_mesh_pb2, mock_derive_key, mock_decrypt
     ):
@@ -161,10 +161,10 @@ class TestTryDecryptMeshPacketMultipleKeys:
         # Should only try the first key
         assert mock_decrypt.call_count == 1
 
-    @patch("malla.mqtt_capture.decrypt_packet")
-    @patch("malla.mqtt_capture.derive_key_from_channel_name")
-    @patch("malla.mqtt_capture.mesh_pb2")
-    @patch("malla.mqtt_capture.portnums_pb2")
+    @patch("malla.utils.decryption.decrypt_packet_payload")
+    @patch("malla.utils.decryption.derive_key_from_channel_name")
+    @patch("malla.utils.decryption.mesh_pb2")
+    @patch("malla.utils.decryption.portnums_pb2")
     def test_try_decrypt_second_key_succeeds(
         self, mock_portnums, mock_mesh_pb2, mock_derive_key, mock_decrypt
     ):
@@ -189,10 +189,10 @@ class TestTryDecryptMeshPacketMultipleKeys:
         # Should try first two keys
         assert mock_decrypt.call_count == 2
 
-    @patch("malla.mqtt_capture.decrypt_packet")
-    @patch("malla.mqtt_capture.derive_key_from_channel_name")
-    @patch("malla.mqtt_capture.mesh_pb2")
-    @patch("malla.mqtt_capture.portnums_pb2")
+    @patch("malla.utils.decryption.decrypt_packet_payload")
+    @patch("malla.utils.decryption.derive_key_from_channel_name")
+    @patch("malla.utils.decryption.mesh_pb2")
+    @patch("malla.utils.decryption.portnums_pb2")
     def test_try_decrypt_all_keys_fail(
         self, mock_portnums, mock_mesh_pb2, mock_derive_key, mock_decrypt
     ):
@@ -211,10 +211,10 @@ class TestTryDecryptMeshPacketMultipleKeys:
         # Should try all three keys
         assert mock_decrypt.call_count == 3
 
-    @patch("malla.mqtt_capture.decrypt_packet")
-    @patch("malla.mqtt_capture.derive_key_from_channel_name")
-    @patch("malla.mqtt_capture.mesh_pb2")
-    @patch("malla.mqtt_capture.portnums_pb2")
+    @patch("malla.utils.decryption.decrypt_packet_payload")
+    @patch("malla.utils.decryption.derive_key_from_channel_name")
+    @patch("malla.utils.decryption.mesh_pb2")
+    @patch("malla.utils.decryption.portnums_pb2")
     def test_try_decrypt_invalid_protobuf_continues(
         self, mock_portnums, mock_mesh_pb2, mock_derive_key, mock_decrypt
     ):
@@ -243,10 +243,10 @@ class TestTryDecryptMeshPacketMultipleKeys:
         # Should try both keys
         assert mock_decrypt.call_count == 2
 
-    @patch("malla.mqtt_capture.decrypt_packet")
-    @patch("malla.mqtt_capture.derive_key_from_channel_name")
-    @patch("malla.mqtt_capture.mesh_pb2")
-    @patch("malla.mqtt_capture.portnums_pb2")
+    @patch("malla.utils.decryption.decrypt_packet_payload")
+    @patch("malla.utils.decryption.derive_key_from_channel_name")
+    @patch("malla.utils.decryption.mesh_pb2")
+    @patch("malla.utils.decryption.portnums_pb2")
     def test_try_decrypt_unknown_app_continues(
         self, mock_portnums, mock_mesh_pb2, mock_derive_key, mock_decrypt
     ):
@@ -275,10 +275,10 @@ class TestTryDecryptMeshPacketMultipleKeys:
         assert mock_decrypt.call_count == 2
 
     @patch("malla.mqtt_capture.DECRYPTION_KEYS", ["global_key1==", "global_key2=="])
-    @patch("malla.mqtt_capture.decrypt_packet")
-    @patch("malla.mqtt_capture.derive_key_from_channel_name")
-    @patch("malla.mqtt_capture.mesh_pb2")
-    @patch("malla.mqtt_capture.portnums_pb2")
+    @patch("malla.utils.decryption.decrypt_packet_payload")
+    @patch("malla.utils.decryption.derive_key_from_channel_name")
+    @patch("malla.utils.decryption.mesh_pb2")
+    @patch("malla.utils.decryption.portnums_pb2")
     def test_try_decrypt_uses_global_keys_when_none_provided(
         self, mock_portnums, mock_mesh_pb2, mock_derive_key, mock_decrypt
     ):
